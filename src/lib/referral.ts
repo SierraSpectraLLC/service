@@ -53,12 +53,16 @@ export const FEE_LABEL: Record<FeeKind, string> = {
  */
 export function resolveChoice(t: FeeTerms, choice: string): FeeTerms {
   if (t.kind !== "either") return t;
-  // A floor and a cap belong to the percentage. Taking the flat side means
-  // taking a single number, and carrying a "minimum" alongside it would be two
-  // answers to one question.
+  /*
+   * Each side drops what belongs to the other, so the agreed row carries one
+   * answer to one question. A floor and a cap belong to the percentage -
+   * taking the flat side means taking a single number, and a "minimum"
+   * alongside it would be a second answer. Equally, a percent that kept the
+   * flat amount would sit there reading like a price nobody agreed to.
+   */
   return choice === "flat"
-    ? { ...t, kind: "flat", minCents: 0, maxCents: 0 }
-    : { ...t, kind: "percent" };
+    ? { ...t, kind: "flat", feeBps: 0, minCents: 0, maxCents: 0 }
+    : { ...t, kind: "percent", feeCents: 0 };
 }
 
 /** Which kinds an offer actually lets somebody pick between. */

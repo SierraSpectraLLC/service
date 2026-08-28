@@ -28,6 +28,7 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
   const [picked, setPicked] = useState<number[]>([]);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
+  const [blind, setBlind] = useState(true);
   const [fee, setFee] = useState({
     kind: "none" as FeeKind, flat: "", pct: "5", months: "12", min: "", max: "", note: "",
   });
@@ -49,7 +50,7 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
   const send = () =>
     startTransition(async () => {
       setError("");
-      const res = await shareClient(orgId, { toOrgIds: picked, note, terms });
+      const res = await shareClient(orgId, { toOrgIds: picked, note, terms, blind });
       if (res.error) { setError(res.error); return; }
       toast({ message: `Offered to ${res.sent} ${res.sent === 1 ? "company" : "companies"} - waiting on them` });
       setPicked([]); setNote("");
@@ -157,6 +158,21 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
                 </div>
               )}
             </>
+          )}
+
+          {/* On by default. A referral is worth something because they cannot
+              go round you, and the full list is exactly what they would need
+              to - see lib/clientShare redactPayload. */}
+          <label className="t-small" style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 10 }}>
+            <input type="checkbox" className="check" checked={blind} disabled={pending}
+              onChange={(e) => setBlind(e.target.checked)} />
+            keep the client&apos;s name back until they accept
+          </label>
+          {blind && (
+            <div className="mut t-meta" style={{ marginTop: 2 }}>
+              They see the equipment, how many sites and which state - not who it is, not the
+              addresses, not the contacts, and no serials.
+            </div>
           )}
 
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>

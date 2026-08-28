@@ -6,7 +6,7 @@ import { useState, useTransition } from "react";
 import {
   answerCounterOffer, counterClientShare, decideClientShare, withdrawClientShare,
 } from "@/app/actions";
-import { summarize, SHARE_LABEL, SHARE_LABEL_IN, type ShareState } from "@/lib/clientShare";
+import { blindSummary, summarize, SHARE_LABEL, SHARE_LABEL_IN, type ShareState } from "@/lib/clientShare";
 import {
   boundsPhrase, choicesFor, FEE_KINDS, FEE_LABEL, termsLine, termsProblems, type FeeKind,
 } from "@/lib/referral";
@@ -100,9 +100,19 @@ export default function ClientShareBoard({ inbox, sent }: {
                 </Pill>
               </div>
               <div className="mut t-small">
-                {s.payload ? summarize(s.payload) : "contents unreadable"}
+                {s.payload
+                  ? (s.blind ? blindSummary(s.payload) : summarize(s.payload))
+                  : "contents unreadable"}
                 {` · offered ${s.createdOn} by ${s.createdBy}`}
               </div>
+              {/* Said before they look, not discovered while they read: the
+                  list is deliberately short of the things that would let them
+                  go round the sender. */}
+              {s.blind && (
+                <div className="mut t-meta" style={{ marginTop: 2 }}>
+                  Who the client is, where exactly, and the serials come with acceptance.
+                </div>
+              )}
               {s.note && <div className="t-small" style={{ marginTop: 2 }}>{s.note}</div>}
 
               {/* The price, before the button and not after it. A fee somebody
@@ -161,7 +171,7 @@ export default function ClientShareBoard({ inbox, sent }: {
                   </button>
                   <button className="btn link" style={{ fontSize: 12 }}
                     onClick={() => setOpen(open === s.id ? null : s.id)}>
-                    {open === s.id ? "hide what would arrive" : "what would arrive"}
+                    {open === s.id ? "hide the equipment" : "what equipment"}
                   </button>
                 </div>
               )}

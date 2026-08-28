@@ -8,7 +8,7 @@ import { assets, clientShares, instruments, orgSites, orgs, providerProfiles } f
 import { forTenant } from "@/lib/tenancy";
 import { siteLabel } from "@/lib/sites";
 import {
-  freeTag, parsePayload, provenanceLine, SHARE_VERSION,
+  freeTag, parsePayload, provenanceLine, redactPayload, SHARE_VERSION,
   type SharePayload, type SharedSite, type SharedSystem,
 } from "@/lib/clientShare";
 import type { ProviderListing } from "@/lib/providerDirectory";
@@ -188,6 +188,8 @@ export type ShareRow = {
   /** What the recipient proposed instead, when they countered. Null when none. */
   counter: FeeTerms | null;
   counteredBy: string;
+  /** True while the recipient is seeing a redacted view of it. */
+  blind: boolean;
   note: string;
   createdBy: string;
   createdOn: string;
@@ -232,13 +234,23 @@ export async function sharesFor(tenantOrgId: number | null): Promise<{
       }
       : null,
     counteredBy: r.counteredBy,
+    blind: r.blind && r.status !== "accepted",
     createdOn: r.createdAt.toISOString().slice(0, 10),
     otherName: (otherId !== null ? names.get(otherId) : "") ?? "another service company",
     payload: parsePayload(r.payload),
     sourceOrgId: r.sourceOrgId, destOrgId: r.destOrgId,
   });
+  /*
+   * Redacted on the way to the RECIPIENT and never to the sender - it is their
+   * client, and a blind offer that hid the name from the person who wrote it
+   * would be nonsense. Done here, at the edge, so nothing downstream has to
+   * remember: whatever reaches their screen is already blind.
+   */
+  const blindly = (r: ShareRow): ShareRow =>
+    (r.blind && r.payload ? { ...r, payload: redactPayload(r.payload) } : r);
+
   return {
     sent: sent.map((r) => shape(r, r.toOrgId)),
-    inbox: inbox.map((r) => shape(r, r.tenantOrgId)),
+    inbox: inbox.map((r) => blindly(shape(r, r.tenantOrgId))),
   };
 }

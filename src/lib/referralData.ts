@@ -3,7 +3,7 @@
 
 import { and, eq, gte, inArray, lte, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { clientShares, invoiceLines, invoices, orgs, referralFees } from "@/db/schema";
+import { invoiceLines, invoices, leads, orgs, referralFees } from "@/db/schema";
 import { accruedCents, feeOutstanding, type FeeRow } from "@/lib/referral";
 import { asStatementRow, invoiceById } from "@/lib/invoiceData";
 import { invoiceView } from "@/lib/statement";
@@ -48,7 +48,9 @@ export async function billedForFee(fee: {
 
 export type LedgerFee = FeeRow & {
   id: number;
-  shareId: number;
+  /** Exactly one of these. A handover's fee, or a lead's. */
+  shareId: number | null;
+  leadId: number | null;
   payeeOrgId: number;
   payerOrgId: number;
   clientOrgId: number | null;
@@ -81,6 +83,17 @@ export async function feesFor(tenantOrgId: number | null): Promise<{
     [f.payeeOrgId, f.payerOrgId, f.clientOrgId].filter((x): x is number => x !== null)))];
   const names = new Map((await db.select({ id: orgs.id, name: orgs.name }).from(orgs)
     .where(inArray(orgs.id, orgIds))).map((o) => [o.id, o.name]));
+  /*
+   * A fee from a LEAD has no client organization to be named after - the payer
+   * was handed a telephone number, not a record. The prospect's name off the
+   * lead is what both sides call it, and both are entitled to it: the finder
+   * typed it, and the payer paid to be told it.
+   */
+  const leadIds = [...new Set(all.map((f) => f.leadId).filter((x): x is number => x !== null))];
+  const prospects = new Map(leadIds.length
+    ? (await db.select({ id: leads.id, name: leads.orgName }).from(leads)
+      .where(inArray(leads.id, leadIds))).map((l) => [l.id, l.name])
+    : []);
   // The client's name off the SHARE's frozen payload would be the sender's
   // spelling; the payer's own org row is what the payer calls them. Both are
   // right, and the row each side reads is its own.
@@ -101,9 +114,11 @@ export async function feesFor(tenantOrgId: number | null): Promise<{
   }
 
   const shape = (f: typeof referralFees.$inferSelect, other: number): LedgerFee => ({
-    id: f.id, shareId: f.shareId,
+    id: f.id, shareId: f.shareId, leadId: f.leadId,
     payeeOrgId: f.payeeOrgId, payerOrgId: f.payerOrgId, clientOrgId: f.clientOrgId,
-    clientName: (f.clientOrgId !== null ? names.get(f.clientOrgId) : "") ?? "a client",
+    clientName: (f.clientOrgId !== null ? names.get(f.clientOrgId) : "")
+      || (f.leadId !== null ? prospects.get(f.leadId) : "")
+      || "a client",
     otherName: names.get(other) ?? "another service company",
     kind: f.kind, feeCents: f.feeCents, feeBps: f.feeBps,
     minCents: f.minCents, maxCents: f.maxCents,
@@ -118,14 +133,16 @@ export async function feesFor(tenantOrgId: number | null): Promise<{
   };
 }
 
-/** One fee with the share behind it, for the actions that decide about it. */
-export async function feeWithShare(id: number): Promise<
-  { fee: typeof referralFees.$inferSelect; share: typeof clientShares.$inferSelect } | null
-> {
+/**
+ * One fee, for the actions that decide about it.
+ *
+ * It used to load the handover behind it and refuse to return a fee without
+ * one. A lead's fee has no handover, and none of the callers ever read it -
+ * every one of them decides from the payer, the payee and the amount.
+ */
+export async function feeById(id: number): Promise<typeof referralFees.$inferSelect | null> {
   const [fee] = await db.select().from(referralFees).where(eq(referralFees.id, id));
-  if (!fee) return null;
-  const [share] = await db.select().from(clientShares).where(eq(clientShares.id, fee.shareId));
-  return share ? { fee, share } : null;
+  return fee ?? null;
 }
 
 /** Totals for a ledger heading. Waived rows count as nothing, not as settled. */

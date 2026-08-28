@@ -477,6 +477,74 @@ export const providerLinks = pgTable("provider_links", {
 }, (t) => [unique("provider_link_unique").on(t.tenantOrgId, t.providerOrgId)]);
 
 /**
+ * An enquiry somebody has not taken: a LEAD, offered to service companies for
+ * a finder's fee.
+ *
+ * The sibling of a client share and deliberately not the same thing. A share
+ * hands over a client you already service - there are records, a fleet, a
+ * history. A lead is somebody who wrote to you about four systems on the east
+ * coast that you are never going to drive to. There is no client organization
+ * behind it and there should not be one: putting a prospect into the client
+ * list to sell them on would foul the one table every tenancy rule reads.
+ *
+ * BLIND UNTIL CLAIMED, which is the whole mechanism. What is published is the
+ * work - what equipment, roughly where, what they asked for. The name, the
+ * address and the person to call are held back until somebody takes it, because
+ * a finder's fee is only worth anything while the finder is the only route.
+ *
+ * FIRST TO CLAIM WINS, and the rest are told it is gone. An enquiry offered to
+ * four shops that all "accept" it is four shops phoning one lab, which is worse
+ * for the lab than not being referred at all.
+ */
+export const leads = pgTable("leads", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** Held back until somebody claims it - see lib/lead. */
+  contactName: text("contact_name").notNull().default(""),
+  contactEmail: text("contact_email").notNull().default(""),
+  contactPhone: text("contact_phone").notNull().default(""),
+  orgName: text("org_name").notNull().default(""),
+  address: text("address").notNull().default(""),
+  /** Published from the start: where, roughly, and what they want. */
+  region: text("region").notNull().default(""),
+  blurb: text("blurb").notNull().default(""),
+  /** [{category, model, count}] as JSON - what they say they have. */
+  systems: text("systems").notNull().default(""),
+  /** What the finder is asking. Same vocabulary as a share's - see lib/referral. */
+  feeKind: text("fee_kind").notNull().default("flat"),
+  feeCents: integer("fee_cents").notNull().default(0),
+  feeBps: integer("fee_bps").notNull().default(0),
+  feeWindowMonths: integer("fee_window_months").notNull().default(12),
+  feeMinCents: integer("fee_min_cents").notNull().default(0),
+  feeMaxCents: integer("fee_max_cents").notNull().default(0),
+  feeNote: text("fee_note").notNull().default(""),
+  /** open | claimed | withdrawn */
+  status: text("status").notNull().default("open"),
+  claimedByOrgId: integer("claimed_by_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  claimedBy: text("claimed_by").notNull().default(""),
+  claimedAt: timestamp("claimed_at"),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/**
+ * Which shops a lead was put in front of.
+ *
+ * A lead is offered to a chosen few rather than posted to the instance: a
+ * board anybody could read is a board somebody scrapes, and the shortlist is
+ * already how a share picks its recipients.
+ */
+export const leadOffers = pgTable("lead_offers", {
+  id: serial("id").primaryKey(),
+  leadId: integer("lead_id").notNull().references((): AnyPgColumn => leads.id, { onDelete: "cascade" }),
+  toOrgId: integer("to_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("lead_offers_to_idx").on(t.toOrgId),
+  unique("lead_offer_unique").on(t.leadId, t.toOrgId),
+]);
+
+/**
  * One client, offered to one other service company.
  *
  * The payload is a FROZEN SNAPSHOT taken when the offer is made, and that is
@@ -505,8 +573,19 @@ export const clientShares = pgTable("client_shares", {
   destOrgId: integer("dest_org_id").references(() => orgs.id, { onDelete: "set null" }),
   /** The snapshot, as JSON - see lib/clientShare. */
   payload: text("payload").notNull().default(""),
-  /** pending | accepted | declined | withdrawn */
+  /** pending | countered | accepted | declined | withdrawn */
   status: text("status").notNull().default("pending"),
+  /**
+   * Show the work without showing whose it is, until they accept.
+   *
+   * A referral is worth something because the other shop cannot go round you,
+   * and an unredacted list hands them the company, the street, the person to
+   * ask for and serials a manufacturer will match to an owner. Blind is the
+   * default for anything with a fee on it. See lib/clientShare redactPayload -
+   * the snapshot itself is never redacted, only the way it is rendered before
+   * the deal is struck.
+   */
+  blind: boolean("blind").notNull().default(false),
   note: text("note").notNull().default(""),
   /**
    * What the referrer is asking for, frozen into the offer with everything
@@ -577,7 +656,16 @@ export const referralFees = pgTable("referral_fees", {
   id: serial("id").primaryKey(),
   /** The payee's workspace: their receivable, so their stamp. */
   tenantOrgId: tenantStamp(),
-  shareId: integer("share_id").notNull().references((): AnyPgColumn => clientShares.id, { onDelete: "cascade" }),
+  /**
+   * The handover it came from, or the LEAD it came from. Exactly one is set.
+   *
+   * A lead's fee is the same debt as a share's - somebody was sent work and is
+   * owed for it - so it is the same row and the same ledger rather than a
+   * second table that would need its own invoicing, its own settlement and its
+   * own reconciliation with the first.
+   */
+  shareId: integer("share_id").references((): AnyPgColumn => clientShares.id, { onDelete: "cascade" }),
+  leadId: integer("lead_id").references((): AnyPgColumn => leads.id, { onDelete: "cascade" }),
   /** Who is owed - the referrer. */
   payeeOrgId: integer("payee_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
   /** Who owes - the shop that accepted. */

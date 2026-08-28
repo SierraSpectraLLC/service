@@ -5,19 +5,20 @@
 // is nowhere to put a price - and these hold the composer to it.
 import { describe, expect, it } from "vitest";
 import {
-  freeTag, isOpen, mayAnswerCounter, mayCounter, mayDecide, mayWithdraw,
-  parsePayload, provenanceLine, shareProblems, summarize, SHARE_VERSION,
-  type SharePayload,
+  blindSummary, freeTag, isOpen, mayAnswerCounter, mayCounter, mayDecide,
+  mayWithdraw, parsePayload, provenanceLine, redactPayload, shareProblems,
+  stateOf, summarize, SHARE_VERSION, type SharePayload,
 } from "@/lib/clientShare";
 
 const PAYLOAD: SharePayload = {
   version: SHARE_VERSION,
   client: { name: "Emery Pharma", kind: "client" },
   sites: [
-    { name: "Hayward", address: "2000 Sample Way", accessNotes: "Dock 4, badge at reception",
+    { name: "Hayward", address: "2000 Sample Way, Hayward CA 94544",
+      accessNotes: "Dock 4, badge at reception",
       contactName: "R. Diaz", contactPhone: "555-0100", contactEmail: "rd@emery.test" },
-    { name: "Alameda", address: "15 Bay Farm Rd", accessNotes: "", contactName: "",
-      contactPhone: "", contactEmail: "" },
+    { name: "Alameda", address: "15 Bay Farm Rd, Alameda CA 94502", accessNotes: "",
+      contactName: "", contactPhone: "", contactEmail: "" },
   ],
   systems: [
     { sourceRef: "EP-001", model: "6495C", category: "LC-MS", siteName: "Hayward", location: "",
@@ -158,5 +159,54 @@ describe("countering", () => {
   it("counts a countered offer as still live", () => {
     expect(isOpen("countered")).toBe(true);
     expect(isOpen("declined")).toBe(false);
+  });
+});
+
+describe("a blind offer", () => {
+  const blind = redactPayload(PAYLOAD);
+
+  it("takes out everything they would need to go round the sender", () => {
+    /*
+     * The point of a referral fee is that the other shop cannot approach the
+     * client directly. The full list hands them the company, the street, the
+     * person to ask for, and serials a manufacturer will match to an owner.
+     */
+    const json = JSON.stringify(blind);
+    expect(json).not.toContain("Emery Pharma");
+    expect(json).not.toContain("2000 Sample Way");
+    expect(json).not.toContain("R. Diaz");
+    expect(json).not.toContain("rd@emery.test");
+    expect(json).not.toContain("555-0100");
+    expect(json).not.toContain("SN7009");
+    // Asset tags look innocuous and are not: a tag on a service report or a
+    // photo identifies the machine, and the machine identifies the lab.
+    expect(json).not.toContain("EP-001");
+  });
+
+  it("keeps enough to decide whether you want the work", () => {
+    expect(blind.systems).toHaveLength(PAYLOAD.systems.length);
+    expect(blind.systems[0].model).toBe("6495C");
+    expect(blind.systems[0].category).toBe("LC-MS");
+    expect(blind.systems[0].modules[0].manufacturer).toBe("Agilent");
+    expect(blind.sites).toHaveLength(2);
+  });
+
+  it("says the state and never the street", () => {
+    expect(stateOf("2000 Sample Way, Hayward CA 94544")).toBe("CA");
+    expect(stateOf("15 Bay Farm Rd\nAlameda, CA")).toBe("CA");
+    expect(stateOf("331 Fort Johnson Road, Charleston, SC 29412")).toBe("SC");
+    // Unreadable comes back blank rather than guessed.
+    expect(stateOf("somewhere out past the airport")).toBe("");
+    expect(stateOf("")).toBe("");
+  });
+
+  it("summarises without naming anybody", () => {
+    expect(blindSummary(PAYLOAD)).toBe("2 systems across 2 sites in CA");
+    const noState = { ...PAYLOAD, sites: [{ ...PAYLOAD.sites[0], address: "out past the airport" }] };
+    expect(blindSummary(noState)).toContain("region not stated");
+  });
+
+  it("still round-trips as a payload, so nothing downstream has to know", () => {
+    expect(parsePayload(JSON.stringify(blind))).toEqual(blind);
   });
 });

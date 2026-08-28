@@ -75,6 +75,69 @@ export type SharePayload = {
   note: string;
 };
 
+/**
+ * The state an address is in, and nothing finer.
+ *
+ * "2000 Sample Way, Hayward CA 94544" is a street somebody can drive to and a
+ * company somebody can look up. "CA" is enough for a shop to know whether the
+ * work is theirs to want. Matched off the ZIP because that is the one part of a
+ * US address whose shape is reliable; anything it cannot read comes back blank
+ * rather than guessed, and blank is shown as "region not stated".
+ */
+export function stateOf(address: string): string {
+  const line = address.trim().split(/\n/).pop() ?? "";
+  const zip = /\b([A-Za-z]{2})[.,]?\s+\d{5}(?:-\d{4})?\s*$/.exec(line);
+  if (zip) return zip[1].toUpperCase();
+  const bare = /,\s*([A-Za-z]{2})\.?\s*$/.exec(line);
+  return bare ? bare[1].toUpperCase() : "";
+}
+
+/**
+ * The same offer with the client's identity taken out of it.
+ *
+ * A referral is worth something because the other shop cannot go round you, and
+ * the unredacted list hands them everything they need to: the company name, the
+ * street, the person to ask for, and serials a manufacturer will match to an
+ * owner. So a BLIND offer says what the work IS and never who it is for -
+ * enough to decide whether you want it, not enough to take it.
+ *
+ * What survives: how many systems, of what category and model, at how many
+ * sites, in which state, and what somebody already has a contract on. What goes:
+ * the client's name, site names, addresses, every contact, every serial, and
+ * the asset tags - which look innocuous and are not, because a tag on a photo
+ * or a service report identifies the machine and the machine identifies the lab.
+ *
+ * Applied at the LAST MOMENT, on the way to a screen, never on the way into the
+ * database. The full snapshot is what they get when they accept - they cannot
+ * service a lab whose address they do not have - so redacting at rest would
+ * mean storing the offer twice and one of them being wrong.
+ */
+export function redactPayload(p: SharePayload): SharePayload {
+  const states = [...new Set(p.sites.map((s) => stateOf(s.address)).filter(Boolean))];
+  return {
+    ...p,
+    client: { ...p.client, name: "A client" },
+    sites: p.sites.map((_, i) => ({
+      name: states.length === 1 ? `Site ${i + 1}, ${states[0]}` : `Site ${i + 1}`,
+      address: "", accessNotes: "", contactName: "", contactPhone: "", contactEmail: "",
+    })),
+    systems: p.systems.map((x, i) => ({
+      ...x,
+      sourceRef: `System ${i + 1}`,
+      siteName: "",
+      location: "",
+      modules: x.modules.map((m) => ({ ...m, serial: "" })),
+    })),
+  };
+}
+
+/** "12 systems across 2 sites in CA" - the headline of a blind offer. */
+export function blindSummary(p: SharePayload): string {
+  const states = [...new Set(p.sites.map((s) => stateOf(s.address)).filter(Boolean))];
+  const where = states.length ? ` in ${states.join(", ")}` : " - region not stated";
+  return `${summarize(p)}${where}`;
+}
+
 export const SHARE_STATES = ["pending", "countered", "accepted", "declined", "withdrawn"] as const;
 export type ShareState = (typeof SHARE_STATES)[number];
 

@@ -710,6 +710,57 @@ export async function notifyClientShared(opts: {
 }
 
 /**
+ * Somebody is offering us work in a place we might actually go.
+ *
+ * Names no lab and no person - that is the whole arrangement, and an inbox
+ * line naming the prospect would undo it in the one place nobody thinks to
+ * check. What it carries is enough to decide whether to open the page: what
+ * equipment, roughly where, and what the finder wants for it.
+ *
+ * It also says the race is a race. A shop that reads this on Thursday and acts
+ * on Monday should know why it was gone.
+ */
+export async function notifyLeadOffered(opts: {
+  to: string[]; fromName: string; summary: string; equipment: string; terms: string;
+}) {
+  try {
+    const url = appUrl();
+    await deliver({
+      to: opts.to, kind: "lead", href: "/network",
+      title: `${opts.fromName} has a lead: ${opts.summary}`,
+      subject: `A lead from ${opts.fromName} - ${opts.summary}`,
+      body: `<b>${esc(opts.fromName)}</b> has an inquiry they are not taking on:
+        <div style="margin-top:8px;">${esc(opts.summary)}</div>
+        <div>${esc(opts.equipment)}</div>
+        <div style="margin-top:8px;">Their finder's fee: <b>${esc(opts.terms)}</b></div>
+        ${mutedLine("Who it is stays with them until somebody claims it - and the first shop to claim it gets it.")}
+        ${url ? btn(`${url}/network`, "Look at it") : ""}`,
+    });
+  } catch (e) {
+    console.error("[notify] lead email failed:", (e as Error).message);
+  }
+}
+
+/** Somebody took one of ours. The finder wants to know, and to invoice it. */
+export async function notifyLeadClaimed(opts: {
+  to: string[]; byName: string; summary: string;
+}) {
+  try {
+    const url = appUrl();
+    await deliver({
+      to: opts.to, kind: "lead", href: "/network",
+      title: `${opts.byName} claimed your lead - ${opts.summary}`,
+      subject: `${opts.byName} took your lead`,
+      body: `<b>${esc(opts.byName)}</b> has claimed your lead - ${esc(opts.summary)}.
+        ${mutedLine("They have the contact details now. Your finder's fee is theirs to settle.")}
+        ${url ? btn(`${url}/network`, "Open it") : ""}`,
+    });
+  } catch (e) {
+    console.error("[notify] lead claim email failed:", (e as Error).message);
+  }
+}
+
+/**
  * Somebody got in for the first time.
  *
  * Only the first: an alert per sign-in becomes a filter rule inside a week, and

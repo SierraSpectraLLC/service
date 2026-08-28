@@ -15,6 +15,7 @@ import {
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
   awards, shareLinkSystems, providerProfiles, providerLinks, clientShares, referralFees,
+  leads, leadOffers,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
@@ -84,7 +85,7 @@ import {
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyClientShared, notifyMessage, notifyModelProposed, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
+import { notifyClientShared, notifyLeadClaimed, notifyLeadOffered, notifyMessage, notifyModelProposed, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -156,7 +157,7 @@ import {
 } from "@/lib/fleetBrief";
 import { fleetRowsFor, scopeProblem } from "@/lib/fleetBriefData";
 import {
-  mayAnswerCounter, mayCounter, mayDecide, mayWithdraw, parsePayload,
+  blindSummary, mayAnswerCounter, mayCounter, mayDecide, mayWithdraw, parsePayload,
   shareProblems, summarize, SHARE_LABEL,
 } from "@/lib/clientShare";
 import { composePayload, materialize } from "@/lib/clientShareData";
@@ -164,8 +165,13 @@ import {
   accruedCents, feeStanding, outstandingCents, resolveChoice, termsLine,
   feeLine, termsProblems, windowEnd, type FeeTerms,
 } from "@/lib/referral";
-import { billedForFee, feeWithShare } from "@/lib/referralData";
+import { billedForFee, feeById } from "@/lib/referralData";
 import { parseTags, profileProblems, MAX_BLURB } from "@/lib/providerDirectory";
+import {
+  equipmentLine, leadProblems, leadSummary, mayClaim, mayWithdrawLead,
+  parseSystems, serializeSystems, type LeadSystem,
+} from "@/lib/lead";
+import { leadWithOffers, wasOffered } from "@/lib/leadData";
 import { normalizePhone } from "@/lib/sms";
 import { isPlatformStaff, isStaffRole, mayAdminOrg, mayBillOrg, mayCreateOrgs } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
@@ -16439,7 +16445,7 @@ export async function unlinkProvider(providerOrgId: number): Promise<{ error?: s
  * exactly what they get, however long they take.
  */
 export async function shareClient(orgId: number, data: {
-  toOrgIds: number[]; note: string; terms?: FeeTerms;
+  toOrgIds: number[]; note: string; terms?: FeeTerms; blind?: boolean;
 }): Promise<{ error?: string; sent?: number }> {
   const u = await requireStaff();
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
@@ -16507,13 +16513,21 @@ export async function shareClient(orgId: number, data: {
       feeKind: terms.kind, feeCents: terms.feeCents, feeBps: terms.feeBps,
       feeWindowMonths: terms.windowMonths, feeNote: terms.note,
       feeMinCents: terms.minCents, feeMaxCents: terms.maxCents,
+      // Blind by default wherever there is a fee: the fee is the reason they
+      // cannot be handed the client's name before they agree to it.
+      blind: data.blind ?? terms.kind !== "none",
       createdBy: u.email,
     }).returning();
     const [to] = await db.select().from(orgs).where(eq(orgs.id, toOrgId));
     await notifyClientShared({
       to: await houseEmails(toOrgId),
       fromName: brand.operatorName || brand.name,
-      clientName: org.name, summary: summarize(payload), note: data.note,
+      // A blind offer stays blind in the email too. An inbox line naming the
+      // client would undo the whole thing in the one place nobody thinks to
+      // check, and these get forwarded.
+      clientName: row.blind ? "a client" : org.name,
+      summary: row.blind ? blindSummary(payload) : summarize(payload),
+      note: data.note,
     }).catch(() => {});
     await audit({
       actor: u.email, entityType: "client_share", entityId: row.id, tenantOrgId: tenant,
@@ -16615,11 +16629,18 @@ export async function withdrawClientShare(shareId: number): Promise<{ error?: st
 export async function recomputeReferralFee(feeId: number): Promise<{ error?: string; billed?: number }> {
   const u = await requireStaff();
   const mine = myTenantOrgId(u);
-  const found = await feeWithShare(feeId);
-  if (!found) return { error: "Not found" };
-  const { fee } = found;
+  const fee = await feeById(feeId);
+  if (!fee) return { error: "Not found" };
   if (mine !== fee.payerOrgId && mine !== fee.payeeOrgId) return { error: "Not found" };
   if (fee.kind !== "percent") return { error: "That fee is a flat amount - there is nothing to recompute." };
+  /*
+   * A fee from a LEAD starts with no client attached - the winner had not
+   * signed them up yet. Computing anyway would write a confident zero over a
+   * figure the payer had reported, so it refuses and says what is missing.
+   */
+  if (fee.clientOrgId === null) {
+    return { error: "Point this fee at the client first, then it can be computed from your invoices." };
+  }
 
   const billed = await billedForFee(fee);
   await db.update(referralFees)
@@ -16643,10 +16664,10 @@ export async function reportReferralBilling(
 ): Promise<{ error?: string }> {
   const u = await requireStaff();
   const mine = myTenantOrgId(u);
-  const found = await feeWithShare(feeId);
-  if (!found) return { error: "Not found" };
+  const fee = await feeById(feeId);
+  if (!fee) return { error: "Not found" };
   // The payer alone. A referrer typing their own basis is not a report.
-  if (mine === null || mine !== found.fee.payerOrgId) return { error: "Not found" };
+  if (mine === null || mine !== fee.payerOrgId) return { error: "Not found" };
   const cents = parseMoney(amount);
   if (cents === null || cents < 0) return { error: "That is not an amount" };
 
@@ -16674,9 +16695,8 @@ export async function payReferralFee(
 ): Promise<{ error?: string; url?: string }> {
   const u = await requireStaff();
   const mine = myTenantOrgId(u);
-  const found = await feeWithShare(feeId);
-  if (!found) return { error: "Not found" };
-  const { fee } = found;
+  const fee = await feeById(feeId);
+  if (!fee) return { error: "Not found" };
   if (mine === null || mine !== fee.payerOrgId) return { error: "Not found" };
   if (!stripeConfigured()) return { error: "Online payment is not set up on this instance." };
 
@@ -16713,15 +16733,52 @@ export async function payReferralFee(
   }
 }
 
+/**
+ * Say which of your own clients a lead's fee is measured against.
+ *
+ * A handover names the client at the moment it is accepted, because accepting
+ * one CREATES it. A lead names nobody: the winner is handed a phone number and
+ * has to go and win the work. This is the step where the two rejoin - once the
+ * prospect is a client in the payer's own workspace, the percentage has a
+ * ledger to be taken of and Recompute starts working.
+ *
+ * The PAYER's alone, and only over their own clients. A referrer choosing
+ * which of somebody else's clients their percentage is measured on would be
+ * picking the number they are paid.
+ */
+export async function linkFeeClient(feeId: number, clientOrgId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  const fee = await feeById(feeId);
+  if (!fee) return { error: "Not found" };
+  if (mine === null || mine !== fee.payerOrgId) return { error: "Not found" };
+  if (fee.status === "waived") return { error: "That fee was waived." };
+
+  const [client] = await db.select().from(orgs).where(and(
+    eq(orgs.id, clientOrgId),
+    eq(orgs.parentOrgId, mine),          // theirs, and not another workspace's
+  ));
+  if (!client) return { error: "That is not one of your clients." };
+
+  await db.update(referralFees).set({ clientOrgId })
+    .where(and(eq(referralFees.id, feeId), eq(referralFees.payerOrgId, mine)));
+  await audit({
+    actor: u.email, entityType: "referral_fee", entityId: feeId, tenantOrgId: mine,
+    action: `pointed a referral fee at ${client.name}`,
+  });
+  revalidatePath("/network");
+  return {};
+}
+
 /** The referrer lets it go. Theirs alone to forgive, and it stays on the record. */
 export async function waiveReferralFee(feeId: number, reason: string): Promise<{ error?: string }> {
   const u = await requireStaff();
   const why = requireReason(reason);
   if (typeof why !== "string") return why;
   const mine = myTenantOrgId(u);
-  const found = await feeWithShare(feeId);
-  if (!found) return { error: "Not found" };
-  if (mine === null || mine !== found.fee.payeeOrgId) return { error: "Not found" };
+  const fee = await feeById(feeId);
+  if (!fee) return { error: "Not found" };
+  if (mine === null || mine !== fee.payeeOrgId) return { error: "Not found" };
   await db.update(referralFees).set({ status: "waived" }).where(eq(referralFees.id, feeId));
   await audit({
     actor: u.email, entityType: "referral_fee", entityId: feeId, tenantOrgId: mine,
@@ -16934,9 +16991,8 @@ async function mayBillHere(u: SessionUser, org: typeof orgs.$inferSelect): Promi
 export async function billReferralFee(feeId: number): Promise<{ error?: string; invoiceId?: number }> {
   const u = await requireStaff();
   const mine = myTenantOrgId(u);
-  const found = await feeWithShare(feeId);
-  if (!found) return { error: "Not found" };
-  const { fee } = found;
+  const fee = await feeById(feeId);
+  if (!fee) return { error: "Not found" };
   // The payee's alone: it is their receivable.
   if (mine === null || mine !== fee.payeeOrgId) return { error: "Not found" };
   if (fee.invoiceId) return { error: "That fee is already on an invoice." };
@@ -16987,4 +17043,197 @@ export async function billReferralFee(feeId: number): Promise<{ error?: string; 
     }
   }
   throw last;
+}
+
+
+// ── Leads ───────────────────────────────────────────────────────────────────
+// An enquiry you are never going to drive to, put in front of shops who would,
+// for a finder's fee. Blind until claimed, first claim wins - see lib/lead.
+
+/**
+ * Post a lead to a few of the service companies on your list.
+ *
+ * The contact details go in and stay in: they are stored from the start,
+ * because the finder has to be able to hand them over the moment somebody
+ * claims it, and they are never sent to anybody who has not.
+ */
+export async function postLead(data: {
+  contactName: string; contactEmail: string; contactPhone: string;
+  orgName: string; address: string; region: string; blurb: string;
+  systems: LeadSystem[]; terms: FeeTerms; toOrgIds: number[];
+}): Promise<{ error?: string; id?: number; sent?: number }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  if (mine === null) return { error: "Your workspace could not be resolved" };
+
+  const terms: FeeTerms = {
+    kind: data.terms.kind,
+    feeCents: Math.max(0, Math.round(data.terms.feeCents)),
+    feeBps: Math.max(0, Math.round(data.terms.feeBps)),
+    windowMonths: Math.max(0, Math.round(data.terms.windowMonths)),
+    minCents: Math.max(0, Math.round(data.terms.minCents)),
+    maxCents: Math.max(0, Math.round(data.terms.maxCents)),
+    note: data.terms.note.trim().slice(0, 200),
+  };
+  const systems = data.systems
+    .map((x) => ({
+      category: x.category.trim().slice(0, 60),
+      model: x.model.trim().slice(0, 60),
+      count: Math.max(1, Math.min(999, Math.round(x.count) || 1)),
+    }))
+    .filter((x) => x.category || x.model);
+
+  const problems = leadProblems({
+    region: data.region, systems, terms,
+    contactEmail: data.contactEmail, contactPhone: data.contactPhone, orgName: data.orgName,
+  });
+  if (problems.length) return { error: problems[0] };
+
+  // Only shops on our own list, and re-checked here: a picker is not a
+  // permission, and this one posts somebody else's contact details.
+  const targets = [...new Set(data.toOrgIds.filter((n) => Number.isInteger(n)))].slice(0, 10);
+  const allowed = new Set((await db.select({ id: providerLinks.providerOrgId }).from(providerLinks)
+    .where(and(eq(providerLinks.tenantOrgId, mine), inArray(providerLinks.providerOrgId, targets))))
+    .map((r) => r.id));
+  const picked = targets.filter((t) => allowed.has(t));
+  if (!picked.length) return { error: "Pick who to offer it to, from your service companies" };
+
+  const [lead] = await db.insert(leads).values({
+    tenantOrgId: mine,
+    contactName: data.contactName.trim().slice(0, 120),
+    contactEmail: data.contactEmail.trim().toLowerCase().slice(0, 200),
+    contactPhone: data.contactPhone.trim().slice(0, 60),
+    orgName: data.orgName.trim().slice(0, 120),
+    address: data.address.trim().slice(0, 400),
+    region: data.region.trim().slice(0, 120),
+    blurb: data.blurb.trim().slice(0, 600),
+    systems: serializeSystems(systems),
+    feeKind: terms.kind, feeCents: terms.feeCents, feeBps: terms.feeBps,
+    feeWindowMonths: terms.windowMonths, feeMinCents: terms.minCents,
+    feeMaxCents: terms.maxCents, feeNote: terms.note,
+    createdBy: u.email,
+  }).returning();
+  await db.insert(leadOffers).values(picked.map((toOrgId) => ({ leadId: lead.id, toOrgId })));
+
+  const brand = await brandForTenant(mine);
+  for (const toOrgId of picked) {
+    await notifyLeadOffered({
+      to: await houseEmails(toOrgId),
+      fromName: brand.operatorName || brand.name,
+      summary: leadSummary({ region: data.region, systems }),
+      equipment: equipmentLine(systems),
+      terms: termsLine(terms, formatCents),
+    }).catch(() => {});
+  }
+  await audit({
+    actor: u.email, entityType: "lead", entityId: lead.id, tenantOrgId: mine,
+    action: `posted a lead to ${picked.length} service ${picked.length === 1 ? "company" : "companies"}: `
+      + `${leadSummary({ region: data.region, systems })} for ${termsLine(terms, formatCents)}`,
+  });
+  revalidatePath("/network");
+  return { id: lead.id, sent: picked.length };
+}
+
+/**
+ * Take it. First claim wins, and the losers are told plainly.
+ *
+ * The race is settled in the database, not in the reader: the UPDATE carries
+ * status = 'open' in its own WHERE, so two shops pressing at once produce one
+ * winner and one row that changed nothing. Reading the status first and writing
+ * second is exactly how both of them end up phoning the lab.
+ */
+export async function claimLead(leadId: number, choice = ""): Promise<{ error?: string; claimed?: boolean }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  if (mine === null) return { error: "Your workspace could not be resolved" };
+  const found = await leadWithOffers(leadId);
+  if (!found || !(await wasOffered(leadId, mine))) return { error: "Not found" };
+  if (!mayClaim(found.lead, mine)) {
+    return { error: found.lead.status === "open" ? "That is your own lead." : "Somebody has already taken that one." };
+  }
+
+  const offered: FeeTerms = {
+    kind: found.lead.feeKind, feeCents: found.lead.feeCents, feeBps: found.lead.feeBps,
+    windowMonths: found.lead.feeWindowMonths, minCents: found.lead.feeMinCents,
+    maxCents: found.lead.feeMaxCents, note: found.lead.feeNote,
+  };
+  /*
+   * Settled BEFORE the claim, because a claim that cannot produce a fee is a
+   * lead given away: the winner would hold the contact details and the finder
+   * would hold nothing.
+   *
+   * An either/or demands the answer explicitly rather than leaning on
+   * resolveChoice's default. On a share the recipient sits with a radio button
+   * already on one side, so a blank is a real choice; here two buttons say
+   * which is which, and a blank means the answer never arrived.
+   */
+  if (offered.kind === "either" && choice !== "flat" && choice !== "percent") {
+    return { error: "Say which of the two you are taking." };
+  }
+  const agreed = resolveChoice(offered, choice);
+  if (agreed.kind !== "flat" && agreed.kind !== "percent") {
+    return { error: "That lead has no fee on it." };
+  }
+
+  const won = await db.update(leads).set({
+    status: "claimed", claimedByOrgId: mine, claimedBy: u.email, claimedAt: new Date(),
+  }).where(and(eq(leads.id, leadId), eq(leads.status, "open"))).returning({ id: leads.id });
+  if (!won.length) return { error: "Somebody has already taken that one." };
+
+  /*
+   * The fee, on the same ledger a handover's fee lands on.
+   *
+   * clientOrgId is NULL and stays null until the winner actually signs them
+   * up and points the fee at their own copy - there is no client yet, and a
+   * percent measured against "no client" would either be zero forever or,
+   * worse, against their whole book. billedForFee returns 0 for a null client
+   * on purpose; lib/referralData says why.
+   */
+  const startsOn = shopToday();
+  await db.insert(referralFees).values({
+    tenantOrgId: found.lead.tenantOrgId,          // the payee's receivable
+    leadId,
+    payeeOrgId: found.lead.tenantOrgId ?? 0,
+    payerOrgId: mine,
+    clientOrgId: null,
+    kind: agreed.kind, feeCents: agreed.feeCents, feeBps: agreed.feeBps,
+    minCents: agreed.minCents, maxCents: agreed.maxCents,
+    startsOn,
+    endsOn: agreed.kind === "percent" ? windowEnd(startsOn, agreed.windowMonths) : "",
+    // No note: leadId already says this came from a lead, and the ledger reads
+    // the prospect's name off the lead itself rather than off a string here.
+    note: found.lead.feeNote,
+  });
+
+  const [me] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, mine));
+  await notifyLeadClaimed({
+    to: await houseEmails(found.lead.tenantOrgId),
+    byName: me?.name ?? "another service company",
+    summary: leadSummary({
+      region: found.lead.region, systems: parseSystems(found.lead.systems),
+    }),
+  }).catch(() => {});
+  await audit({
+    actor: u.email, entityType: "lead", entityId: leadId, tenantOrgId: mine,
+    action: `claimed a lead from ${found.lead.createdBy}: `
+      + `${found.lead.orgName || "a prospect"} in ${found.lead.region || "an unstated region"}`,
+  });
+  revalidatePath("/network");
+  return { claimed: true };
+}
+
+/** The finder pulls it, while nobody has taken it. */
+export async function withdrawLead(leadId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  const found = await leadWithOffers(leadId);
+  if (!found || mine === null || found.lead.tenantOrgId !== mine) return { error: "Not found" };
+  if (!mayWithdrawLead(found.lead.status)) return { error: "Somebody has already taken that one." };
+  await db.update(leads).set({ status: "withdrawn" }).where(eq(leads.id, leadId));
+  await audit({
+    actor: u.email, entityType: "lead", entityId: leadId, tenantOrgId: mine,
+    action: "withdrew a lead before anybody took it",
+  });
+  revalidatePath("/network");
+  return {};
 }
