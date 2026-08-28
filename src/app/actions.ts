@@ -19,7 +19,7 @@ import {
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
-  dunningEvents, creditOverrides, quotes, quoteLines, payroll, perks,
+  dunningEvents, creditOverrides, quotes, quoteLines, payroll, perks, bugReports,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import {
@@ -87,7 +87,7 @@ import {
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyClientShared, notifyLeadClaimed, notifyLeadOffered, notifyMessage, notifyModelProposed, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
+import { notifyBugReport, notifyClientShared, notifyLeadClaimed, notifyLeadOffered, notifyMessage, notifyModelProposed, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -146,6 +146,10 @@ import {
 } from "@/lib/payroll";
 import { isHouseHr, mayAdminPeople, payrollViewerFor, reportSubjectFor } from "@/lib/hr";
 import { perkProblems } from "@/lib/perks";
+import {
+  needsResolution, reportProblems, REPORT_STATES, STATE_LABEL,
+} from "@/lib/bugs";
+import { crumbsFor } from "@/lib/bugData";
 import { jobFrom, nextDocNumber } from "@/lib/docNumberData";
 import {
   DOC_KINDS, DOC_LABEL, serializeScheme, templateProblems, type Scheme,
@@ -182,7 +186,7 @@ import { normalizePhone } from "@/lib/sms";
 import { isPlatformStaff, isStaffRole, mayAdminOrg, mayBillOrg, mayCreateOrgs } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
 import { signInIdentity } from "@/auth";
-import { maySeeTrail } from "@/lib/trail";
+import { maySeeTrail, safeQuery, trailAdmins } from "@/lib/trail";
 import { pruneTrail, recordTrail } from "@/lib/trailData";
 import { connectionView, removeConnection, withGraph } from "@/lib/cloudStore";
 import { copyable, copyPlan, copySummary } from "@/lib/taskCopy";
@@ -13690,6 +13694,121 @@ export async function reportTrail(input: {
   } catch {
     // Nothing here may surface to a person. See lib/trailData.
   }
+}
+
+// ---------------- Problem reports ----------------
+
+/**
+ * File something somebody noticed.
+ *
+ * The whole design is in what this does NOT ask for. A person who has just
+ * watched a total come out wrong will type one sentence and nothing else - so
+ * the form takes the sentence, and everything that makes it actionable is
+ * taken from the session and the request: who, which workspace, which route,
+ * which build, which browser, and their own last few minutes off the trail.
+ *
+ * STAFF ONLY, and that is the answer to "anyone I allow": letting somebody
+ * into the workspace already IS allowing them. A separate permission would be
+ * a second list to keep in step with the first, and the failure mode of
+ * forgetting is an engineer who watched something break and had nowhere to
+ * put it. Clients have Request service, which is about their instruments.
+ */
+export async function fileReport(data: {
+  kind: string; title: string; body: string; blocking: boolean;
+  route: string; search?: string; viewport?: string;
+}): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const problems = reportProblems({ title: data.title, kind: data.kind });
+  if (problems.length) return { error: problems[0] };
+
+  const h = await headers();
+  const mine = myTenantOrgId(u);
+  const [row] = await db.insert(bugReports).values({
+    tenantOrgId: mine,
+    kind: data.kind,
+    title: data.title.trim().slice(0, 200),
+    body: data.body.trim().slice(0, 4000),
+    blocking: !!data.blocking,
+    // The route is taken as given (the browser knows where it is) but the
+    // query is scrubbed by the same rule the trail uses: "?q=<a client's
+    // name>" is a thing somebody typed and has no bearing on why a page broke.
+    route: data.route.trim().slice(0, 300),
+    query: safeQuery(data.search ?? ""),
+    userAgent: (h.get("user-agent") ?? "").slice(0, 400),
+    viewport: (data.viewport ?? "").trim().slice(0, 20),
+    buildSha: process.env.NEXT_PUBLIC_BUILD_SHA ?? "",
+    breadcrumbs: await crumbsFor(u.email).catch(() => ""),
+    reportedBy: u.email,
+    reportedByName: u.name || u.email,
+  }).returning();
+
+  /*
+   * Who hears about it, and why it is two audiences.
+   *
+   * The workspace's OWNERS, because it is their shop's list and most reports
+   * are theirs to triage. And the platform address, because a bug in the
+   * SOFTWARE is not an operator's to fix - a report that only ever reached
+   * their own settings page would sit there being true and unread by anybody
+   * who could act on it. Deduped, so the one person who is both hears once.
+   *
+   * Best-effort, and after the row exists: a report that failed because its
+   * own email failed would be the one kind of bug nobody could report.
+   */
+  const owners = (await houseMemberRows())
+    .filter((m) => m.role === "owner" && (mine === null || (m.orgId ?? null) === mine))
+    .map((m) => m.email);
+  await notifyBugReport({
+    to: [...new Set([...owners, ...trailAdmins()].map((e) => e.trim().toLowerCase()).filter(Boolean))],
+    reporter: u.name || u.email,
+    title: row.title,
+    where: row.route,
+    blocking: row.blocking,
+  }).catch(() => {});
+  await audit({
+    actor: u.email, entityType: "report", entityId: row.id, tenantOrgId: mine,
+    action: `reported a problem: ${row.title}`,
+  });
+  revalidatePath("/settings/reports");
+  return { id: row.id };
+}
+
+/**
+ * Move a report along, and say why when it ends.
+ *
+ * Whoever may read the list may drive it: inside a workspace that is its own
+ * staff, and the platform reads and drives every workspace's, because the
+ * software is theirs to fix. A reason is required to END one and not to pick
+ * it up - "closed" with no word beside it is how a reporter learns not to
+ * bother next time.
+ */
+export async function setReportStatus(
+  id: number, status: string, resolution = "",
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  if (!(REPORT_STATES as readonly string[]).includes(status)) return { error: "Not a status" };
+  const [row] = await db.select().from(bugReports).where(eq(bugReports.id, id));
+  if (!row) return { error: "Not found" };
+  const platform = isPlatformStaff(tenantViewer(u));
+  const mine = myTenantOrgId(u);
+  if (!platform && (mine === null || row.tenantOrgId !== mine)) return { error: "Not found" };
+
+  const why = resolution.trim().slice(0, 500);
+  if (needsResolution(status) && !why) {
+    return { error: status === "fixed" ? "Say what was fixed" : "Say why it is closed" };
+  }
+  await db.update(bugReports).set({
+    status,
+    resolution: needsResolution(status) ? why : "",
+    resolvedBy: needsResolution(status) ? u.email : "",
+    resolvedAt: needsResolution(status) ? new Date() : null,
+  }).where(eq(bugReports.id, id));
+  await audit({
+    actor: u.email, entityType: "report", entityId: id, tenantOrgId: row.tenantOrgId,
+    action: `marked a report ${STATE_LABEL[status as "new"].toLowerCase()}: ${row.title}`
+      + (why ? ` - ${why}` : ""),
+  });
+  revalidatePath("/settings/reports");
+  return {};
 }
 
 /** Empty the trail. Only whoever may read it may clear it. */

@@ -23,12 +23,13 @@ import { viewAsPeople } from "@/app/actions";
 import { seesBooksFor } from "@/lib/financeData";
 import { mayAdminPeople, seesPayrollFor } from "@/lib/hr";
 import { financeNavItems } from "@/lib/finance";
-import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
+import { isPlatformStaff, isStaffRole, tenantViewer } from "@/lib/tenants";
 import { visibleOrgs } from "@/lib/tenancy";
 import NotificationCenter from "@/components/NotificationCenter";
 import { ConfirmHost } from "@/components/ui/ConfirmDialog";
 import { ToastHost } from "@/components/ui/Toast";
 import TrailReporter from "@/components/TrailReporter";
+import ReportButton from "@/components/ReportButton";
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import { getAppearance } from "@/lib/appearanceData";
@@ -496,6 +497,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {modules.trail && user && (
           <Suspense fallback={null}><TrailReporter /></Suspense>
         )}
+        {/* Say something is wrong, from wherever you are standing when you see
+            it. Staff only - a client's route for "something is wrong with my
+            instrument" is Request service, and this is about the software.
+            Not behind a module flag: a way to report a bug that an instance
+            can switch off is not a reliable way to report a bug. */}
+        {user && isStaffRole(user.role) && <ReportButton />}
         <Analytics />
       </body>
     </html>

@@ -3711,3 +3711,29 @@ CREATE TABLE IF NOT EXISTS "perks" (
   "created_at" timestamp NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS "perks_org_idx" ON "perks" ("org_id");
+
+-- Something a person noticed and said out loud. The trail records what the
+-- machine noticed; this is the other half, and most of it.
+CREATE TABLE IF NOT EXISTS "bug_reports" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "kind" text NOT NULL DEFAULT 'bug',
+  "title" text NOT NULL DEFAULT '',
+  "body" text NOT NULL DEFAULT '',
+  "blocking" boolean NOT NULL DEFAULT false,
+  "status" text NOT NULL DEFAULT 'new',
+  "route" text NOT NULL DEFAULT '',
+  "query" text NOT NULL DEFAULT '',
+  "user_agent" text NOT NULL DEFAULT '',
+  "viewport" text NOT NULL DEFAULT '',
+  "build_sha" text NOT NULL DEFAULT '',
+  "breadcrumbs" text NOT NULL DEFAULT '',
+  "reported_by" text NOT NULL DEFAULT '',
+  "reported_by_name" text NOT NULL DEFAULT '',
+  "resolution" text NOT NULL DEFAULT '',
+  "resolved_by" text NOT NULL DEFAULT '',
+  "resolved_at" timestamp,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "bug_reports_status_idx" ON "bug_reports" ("status");
+CREATE INDEX IF NOT EXISTS "bug_reports_tenant_idx" ON "bug_reports" ("tenant_org_id");

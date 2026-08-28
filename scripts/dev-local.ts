@@ -53,6 +53,10 @@ const FIXTURE = `
 
   UPDATE app_settings SET operator_org_id = (SELECT id FROM orgs WHERE name = 'Sierra Spectra') WHERE id = 1;
   UPDATE app_settings SET public_contact_email = 'hello@ridgelinefield.test' WHERE id = 1;
+  -- The trail on, so the fixture exercises what a problem report ATTACHES:
+  -- with it off there are no breadcrumbs to freeze, and the half of a bug
+  -- report that makes it actionable never gets driven locally.
+  UPDATE app_settings SET trail_enabled = true WHERE id = 1;
   -- The starter expense vocabulary, exactly as createOperator seeds it - the
   -- fixture must eat what production cooks.
   INSERT INTO expense_categories (tenant_org_id, name, sort_order, created_by)

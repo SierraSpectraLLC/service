@@ -761,6 +761,34 @@ export async function notifyLeadClaimed(opts: {
 }
 
 /**
+ * Somebody on the staff hit a snag and said so.
+ *
+ * Goes to the workspace's owners rather than to everybody: it is a thing to
+ * triage, not news. Carries the ROUTE, because "the invoices page" is the
+ * difference between a report somebody can act on this morning and one that
+ * waits for a reply asking where it happened.
+ */
+export async function notifyBugReport(opts: {
+  to: string[]; reporter: string; title: string; where: string; blocking: boolean;
+}) {
+  try {
+    const url = appUrl();
+    await deliver({
+      to: opts.to, kind: "bug_report", href: "/settings/reports",
+      title: `${opts.reporter}: ${opts.title}`,
+      subject: `${opts.blocking ? "Blocked - " : ""}${opts.reporter} reported a problem`,
+      body: `<b>${esc(opts.reporter)}</b> reported a problem with the software:
+        <div style="margin-top:8px;">${esc(opts.title)}</div>
+        ${opts.where ? mutedLine(`On ${esc(opts.where)}`) : ""}
+        ${opts.blocking ? mutedLine("They said it stopped them working.") : ""}
+        ${url ? btn(`${url}/settings/reports`, "Open the report") : ""}`,
+    });
+  } catch (e) {
+    console.error("[notify] bug report email failed:", (e as Error).message);
+  }
+}
+
+/**
  * Somebody got in for the first time.
  *
  * Only the first: an alert per sign-in becomes a filter rule inside a week, and

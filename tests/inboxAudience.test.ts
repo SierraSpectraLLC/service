@@ -22,6 +22,8 @@ const HOUSE_ONLY = [
   "client_share",
   // Work offered to us by another shop, and the answer when we offer one.
   "lead",
+  // Our own staff reporting a snag in the software.
+  "bug_report",
 ];
 
 describe("who is offered which switch", () => {

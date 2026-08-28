@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { reportTrail } from "@/app/actions";
 import { SHADOW_REFUSAL } from "@/lib/viewAs";
+import { REPORT_EVENT } from "@/lib/reportEvent";
 
 /**
  * The page that appears when a page throws, and the one place a render error
@@ -26,6 +27,7 @@ export default function ErrorPage({ error, reset }: {
      read as a polite decline rather than as a crash on top of the bug being
      chased. Recognised by message so every action gets it at once. */
   const refused = error.message === SHADOW_REFUSAL;
+  const [said, setSaid] = useState(false);
 
   useEffect(() => {
     if (refused) return;
@@ -66,9 +68,21 @@ export default function ErrorPage({ error, reset }: {
           The failure has been recorded with the page you were on. Trying again
           often works - the same page twice in a row means it is not you.
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button className="btn accent" onClick={() => reset()}>Try again</button>
           <a className="btn" href="/">Back to the start</a>
+          {/* The floating button is mounted in the layout, which is still
+              standing when a PAGE throws - but somebody looking at a broken
+              page should not have to go hunting for a 34px circle. Same
+              dialog, opened by the same shortcut it advertises everywhere
+              else, so pressing this is the thing they already half know. */}
+          <button className="btn link" style={{ fontSize: 13 }} disabled={said}
+            onClick={() => {
+              setSaid(true);
+              window.dispatchEvent(new Event(REPORT_EVENT));
+            }}>
+            {said ? "thanks" : "tell somebody what you were doing"}
+          </button>
         </div>
         {error.digest && (
           <div className="mut t-meta" style={{ marginTop: 12 }}>

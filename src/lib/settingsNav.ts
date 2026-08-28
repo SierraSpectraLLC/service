@@ -59,6 +59,11 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       { href: "/settings/activity", label: "Usage", ownerOnly: true },
       // Where the errors are. Not a role gate: see lib/trail.
       { href: "/settings/trail", label: "Trail", ownerOnly: true, platformOnly: true, trailAdminOnly: true },
+      // What PEOPLE reported, as against what the machine caught. Open to all
+      // staff on purpose - whoever filed one needs to see what happened to it,
+      // and a queue only the owner can read is a queue nobody files into
+      // twice. See lib/bugs.
+      { href: "/settings/reports", label: "Reports", ownerOnly: false },
     ],
   },
 ];

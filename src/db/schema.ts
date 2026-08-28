@@ -2066,6 +2066,71 @@ export const trailEvents = pgTable("trail_events", {
   index("trail_events_email_idx").on(t.email),
 ]);
 
+/**
+ * Something a person noticed and said out loud.
+ *
+ * The trail above records what the MACHINE noticed - a page opened, an
+ * exception thrown. It cannot record the other half, which is most of it: a
+ * total that is wrong, a button that does nothing, a label nobody understands.
+ * Those throw no exception and leave no row, and until this table the only
+ * place they went was somebody's memory.
+ *
+ * Deliberately not a trail_events kind. A trail row is machine-written,
+ * pruned at thirty days and read by one address; a report is authored, has a
+ * lifecycle somebody drives, belongs to the workspace whose staff filed it,
+ * and must outlive the trail that fed it. Same reasoning that keeps a work
+ * order out of the audit log.
+ *
+ * WHO SEES IT, in both directions. The workspace's own staff see their shop's
+ * reports - it is their list, and a queue nobody can watch is a queue people
+ * stop filing into. Platform staff see every workspace's, because a bug in
+ * the software is not the operator's to fix and a report that stopped at
+ * their own settings page would never reach anybody who could act on it.
+ */
+export const bugReports = pgTable("bug_reports", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** bug (something is wrong) | idea (something could be better). */
+  kind: text("kind").notNull().default("bug"),
+  /** Their own words. The title is what a list shows; the body is the detail. */
+  title: text("title").notNull().default(""),
+  body: text("body").notNull().default(""),
+  /** "This stopped me working" - the one triage fact worth a checkbox. */
+  blocking: boolean("blocking").notNull().default(false),
+  /** new | open | fixed | closed */
+  status: text("status").notNull().default("new"),
+  /**
+   * WHERE THEY WERE, captured rather than typed. The single most useful field
+   * on a bug report and the one nobody fills in: a person reporting a wrong
+   * total does not think to say which page it was on.
+   */
+  route: text("route").notNull().default(""),
+  query: text("query").notNull().default(""),   // scrubbed, see lib/trail.safeQuery
+  userAgent: text("user_agent").notNull().default(""),
+  viewport: text("viewport").notNull().default(""),   // "390x844", for a phone-only bug
+  buildSha: text("build_sha").notNull().default(""),
+  /**
+   * The reporter's own last few minutes, frozen at the moment they filed.
+   *
+   * Frozen rather than joined because the trail prunes at thirty days and a
+   * report outlives it - a snapshot that dissolves is worse than none, since
+   * it reads as complete right up until it is empty. Scoped to the reporter's
+   * OWN rows and shown to them on the report itself: what they were doing
+   * when it broke, never a record of anybody else's day.
+   */
+  breadcrumbs: text("breadcrumbs").notNull().default(""),   // JSON, see lib/reports
+  reportedBy: text("reported_by").notNull().default(""),
+  reportedByName: text("reported_by_name").notNull().default(""),
+  /** How it ended, in the words of whoever ended it. */
+  resolution: text("resolution").notNull().default(""),
+  resolvedBy: text("resolved_by").notNull().default(""),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("bug_reports_status_idx").on(t.status),
+  index("bug_reports_tenant_idx").on(t.tenantOrgId),
+]);
+
 // A work order: one job, from the ask to the close-out.
 //
 // The thing this table adds is not storage - tasks, hours, parts and files were

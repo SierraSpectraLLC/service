@@ -57,6 +57,10 @@ export const NOTIFY_KINDS = [
   { kind: "issue", label: "A client reports a problem", audience: "house" },
   { kind: "pm_request", label: "A client asks for maintenance", audience: "house" },
   { kind: "renewal", label: "A contract is coming up for renewal", audience: "house" },
+  // Somebody on our own staff hit a snag in the software. House-only: a client
+  // has no business being told the shop's engineers are filing bug reports,
+  // and the switch alone would say so.
+  { kind: "bug_report", label: "Somebody reports a problem with the software", audience: "house" },
   // Asked OF the owner, so the owner hears it too.
   { kind: "parts_request", label: "We're asked to order parts for our systems", audience: "all" },
   { kind: "message", label: "Somebody messages me directly", audience: "all" },

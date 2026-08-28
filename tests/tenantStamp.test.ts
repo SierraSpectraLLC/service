@@ -25,7 +25,11 @@ const STAMPED = [
   "catalogRefs", "validationDocs", "messageThreads", "folders", "dropLinks", "shareLinks",
   "rateCards", "expenses", "invoices", "payments", "invoiceFees", "promises",
   "disputes", "dunningEvents", "creditOverrides", "quotes", "expenseCategories", "expenseReports",
-  "awards", "providerLinks", "clientShares", "referralFees", "leads",
+  "awards",
+  // Which workspace filed a problem report. Their staff read their own;
+  // platform staff read every workspace's, because the software is theirs to
+  // fix - see lib/bugData.reportsFor.
+  "bugReports", "providerLinks", "clientShares", "referralFees", "leads",
   // Stamped for housekeeping only. Payroll's ACCESS runs off org_id and is
   // decided in lib/payroll - the stamp is deliberately not a permission there,
   // which is the one place in the app where those two come apart.
