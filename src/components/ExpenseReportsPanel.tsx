@@ -62,7 +62,8 @@ const NO_JOB = "none";
  * Marking one paid records that a check went out. It does not move money.
  */
 export default function ExpenseReportsPanel({
-  pool, mine, queue, adminsPeople, isOwner, subjects, me, openFor, today, categories, workOrders,
+  pool, mine, queue, adminsPeople, isOwner, subjects, me, openFor, today, paidMonths,
+  categories, workOrders,
 }: {
   pool: PoolRow[];
   mine: ReportRow[];
@@ -86,6 +87,12 @@ export default function ExpenseReportsPanel({
    */
   openFor: string;
   today: string;
+  /**
+   * The months a bookkeeper's export would find paid claims in, newest first.
+   * Empty for anybody who may not read everybody's - the route refuses on the
+   * same rule, so this only decides whether the control is drawn.
+   */
+  paidMonths: string[];
   /** The tenant's expense categories, for the new-expense picker. */
   categories: string[];
   /** Every work order, open or closed - a receipt often surfaces after the job wraps. */
@@ -269,6 +276,23 @@ export default function ExpenseReportsPanel({
             </Panel>
           )}
         </>
+      )}
+
+      {adminsPeople && paidMonths.length > 0 && (
+        /* What actually gets sent to an accountant: a month of PAID claims as
+           one sheet. Dated by the PAYOUT rather than by submission, because a
+           reimbursement hits the books when the shop paid it - a claim
+           submitted in July and paid in August belongs in August's file, and
+           getting that backwards is how the same money gets accrued twice.
+           Single reports carry their own receipts; this is the ledger. */
+        <Panel title="For the bookkeeper"
+          hint="A month of paid claims as one sheet. Individual reports download with their receipts from the report itself.">
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {paidMonths.map((m) => (
+              <a key={m} className="btn sm" href={`/api/export/reimbursements?month=${m}`}>{m}</a>
+            ))}
+          </div>
+        </Panel>
       )}
 
       <Panel title="Start here"

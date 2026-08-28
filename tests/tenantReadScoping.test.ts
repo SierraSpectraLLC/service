@@ -33,6 +33,15 @@ const ALLOWED: Record<string, string> = {
   "src/lib/recurringRun.ts::agreements":
     "Same: the recurring-billing cron, behind CRON_SECRET. Each cycle is raised " +
     "against its own agreement, which carries the stamp the invoice inherits.",
+  "src/lib/stipendRun.ts::stipends":
+    "The stipend cron, behind CRON_SECRET, and the same shape as recurringRun " +
+    "above: it sweeps every workspace's standing reimbursements because that is " +
+    "the job, and each row it raises inherits ITS OWN stipend's stamp - the " +
+    "expense, and the perks report it lands on, are both written with " +
+    "s.tenantOrgId. perksReportFor then re-applies that stamp when it looks for " +
+    "the month's claim, so one shop's perks report can never collect another's " +
+    "stipend; tests/stipendRun holds that down with two companies employing the " +
+    "same-named engineer. Nothing here is rendered to a person.",
   "src/app/settings/tenants/page.tsx::instruments":
     "The platform owner's meter - seats, clients, systems and machines PER " +
     "workspace. Counting across tenants is the page's entire job, and " +

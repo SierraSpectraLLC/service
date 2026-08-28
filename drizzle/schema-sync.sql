@@ -3583,3 +3583,49 @@ CREATE INDEX IF NOT EXISTS "expenses_allowance_idx" ON "expenses" ("allowance_st
 -- that cannot be recovered from the job or the rulebook, kept so re-judging a
 -- claim on a different job does not silently demote an overnight to a day trip.
 ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "allowance_nights" integer NOT NULL DEFAULT 0;
+
+-- A standing arrangement to reimburse somebody the same amount every month:
+-- the internet stipend, the phone allowance.
+--
+-- Deliberately NOT payroll. A stipend pays somebody back for something they
+-- bought; running it through the wage register would tax it as income and bury
+-- it in a line nobody can read. It flows through the reimbursement desk like
+-- any other out-of-pocket cost. See src/db/schema.ts and src/lib/stipends.ts.
+CREATE TABLE IF NOT EXISTS "stipends" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "person" text NOT NULL,
+  "label" text NOT NULL DEFAULT '',
+  "amount_cents" integer NOT NULL DEFAULT 0,
+  "kind" text NOT NULL DEFAULT 'Other',
+  "every_months" integer NOT NULL DEFAULT 1,
+  "day_of_month" integer NOT NULL DEFAULT 1,
+  "starts_on" text NOT NULL DEFAULT '',
+  "ends_on" text NOT NULL DEFAULT '',
+  "active" boolean NOT NULL DEFAULT true,
+  "last_on" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "stipends_tenant_idx" ON "stipends" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "stipends_person_idx" ON "stipends" ("person");
+
+-- Where a report came from: '' is somebody opening one by hand, 'stipend' is
+-- the monthly perks claim the recurring pass assembles. A column rather than a
+-- guess at the title, because the pass has to FIND this month's perks report
+-- to add to it and a title is something an owner can rename.
+ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "source" text NOT NULL DEFAULT '';
+
+-- Which standing arrangement raised a row. Null for every receipt a person
+-- actually filed. This is the never-pay-twice guard as much as it is
+-- provenance - the pass asks whether a row exists for (stipend, month) before
+-- writing one. Set null on delete: the payment outlives the arrangement.
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "stipend_id" integer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expenses_stipend_id_stipends_id_fk') THEN
+    ALTER TABLE "expenses" ADD CONSTRAINT "expenses_stipend_id_stipends_id_fk"
+      FOREIGN KEY ("stipend_id") REFERENCES "stipends"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS "expenses_stipend_idx" ON "expenses" ("stipend_id");

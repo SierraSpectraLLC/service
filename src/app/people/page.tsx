@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { expenseReports, expenses, houseMembers, payroll } from "@/db/schema";
+import { expenseCategories, expenseReports, expenses, houseMembers, payroll, stipends } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
@@ -13,6 +13,8 @@ import { formatCents } from "@/lib/money";
 import { shopToday } from "@/lib/shopday";
 import { PageHead, Panel } from "@/components/ui";
 import PeopleDesk, { type RosterRow } from "@/app/people/PeopleDesk";
+import StipendsCard, { type StipendRow } from "@/components/StipendsCard";
+import { nextStipendCycle } from "@/lib/stipends";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +50,7 @@ export default async function PeoplePage() {
   const today = shopToday();
   const isOwner = user.role === "owner";
 
-  const [members, reportRows, expenseRows, seesPay] = await Promise.all([
+  const [members, reportRows, expenseRows, seesPay, stipendRows, categoryRows] = await Promise.all([
     db.select().from(houseMembers)
       .where(and(forTenant(houseMembers.orgId, t), ne(houseMembers.role, "none")))
       .orderBy(asc(houseMembers.name), asc(houseMembers.email)),
@@ -56,6 +58,13 @@ export default async function PeoplePage() {
       .orderBy(desc(expenseReports.submittedAt)),
     db.select().from(expenses).where(forTenant(expenses.tenantOrgId, t)),
     seesPayrollFor(user),
+    /* The standing arrangements. Read by everybody who gets into this room -
+       HR runs the payout and needs to know what is coming - and changed only
+       by the owner, which the card enforces and the action re-checks. */
+    db.select().from(stipends).where(forTenant(stipends.tenantOrgId, t))
+      .orderBy(asc(stipends.person), asc(stipends.label)),
+    db.select().from(expenseCategories).where(forTenant(expenseCategories.tenantOrgId, t))
+      .orderBy(asc(expenseCategories.sortOrder), asc(expenseCategories.id)),
   ]);
 
   /*
@@ -105,6 +114,16 @@ export default async function PeoplePage() {
 
   const owedCents = roster.reduce((n, r) => n + r.unclaimedCents, 0);
 
+  const standing: StipendRow[] = stipendRows.map((s) => ({
+    id: s.id, person: s.person, label: s.label, amountCents: s.amountCents, kind: s.kind,
+    everyMonths: s.everyMonths, dayOfMonth: s.dayOfMonth,
+    startsOn: s.startsOn, endsOn: s.endsOn, active: s.active, lastOn: s.lastOn,
+    /* Asked of the same rule the cron obeys, so the row and the pass cannot
+       disagree about when somebody next gets paid. */
+    nextOn: nextStipendCycle(s, today),
+    note: s.note,
+  }));
+
   return (
     <div className="container wide">
       <PageHead
@@ -145,6 +164,16 @@ export default async function PeoplePage() {
       </Panel>
 
       <PeopleDesk roster={roster} isOwner={isOwner} />
+
+      {/* Under the roster, because it is a fact ABOUT the roster: what each
+          person is owed every month whether or not they file anything. */}
+      <StipendsCard
+        rows={standing}
+        roster={roster.filter((r) => r.nameable).map((r) => ({ name: r.name }))}
+        categories={categoryRows.map((c) => c.name)}
+        isOwner={isOwner}
+        today={today}
+      />
     </div>
   );
 }
