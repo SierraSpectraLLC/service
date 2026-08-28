@@ -1897,6 +1897,15 @@ export const assets = pgTable("assets", {
   ownerOrgId: integer("owner_org_id").references(() => orgs.id, { onDelete: "set null" }),
   // Condition on arrival, in the tech's words. Written once at intake and kept.
   asFound: text("as_found").notNull().default(""),
+  /**
+   * The order it arrived on, when it was received rather than typed in.
+   *
+   * Same job parts.po_id does for a consumable: "where is the receipt for this
+   * pump" has an answer that survives somebody's memory. Null for a unit
+   * entered by hand or imported - most of a migrated fleet - and that null is
+   * honest rather than missing.
+   */
+  poId: integer("po_id").references((): AnyPgColumn => purchaseOrders.id, { onDelete: "set null" }),
   // Resale state - same contract as the instruments columns: while for_sale is
   // true the listing_token URL serves a public, redacted view of this unit.
   forSale: boolean("for_sale").notNull().default(false),
