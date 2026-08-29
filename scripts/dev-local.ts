@@ -596,6 +596,21 @@ const FIXTURE = `
     (3, 3, 'Annual desolvation line swap', '', 365, to_char(now() + interval '200 days', 'YYYY-MM-DD'), ''),
     (3, 6, 'Rough pump oil change', 'joe', 180, to_char(now() + interval '20 days', 'YYYY-MM-DD'), '');
 
+  -- A CLUSTER, because it is the ordinary case and nothing else in this
+  -- fixture showed it: one machine's schedules were written on the same day at
+  -- the same cadence, so they fall due together. The calendar collapses these
+  -- into one line naming the machine - see lib/calendar.assembleEvents - and
+  -- without a cluster here there is no way to look at that locally.
+  INSERT INTO pm_schedules (tenant_org_id, instrument_id, title, assignee, every_days, next_due, last_done)
+  SELECT 3, 2, v.title, 'joe', 90, to_char(now() + interval '6 days', 'YYYY-MM-DD'), ''
+  FROM (VALUES
+    ('Source housekeeping'),
+    ('Turbo bearing check'),
+    ('Inlet liner and septum'),
+    ('Detector gain calibration'),
+    ('Foreline pump oil')
+  ) AS v(title);
+
   -- A reference library, so the hand-off has paper to carry. Provenance is
   -- what decides whether a row may travel - see lib/provenance - so the
   -- fixture has one of each answer.

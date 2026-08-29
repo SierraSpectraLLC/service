@@ -2,6 +2,7 @@
 
 import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { cookies, headers } from "next/headers";
 import { eq, and, asc, desc, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
@@ -13935,20 +13936,36 @@ export async function fileReport(data: {
    * Best-effort, and after the row exists: a report that failed because its
    * own email failed would be the one kind of bug nobody could report.
    */
-  const owners = (await houseMemberRows())
-    .filter((m) => m.role === "owner" && (mine === null || (m.orgId ?? null) === mine))
-    .map((m) => m.email);
-  await notifyBugReport({
-    to: [...new Set([...owners, ...trailAdmins()].map((e) => e.trim().toLowerCase()).filter(Boolean))],
-    reporter: u.name || u.email,
-    title: row.title,
-    where: row.route,
-    blocking: row.blocking,
-  }).catch(() => {});
   await audit({
     actor: u.email, entityType: "report", entityId: row.id, tenantOrgId: mine,
     action: `reported a problem: ${row.title}`,
   });
+
+  /*
+   * AFTER THE ANSWER, not before it. The row above is the report; the mail is
+   * how somebody hears about it, and the one thing this feature cannot afford
+   * is for the telling to hold up the saying. Awaited inline it added the full
+   * round trip to Resend to every report - seconds on a good day, and on a bad
+   * one a person watching "Sending..." and concluding they cannot report
+   * problems, which is the single worst bug this feature could have.
+   *
+   * after() runs it once the response has gone. Wrapped anyway: a report that
+   * failed because its own email failed would be the one kind of bug nobody
+   * could report.
+   */
+  after(async () => {
+    const owners = (await houseMemberRows())
+      .filter((m) => m.role === "owner" && (mine === null || (m.orgId ?? null) === mine))
+      .map((m) => m.email);
+    await notifyBugReport({
+      to: [...new Set([...owners, ...trailAdmins()].map((e) => e.trim().toLowerCase()).filter(Boolean))],
+      reporter: u.name || u.email,
+      title: row.title,
+      where: row.route,
+      blocking: row.blocking,
+    }).catch(() => {});
+  });
+
   revalidatePath("/settings/reports");
   return { id: row.id };
 }

@@ -65,11 +65,27 @@ export default function ReportButton() {
   const send = () =>
     startTransition(async () => {
       setError("");
-      const res = await fileReport({ ...f, ...where });
-      if (res.error) { setError(res.error); return; }
-      toast({ message: "Reported - it is on the list, with the page you were on" });
-      setOpen(false);
-      setF({ kind: "bug", title: "", body: "", blocking: false });
+      /*
+       * THE CATCH IS THE POINT. A server action that THROWS - the table is not
+       * there yet on this deploy, the database is unreachable, anything -
+       * rejects this promise, and without a catch the transition never ends:
+       * the button sits on "Sending..." forever and says nothing. Somebody
+       * watching that concludes they cannot report problems, and the one bug
+       * they cannot then report is that one.
+       */
+      try {
+        const res = await fileReport({ ...f, ...where });
+        if (res.error) { setError(res.error); return; }
+        toast({ message: "Reported - it is on the list, with the page you were on" });
+        setOpen(false);
+        setF({ kind: "bug", title: "", body: "", blocking: false });
+      } catch {
+        // Deliberately not the raw message: a server action's error reaches the
+        // browser as an opaque digest in production, so there is nothing here
+        // worth printing. Say what to do instead.
+        setError("That did not save. Try once more, and if it still will not go,"
+          + " tell whoever looks after this software directly.");
+      }
     });
 
   return (

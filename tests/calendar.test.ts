@@ -47,6 +47,126 @@ describe("what makes the calendar", () => {
     expect(ev[0]).toMatchObject({ kind: "pm", date: "2026-08-20", tone: "bad" });
   });
 
+/*
+ * ONE LINE PER MACHINE PER DAY.
+ *
+ * The thing that made this necessary: a system's schedules are written on the
+ * same day at the same cadence, so they fall due together, and a fleet falls
+ * due together too. One event per schedule turned a single Tuesday into
+ * fourteen rows about one machine - and the title of one of fourteen jobs is
+ * not the useful fact. Which machine needs somebody is.
+ */
+describe("maintenance is counted per machine, not per job", () => {
+  it("keeps the job's own title when there is only one", () => {
+    // Nothing is gained by hiding it: with one job the title IS the fact.
+    const ev = assembleEvents({ ...base, schedules: [sched({})] }, "2026-08-01", "2026-08-31", T);
+    expect(ev).toHaveLength(1);
+    expect(ev[0].label).toBe("Quarterly source clean @ LZ-001");
+  });
+
+  it("collapses a machine's cluster into one line that names the machine", () => {
+    const ev = assembleEvents({
+      ...base,
+      schedules: [
+        sched({ id: 1, title: "Quarterly source clean" }),
+        sched({ id: 2, title: "Annual PM" }),
+        sched({ id: 3, title: "Detector housekeeping" }),
+      ],
+    }, "2026-08-01", "2026-08-31", T);
+    expect(ev).toHaveLength(1);
+    expect(ev[0].label).toBe("LZ-001 maintenance due · 3 jobs");
+    // Still the machine's own page: the list of the three already lives there.
+    expect(ev[0]).toMatchObject({ kind: "pm", date: "2026-08-20", href: "/instruments/1" });
+  });
+
+  it("keeps machines apart, and keeps days apart", () => {
+    const ev = assembleEvents({
+      ...base,
+      schedules: [
+        sched({ id: 1, instrumentId: 1, systemLabel: "LZ-001" }),
+        sched({ id: 2, instrumentId: 1, systemLabel: "LZ-001" }),
+        sched({ id: 3, instrumentId: 2, systemLabel: "LZ-002" }),
+        sched({ id: 4, instrumentId: 2, systemLabel: "LZ-002" }),
+        sched({ id: 5, instrumentId: 2, systemLabel: "LZ-002", nextDue: "2026-08-27" }),
+      ],
+    }, "2026-08-01", "2026-08-31", T);
+    expect(ev.map((e) => e.label).sort()).toEqual([
+      "LZ-001 maintenance due · 2 jobs",
+      "LZ-002 maintenance due · 2 jobs",
+      "Quarterly source clean @ LZ-002",
+    ]);
+  });
+
+  it("keeps a booking apart from a due cycle on the same machine", () => {
+    // Different days and different facts: one is an appointment somebody
+    // agreed to, the other is a cycle nobody has answered yet.
+    const ev = assembleEvents({
+      ...base,
+      schedules: [
+        sched({ id: 1, bookedOn: "2026-08-28" }),
+        sched({ id: 2, bookedOn: "2026-08-28" }),
+        sched({ id: 3 }),
+      ],
+    }, "2026-08-01", "2026-08-31", T);
+    expect(ev.map((e) => `${e.kind}:${e.label}`).sort()).toEqual([
+      "pm:Quarterly source clean @ LZ-001",
+      "visit:LZ-001 booked in · 2 jobs",
+    ]);
+  });
+
+  it("does not pool one machine's jobs with another machine's", () => {
+    /*
+     * Keyed on the RECORD rather than on the printed tag. Two workspaces can
+     * each have an LZ-001, and a calendar that merged them would say one
+     * machine needs four jobs when two machines need two each.
+     */
+    const ev = assembleEvents({
+      ...base,
+      schedules: [
+        sched({ id: 1, instrumentId: 7, systemLabel: "LZ-001" }),
+        sched({ id: 2, instrumentId: 9, systemLabel: "LZ-001" }),
+      ],
+    }, "2026-08-01", "2026-08-31", T);
+    expect(ev).toHaveLength(2);
+    expect(ev.map((e) => e.href).sort()).toEqual(["/instruments/7", "/instruments/9"]);
+  });
+
+  it("does not pool schedules that hang off no machine at all", () => {
+    // A schedule with neither an instrument nor an asset has nothing to be
+    // grouped BY; pooling them would invent a machine that does not exist.
+    const ev = assembleEvents({
+      ...base,
+      schedules: [
+        sched({ id: 1, instrumentId: null, assetId: null, systemLabel: "", title: "Calibrate the bench meter" }),
+        sched({ id: 2, instrumentId: null, assetId: null, systemLabel: "", title: "Service the compressor" }),
+      ],
+    }, "2026-08-01", "2026-08-31", T);
+    expect(ev.map((e) => e.label).sort())
+      .toEqual(["Calibrate the bench meter", "Service the compressor"]);
+  });
+
+  it("counts a standalone asset as its own machine", () => {
+    const ev = assembleEvents({
+      ...base,
+      schedules: [
+        sched({ id: 1, instrumentId: null, assetId: 4, systemLabel: "Pump nXDS15i" }),
+        sched({ id: 2, instrumentId: null, assetId: 4, systemLabel: "Pump nXDS15i" }),
+      ],
+    }, "2026-08-01", "2026-08-31", T);
+    expect(ev).toHaveLength(1);
+    expect(ev[0]).toMatchObject({ href: "/assets/4", label: "Pump nXDS15i maintenance due · 2 jobs" });
+  });
+
+  it("still hides a paused schedule, however many it stands beside", () => {
+    const ev = assembleEvents({
+      ...base,
+      schedules: [sched({ id: 1 }), sched({ id: 2, paused: true }), sched({ id: 3, paused: true })],
+    }, "2026-08-01", "2026-08-31", T);
+    expect(ev).toHaveLength(1);
+    expect(ev[0].label).toBe("Quarterly source clean @ LZ-001");
+  });
+});
+
   it("paused schedules, draft quotes and paid invoices are nobody's plans", () => {
     const ev = assembleEvents({
       ...base,

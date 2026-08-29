@@ -31,6 +31,20 @@ vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => undefined }),
   headers: async () => new Map([["user-agent", "Mozilla/5.0 Chrome/120.0 Safari/537.36"]]),
 }));
+/*
+ * fileReport hands the email to after() so the report returns the moment the
+ * row is written - see the comment there. after() needs a request scope and
+ * there is none out here, so the work is held and `settleAfter` runs it.
+ *
+ * Held rather than run inline on purpose: the point of the change is that the
+ * mail happens AFTER the answer, and a mock that awaited it inline would let a
+ * regression putting it back on the response path sail through green.
+ */
+const afterJobs = vi.hoisted(() => [] as Promise<unknown>[]);
+vi.mock("next/server", () => ({
+  after: (fn: () => unknown) => { afterJobs.push(Promise.resolve().then(fn)); },
+}));
+const settleAfter = async () => { await Promise.all(afterJobs.splice(0)); };
 
 /** 3 = Sierra Spectra (root), 5 = Cascade, a second operator. */
 const JOE: Who = {
@@ -186,6 +200,10 @@ describe("who hears about it", () => {
     who = BILL;
     const { fileReport } = await import("@/app/actions");
     await fileReport(FILE);
+    // Nothing has been sent yet, and that is the change: the reporter got their
+    // answer without waiting on anybody's mail server.
+    expect(sent).toEqual([]);
+    await settleAfter();
     expect(sent).toContain("joe@sierra.test");
     expect(sent).toContain("admin@ridgelinefield.com");
     expect(sent).not.toContain("cass@cascade.test");

@@ -94,22 +94,58 @@ export function assembleEvents(inp: CalendarInputs, from: string, to: string, to
   const inRange = (d: string) => isDay(d) && d >= from && d <= to;
   const lateTone = (d: string, calm: CalEvent["tone"]): CalEvent["tone"] => (d < today ? "bad" : calm);
 
+  /*
+   * ONE LINE PER MACHINE PER DAY, not one per job.
+   *
+   * Maintenance clusters: a system's schedules were usually written on the
+   * same day at the same cadence, so they come due together, and a fleet of
+   * them comes due together too. Emitted one event per schedule, a single
+   * Tuesday read "Quarterly source clean @ TOC-001", "Source housekeeping @
+   * TOC-001", "Annual PM @ TOC-001" and eleven more - which is not a calendar
+   * anybody can look at, and the title of one of fourteen jobs is not even the
+   * useful fact. The useful fact is WHICH MACHINE needs somebody.
+   *
+   * So schedules are gathered per machine per day and collapsed. One job keeps
+   * its own title, because there the title IS the fact and nothing is gained by
+   * hiding it; several become "TOC-001 maintenance due", with the count, and
+   * the link goes where the list of them already lives.
+   */
+  const cluster = new Map<string, {
+    date: string; kind: CalKind; href: string; label: string; system: string; n: number;
+  }>();
   for (const s of inp.schedules) {
     if (s.paused) continue;
-    const where = s.systemLabel ? ` @ ${s.systemLabel}` : "";
     const href = s.instrumentId !== null ? `/instruments/${s.instrumentId}`
       : s.assetId !== null ? `/assets/${s.assetId}` : "/maintenance";
-    if (s.bookedOn) {
-      if (inRange(s.bookedOn)) out.push({
-        date: s.bookedOn, kind: "visit", href,
-        label: `${s.title}${where}`, tone: lateTone(s.bookedOn, "info"),
-      });
-    } else if (inRange(s.nextDue)) {
-      out.push({
-        date: s.nextDue, kind: "pm", href,
-        label: `${s.title}${where}`, tone: lateTone(s.nextDue, "warn"),
-      });
-    }
+    // Booked and due are different days and different facts, so they cluster
+    // apart: a machine can have one of each in the same week.
+    const [date, kind] = s.bookedOn
+      ? [s.bookedOn, "visit" as const]
+      : [s.nextDue, "pm" as const];
+    if (!inRange(date)) continue;
+    /* Keyed on the RECORD, not on the label. Two machines can carry the same
+       tag in different workspaces, and a schedule with no machine behind it at
+       all must not be pooled with every other orphan on that day. */
+    const who = s.instrumentId !== null ? `i${s.instrumentId}`
+      : s.assetId !== null ? `a${s.assetId}` : `s${s.id}`;
+    const key = `${date}|${kind}|${who}`;
+    const seen = cluster.get(key);
+    if (seen) { seen.n++; continue; }
+    cluster.set(key, {
+      date, kind, href, n: 1,
+      label: s.title, system: s.systemLabel,
+    });
+  }
+  for (const c of cluster.values()) {
+    const where = c.system ? ` @ ${c.system}` : "";
+    out.push({
+      date: c.date, kind: c.kind, href: c.href,
+      label: c.n === 1
+        ? `${c.label}${where}`
+        : `${c.system || "Unassigned"} ${c.kind === "visit" ? "booked in" : "maintenance due"}`
+          + ` · ${c.n} jobs`,
+      tone: lateTone(c.date, c.kind === "visit" ? "info" : "warn"),
+    });
   }
 
   for (const t of inp.tasks) {

@@ -15,13 +15,24 @@
  * plain text, for clients that refuse HTML, for a screen reader in text mode,
  * and for the spam scorers that treat an HTML-only mail as a smell. Generated
  * from the same data as the HTML by the composer, never hand-kept.
+ *
+ * BOUNDED. This is a call to somebody else's server sitting inside a request
+ * this application is holding open, and an un-timed one is the whole app's
+ * latency handed to a third party: every action that notifies - assigning a
+ * task, sending an invoice, filing a problem report - waits as long as Resend
+ * takes, and forever if Resend never answers. The caller's own catch does not
+ * help, because a hang is not an error. Ten seconds is far past a healthy
+ * send and far short of a person giving up on the page.
  */
+export const SEND_TIMEOUT_MS = 10_000;
+
 export async function sendEmail(
   to: string[], subject: string, html: string,
   opts: { headers?: Record<string, string>; from?: string; replyTo?: string; text?: string } = {},
 ): Promise<void> {
   const headers = opts.headers;
   const res = await fetch("https://api.resend.com/emails", {
+    signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     method: "POST",
     headers: {
       Authorization: `Bearer ${process.env.AUTH_RESEND_KEY}`,
