@@ -242,7 +242,11 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
 
   return (
     <div className="container">
-      <PageHead title="Dashboard"
+      {/* "Today", not "Dashboard". The nav word and the page's own title were
+          two different words for one destination - the tab bar said Today, the
+          header said Dashboard, and this said Dashboard again. One word per
+          destination, and it is decided in lib/nav. */}
+      <PageHead title="Today"
         actions={(ownerView || canEdit) && (
           <>
             {ownerView && (

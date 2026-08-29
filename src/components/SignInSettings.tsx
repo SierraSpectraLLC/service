@@ -18,7 +18,17 @@ import { MIN_PASSWORD } from "@/lib/password";
  * the address was already proved, so neither is a way to get an account, only a
  * second way back into one you already have.
  */
-export default function SignInSettings({ name, email, hasPassword, phone, smsConfigured }: {
+export default function SignInSettings({ show = "signin", name, email, hasPassword, phone, smsConfigured }: {
+  /**
+   * WHICH HALF OF THIS CARD. It used to be one block called "Profile &
+   * sign-in", on the inbox, because there was nowhere else for it - the app had
+   * no user-level settings area at all, so a person's own name sat under their
+   * mail. There is one now, and the two halves belong on different rooms of it:
+   * the name is who you are (/account/profile), the password and the number are
+   * how you get in (/account/security). One component still owns both, so the
+   * actions and the validation stay in one place.
+   */
+  show?: "name" | "signin";
   /** What everybody else sees on your assignments and mentions. Yours to set. */
   name: string; email: string;
   hasPassword: boolean; phone: string; smsConfigured: boolean;
@@ -68,13 +78,15 @@ export default function SignInSettings({ name, email, hasPassword, phone, smsCon
   };
 
   return (
-    <div className="card" style={{ marginTop: 14 }}>
-      <div className="card-title" style={{ marginBottom: 6 }}>Profile & sign-in</div>
+    <div className="card">
+      <div className="card-title" style={{ marginBottom: 6 }}>
+        {show === "name" ? "Your name" : "How you sign in"}
+      </div>
 
       {/* Yours to set, not the owner's. This is the name on your assignments,
           your mentions and your hours; before this it was whatever somebody
           typed when they added you, which was usually nothing. */}
-      <form onSubmit={saveName} style={{ marginBottom: 14 }}>
+      {show === "name" && <form onSubmit={saveName} style={{ marginBottom: 14 }}>
         <label htmlFor="my-name" className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 3 }}>
           Your name <span className="mut" style={{ fontWeight: 400 }}>{email}</span>
         </label>
@@ -86,12 +98,12 @@ export default function SignInSettings({ name, email, hasPassword, phone, smsCon
             {pending ? "Saving..." : "Save"}
           </button>
         </div>
-      </form>
+      </form>}
 
       {/* Only once texting actually works. Asking for a number that nothing can
           send to is a field that does nothing and a promise we haven't kept -
           set the three Twilio variables and this appears on its own. */}
-      {smsConfigured && (
+      {show === "signin" && smsConfigured && (
         <form onSubmit={savePhone} style={{ marginBottom: 14 }}>
           <label htmlFor="tel" className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 3 }}>
             Mobile number <span className="mut" style={{ fontWeight: 400 }}>for codes by text</span>
@@ -107,7 +119,7 @@ export default function SignInSettings({ name, email, hasPassword, phone, smsCon
         </form>
       )}
 
-      {open ? (
+      {show === "signin" && (open ? (
         <form onSubmit={savePassword}>
           <label htmlFor="new-pw" className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 3 }}>
             {hasPassword ? "New password" : "Password"} <span className="mut" style={{ fontWeight: 400 }}>at least {MIN_PASSWORD} characters</span>
@@ -151,7 +163,7 @@ export default function SignInSettings({ name, email, hasPassword, phone, smsCon
               }}>Remove</button>
           )}
         </div>
-      )}
+      ))}
 
       {msg && <div className="t-small" style={{ color: "var(--t-good-fg)", marginTop: 8 }}>{msg}</div>}
       {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}

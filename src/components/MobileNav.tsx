@@ -3,17 +3,26 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import type { NavGroup } from "@/components/HeaderNav";
+import { signOutAction } from "@/app/actions";
+import { isActive, sectionTone, type NavTree, type SectionKey, type TabKey } from "@/lib/nav";
 
 /**
- * Navigation for a phone: a bottom tab bar with the five daily destinations,
- * and a drawer (from the hamburger this component also renders into the
- * header) carrying every nav group - so the header itself never has to wrap.
+ * Navigation for a phone: a bottom tab bar with the daily destinations, and a
+ * drawer (from the hamburger this component also renders into the header)
+ * carrying the sections - so the header itself never has to wrap.
  * Renders nothing visible from 640px up; the desktop keeps its link row.
  *
- * Icons are inline line SVGs on currentColor, same idiom as NavIcons: five
- * small drawings are not worth a package, and currentColor keeps them
- * legible on a themed header.
+ * THE DRAWER IS A FOLD, NOT A SITE MAP. It used to take the same links and
+ * groups the desktop header folds into three dropdowns and unroll all of them
+ * into one scroll: 29 rows on a staff phone, four of them duplicating the tab
+ * bar underneath in different words. At rest it is now ten rows, and the
+ * sections are exclusive-open accordions - opening one closes the other, so
+ * the worst case on screen is ten plus the largest group rather than the whole
+ * app at once.
+ *
+ * Icons are inline line SVGs on currentColor, same idiom as NavIcons: a few
+ * small drawings are not worth a package, and currentColor keeps them legible
+ * on a themed header.
  */
 const S = {
   width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
@@ -48,43 +57,54 @@ const PartsIcon = () => (
  *
  * The bar used to be a module constant with no role input at all: every signed-
  * in person got Today / Work / Assets / Inbox / Library, including the /inbox
- * tab, which appears in neither nav branch, and three labels that disagreed
- * with the ones beside them on a desktop. The phone was the one surface where
- * a client could not be given their own product, because nothing here knew who
- * was holding it.
+ * tab, which appeared in neither nav branch, and three labels that disagreed
+ * with the ones beside them on a desktop. Both the destinations and the words
+ * now come from the one tree - see lib/nav.
  */
-const TAB_ICON = {
+const TAB_ICON: Record<TabKey, React.ReactNode> = {
   home: <HomeIcon />, work: <WorkIcon />, assets: <AssetsIcon />,
   inbox: <InboxTabIcon />, library: <LibraryIcon />,
   approvals: <ApprovalsIcon />, parts: <PartsIcon />,
-} as const;
+};
 
-export type TabKey = keyof typeof TAB_ICON;
-export type TabItem = { href: string; label: string; icon: TabKey };
+const Chevron = () => (
+  <svg {...S} width="16" height="16" className="mnav-caret" aria-hidden><path d="M9 6l6 6-6 6" /></svg>
+);
 
-export default function MobileNav({ tabs, links, groups, settingsHref, userName, orgName }: {
-  /** The five daily destinations, chosen by whoever is holding the phone. */
-  tabs: TabItem[];
-  links: { href: string; label: string }[];
-  groups: NavGroup[];
-  settingsHref: string | null;
+export default function MobileNav({ nav, userName, orgName }: {
+  /** The whole tree. The drawer renders the fold; the bar renders the tabs. */
+  nav: NavTree;
   userName: string;
   orgName: string;
 }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
-  const isActive = (href: string) =>
-    href === "/" ? path === "/" : path === href || path.startsWith(`${href}/`);
+  /**
+   * EXCLUSIVE OPEN: one key, not a set. Opening a section sets it, which
+   * collapses whichever was open, so the drawer's height stays bounded by its
+   * largest single group instead of growing with every tap. Closing the drawer
+   * resets it - a drawer that reopens mid-scroll on yesterday's section is a
+   * drawer that has to be re-read.
+   */
+  const [expanded, setExpanded] = useState<SectionKey | null>(null);
 
   // A navigation is the end of the drawer's business; and Escape closes it
   // like any overlay.
   useEffect(() => { setOpen(false); }, [path]);
+  useEffect(() => { if (!open) setExpanded(null); }, [open]);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
+
+  const active = (href: string) => isActive(path, href);
+  /* The sections that fold. Account is deliberately not one of them: four
+     children is not worth a fold, and it is the row people find by muscle
+     memory at the bottom of a drawer. */
+  const folding = nav.sections.filter((s) => s.key !== "account");
+  const account = nav.sections.find((s) => s.key === "account");
 
   return (
     <>
@@ -101,33 +121,69 @@ export default function MobileNav({ tabs, links, groups, settingsHref, userName,
               <b>{userName}</b>
               <div className="mut t-meta">{orgName}</div>
             </div>
-            <div className="mnav-group">Work</div>
-            {links.map((l) => (
-              <Link key={l.href} href={l.href} className={isActive(l.href) ? "active" : undefined}>{l.label}</Link>
+            {nav.primary.map((l) => (
+              <Link key={l.href} href={l.href} className={active(l.href) ? "active" : undefined}>{l.label}</Link>
             ))}
-            {groups.filter((g) => g.items.length > 0).map((g) => (
-              <span key={g.label}>
-                <div className="mnav-group">{g.label}</div>
-                {g.items.map((i) => (
-                  <Link key={i.href} href={i.href} className={isActive(i.href) ? "active" : undefined}>{i.label}</Link>
-                ))}
-              </span>
-            ))}
-            {settingsHref && (
+            <div className="mnav-rule" />
+            {folding.map((s) => {
+              const isOpen = expanded === s.key;
+              const tone = sectionTone(s);
+              /* A section reads as current when the page is one of its rooms
+                 OR its own hub - the hub is the section, not a child of it. */
+              const inside = active(s.href) || s.items.some((i) => active(i.href));
+              return (
+                <div key={s.key} className="mnav-section">
+                  <button type="button" aria-expanded={isOpen}
+                    className={`mnav-sectionhead${isOpen ? " open" : ""}${inside ? " inside" : ""}`}
+                    onClick={() => setExpanded(isOpen ? null : s.key)}>
+                    <span>{s.label}</span>
+                    {/* A DOT, NOT A NUMBER. The drawer has room for one bit per
+                        row; counts live where there is room to say what they
+                        count - the tab bar and the hub cards. */}
+                    {tone && <span className={`dot ${tone}`} aria-label={`${s.label} needs attention`} />}
+                    <span className="sp" />
+                    <Chevron />
+                  </button>
+                  {isOpen && (
+                    <div className="mnav-sectionbody">
+                      {/* The hub leads, bolder than its siblings: it is the one
+                          row that means "the whole of this section", and it
+                          carries the live signals a drawer row cannot. */}
+                      <Link href={s.href} className={`mnav-home${active(s.href) ? " active" : ""}`}>
+                        {s.homeLabel}
+                      </Link>
+                      {s.items.map((i) => (
+                        <Link key={i.href} href={i.href} className={active(i.href) ? "active" : undefined}>
+                          {i.label}
+                          {i.badge && i.tone ? <span className={`dot ${i.tone}`} aria-hidden /> : null}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {account && (
               <>
-                <div className="mnav-group">Account</div>
-                <Link href={settingsHref}>Settings</Link>
+                <div className="mnav-rule" />
+                <Link href={account.href} className={active(account.href) ? "active" : undefined}>
+                  {account.label}
+                </Link>
               </>
             )}
+            {/* A real form, so signing out survives a dead client bundle. */}
+            <form action={signOutAction}>
+              <button type="submit" className="mnav-signout">Sign out</button>
+            </form>
           </div>
         </div>
       )}
 
       <nav className="mnav-tabbar no-print" aria-label="Primary">
-        {tabs.map((t) => (
+        {nav.tabs.map((t) => (
           <Link key={t.href} href={t.href}
-            aria-current={isActive(t.href) ? "page" : undefined}
-            className={isActive(t.href) ? "active" : undefined}>
+            aria-current={active(t.href) ? "page" : undefined}
+            className={active(t.href) ? "active" : undefined}>
             {TAB_ICON[t.icon]}
             {t.label}
           </Link>

@@ -61,7 +61,7 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
   return (
     <div className="container page">
       <div className="crumb">
-        <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>Dashboard</Link> › <b>Engagement record</b>
+        <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>Today</Link> › <b>Engagement record</b>
       </div>
 
       <RecordHero
