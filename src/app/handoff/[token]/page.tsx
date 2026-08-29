@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { clientShares, orgs } from "@/db/schema";
 import { getBrand } from "@/lib/brand";
 import { blindSummary, inventoryLines, inventoryOf, parsePayload, redactPayload } from "@/lib/clientShare";
+import { FREE_TIER_LINES } from "@/lib/plan";
 import { daysLeft, inviteOpen, inviteState, looksLikeToken, pitchLine } from "@/lib/handoff";
 import { termsLine } from "@/lib/referral";
 import { formatCents } from "@/lib/money";
@@ -80,6 +81,12 @@ export default async function HandoffPage({ params }: { params: Promise<{ token:
           <div className="mut t-small" style={{ marginTop: 10 }}>
             Sign in as <span className="mono">{row.toEmail}</span>. We email a code;
             there is no password to choose.
+          </div>
+          {/* Said again on the way in, because this is the screen somebody
+              actually reads - the one before it they skimmed. */}
+          <div className="mut t-small" style={{ marginTop: 6 }}>
+            The workspace is free for {dest?.name ? <b>{dest.name}</b> : "this client"} and has no
+            clock on it. Taking on a client of your own is where a subscription starts.
           </div>
           {/* inline-block, or the margin on an inline anchor is ignored and the
               button sits on top of the line above it. */}
@@ -193,6 +200,23 @@ export default async function HandoffPage({ params }: { params: Promise<{ token:
                 the page with. */}
             <div className="t-lead" style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
               <b>View all this and more in Ridgeline.</b>
+            </div>
+
+            {/*
+              * WHAT IT COSTS, said here rather than discovered in a month.
+              *
+              * The workspace this opens is free and it is not a trial - there
+              * is no clock on it and nothing switches off. What it covers is
+              * THIS client. Somebody who finds that out later, having moved
+              * their records in, has been tricked, and a platform that
+              * converts service companies by tricking them converts each of
+              * them exactly once. See lib/plan.
+              */}
+            <div className="mut t-small" style={{ marginTop: 10 }}>
+              <b>Free, and not a trial.</b> No clock, no card, nothing that switches off:
+              <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                {FREE_TIER_LINES.map((l, i) => <li key={i} style={{ padding: "1px 0" }}>{l}</li>)}
+              </ul>
             </div>
           </>
         )}

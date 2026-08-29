@@ -175,6 +175,10 @@ import {
 } from "@/lib/handoff";
 import { composePayload, composePricing, materialize } from "@/lib/clientShareData";
 import {
+  addClientProblem, cleanPlan, inviteCountProblem, invitePlanProblem, PLAN_LABEL,
+} from "@/lib/plan";
+import { openInvites, planFor } from "@/lib/planData";
+import {
   accruedCents, feeStanding, outstandingCents, resolveChoice, termsLine,
   feeLine, termsProblems, windowEnd, type FeeTerms,
 } from "@/lib/referral";
@@ -10106,6 +10110,15 @@ export async function addOrg(name: string, kind: string): Promise<{ error?: stri
   if (existing.some((o) => o.parentOrgId === tenant && o.name.toLowerCase() === n.toLowerCase())) {
     return { error: `${n} already exists` };
   }
+  /*
+   * THE WALL, and the only one in the product. A workspace that arrived free
+   * with a handed-over client covers that client; a second one of their own is
+   * where a subscription starts. Checked here rather than in the form because
+   * this function is reachable from anything holding a session - see lib/plan.
+   */
+  const seat = await planFor(tenant);
+  const capped = addClientProblem(seat.plan, seat.clients, (await getBrand()).contactEmail);
+  if (capped) return { error: capped };
   const [row] = await db.insert(orgs).values({
     name: n, kind: k,
     // A client belongs to the workspace that created it; that parent is what
@@ -10690,6 +10703,48 @@ export async function createOperator(
   revalidatePath("/settings/tenants");
   revHouse();
   return { orgId: org.id };
+}
+
+/**
+ * Move a workspace onto a plan, or off one. Platform owner only.
+ *
+ * This is the collection lever, and it is deliberately a human one: money
+ * arrives by invoice, bank transfer or a conversation, and the platform's own
+ * subscriptions are not something this codebase takes a card for. A workspace
+ * that has paid gets its limit lifted here, by somebody who knows they paid.
+ *
+ * It goes both ways. A workspace put back on the free tier keeps every record
+ * it has - nothing is deleted and nothing is hidden - it simply stops being
+ * able to take on another client. Whether that is fair is a question about the
+ * conversation that preceded it, not about this function.
+ */
+export async function setWorkspacePlan(
+  orgId: number, plan: string, reason: string,
+): Promise<{ error?: string }> {
+  const u = await requirePlatformOwner();
+  // A year from now "why is this shop on full" is a question somebody will
+  // have, and the answer is a sentence rather than a timestamp.
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const next = cleanPlan(plan);
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org || !org.isOperator) return { error: "Not found" };
+  // The instance's own workspace is not a customer of itself, and a console
+  // misclick that limited it would lock the platform's staff out of taking on
+  // a client while they were supporting somebody.
+  const root = (await getBrand()).operatorOrgId;
+  if (root !== null && org.id === root && next !== "") {
+    return { error: "This is the workspace running the instance - it has no plan to be on." };
+  }
+  if (cleanPlan(org.plan) === next) return {};
+  await db.update(orgs).set({ plan: next, planSince: shopToday() }).where(eq(orgs.id, orgId));
+  await audit({
+    actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: orgId,
+    action: `moved ${org.name} to ${PLAN_LABEL[next].toLowerCase()}: ${why}`,
+  });
+  revalidatePath("/settings/tenants");
+  revHouse();
+  return {};
 }
 
 /** Add somebody to the house, or change what they already are. */
@@ -17223,6 +17278,25 @@ export async function inviteHandoff(orgId: number, data: {
   const tenant = orgTenant(org);
   if (tenant === null) return { error: "That organization has no workspace behind it" };
 
+  /*
+   * THE FAUCET. Accepting one of these opens a workspace, so a workspace that
+   * could send them could open more without end - hand your only client on and
+   * two free workspaces stand where one did, then four. No bad faith needed:
+   * one person with a second address walks that chain by accident. A free
+   * workspace can still hand this client to a company already on the instance,
+   * which mints nothing. See lib/plan.
+   *
+   * The count is not about money. An invitation is an email this platform
+   * sends to a stranger on somebody else's say-so, and a surface that will
+   * send an unbounded number of those is a spam cannon with our return address
+   * on it - so it is capped for everybody, high enough that a shop working a
+   * real list never meets it.
+   */
+  const seat = await planFor(tenant);
+  const gated = invitePlanProblem(seat.plan, (await getBrand()).contactEmail)
+    ?? inviteCountProblem(await openInvites(tenant));
+  if (gated) return { error: gated };
+
   const to = data.email.trim().toLowerCase().slice(0, 200);
   if (!validHouseEmail(to)) return { error: "Give one exact email address" };
   /* Somebody already here is not an invite - they have a workspace, a
@@ -17356,6 +17430,19 @@ export async function acceptHandoff(token: string, data: {
 
   const [org] = await db.insert(orgs).values({
     name, kind: "provider", isOperator: true, parentOrgId: null,
+    /*
+     * THE ONE PLACE A LIMITED WORKSPACE IS BORN. Every other workspace on the
+     * instance was opened by the platform owner through createOperator, after
+     * somebody paid - that human step was the price, and those stay blank,
+     * which is full.
+     *
+     * This one nobody at the platform was asked about. It is real and it is
+     * theirs: the client they were just handed, worked completely and with no
+     * clock on it. The second client of their own is where a subscription
+     * starts. See lib/plan for why the boundary is clients rather than days.
+     */
+    plan: "free",
+    planSince: shopToday(),
   }).returning();
   await db.insert(houseMembers).values({
     email: row.toEmail, role: "owner", name: "", addedBy: row.createdBy, orgId: org.id,
@@ -17416,6 +17503,19 @@ export async function decideClientShare(
 
   const payload = parsePayload(row.payload);
   if (accept && !payload) return { error: "That offer's contents could not be read" };
+
+  /*
+   * The same wall addOrg puts up, at the other door a client comes through.
+   * Accepting an offer is how a workspace gains a client just as much as
+   * typing one in is, and a limit enforced on one path and not the other is
+   * not a limit. DECLINING is always allowed: refusing an offer must never
+   * depend on what somebody is paying.
+   */
+  if (accept) {
+    const seat = await planFor(tenant);
+    const capped = addClientProblem(seat.plan, seat.clients, (await getBrand()).contactEmail);
+    if (capped) return { error: capped };
+  }
 
   let orgId: number | undefined;
   let systems = 0;

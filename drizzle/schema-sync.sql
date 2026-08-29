@@ -3747,3 +3747,10 @@ ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "invite_token" text NOT NUL
 ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "opened_at" timestamp;
 ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "expires_on" text NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS "client_shares_invite_idx" ON "client_shares" ("invite_token");
+
+-- What a workspace is entitled to. Blank is FULL and blank is what every
+-- existing row gets, so nobody who bought the product is downgraded by a
+-- deploy; a workspace only becomes limited by being created limited, which
+-- happens on the hand-off acceptance path alone. See lib/plan.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "plan" text NOT NULL DEFAULT '';
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "plan_since" text NOT NULL DEFAULT '';

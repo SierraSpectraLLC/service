@@ -212,6 +212,30 @@ export const orgs = pgTable("orgs", {
   // Cascade because a tenant's clients are part of that tenant: offboarding the
   // operator takes its client list, their logins and their shares with it.
   parentOrgId: integer("parent_org_id").references((): AnyPgColumn => orgs.id, { onDelete: "cascade" }),
+  /**
+   * WHAT THIS WORKSPACE IS ENTITLED TO. Operators only - see lib/plan.
+   *
+   * Blank is FULL, and it is blank on every workspace that existed before this
+   * column did, which is the point: a workspace somebody bought is not
+   * downgraded by a deploy. A workspace only becomes limited by being created
+   * limited.
+   *
+   * That happens on exactly one path. Accepting a hand-off invitation opens a
+   * workspace without anybody at the platform being asked - it is the whole
+   * conversion mechanism, and putting a sign-up wall in front of it would put
+   * a wall in front of the only thing that persuades a shop to want an account
+   * at all. So the workspace is real and the CLIENT LIST is what is bounded:
+   * they keep the client they were handed, work it completely and forever, and
+   * the second client of their own is where a subscription starts.
+   *
+   * Bounded on clients rather than on a clock deliberately. A service
+   * company's cycle is quarterly; thirty days can contain no PM at all, so a
+   * trial clock expires on people who never got to see the product work. A
+   * second client means it worked.
+   */
+  plan: text("plan").notNull().default(""),
+  /** When the plan was last set, for the console and for an argument later. */
+  planSince: text("plan_since").notNull().default(""),   // YYYY-MM-DD
   // Workspace appearance, set by the org's own editors: header color (hex)
   // and a logo shown beside the wordmark. Blank = the platform default look.
   themeColor: text("theme_color").notNull().default(""),

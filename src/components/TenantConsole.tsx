@@ -1,8 +1,11 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { createOperator } from "@/app/actions";
+import { createOperator, setWorkspacePlan } from "@/app/actions";
+import { cleanPlan, FREE_CLIENTS, PLAN_LABEL } from "@/lib/plan";
 import { DataTable, PageHead, Pill } from "@/components/ui";
+import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 
 export type TenantRow = {
@@ -11,6 +14,9 @@ export type TenantRow = {
   clients: number; clientLogins: number;
   systems: number; live: number;
   machines: number; invitedOnto: number;
+  /** '' = full, 'free' = the client-bounded hand-off tier. See lib/plan. */
+  plan: string;
+  planSince: string;
   since: string;
 };
 
@@ -30,6 +36,35 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
+
+  /*
+   * The collection lever, and deliberately a human one: the platform takes no
+   * card for its own subscriptions anywhere in this codebase, so money arrives
+   * by invoice or by conversation and somebody who knows it arrived lifts the
+   * limit here. Asking for a reason because a year from now "why is this shop
+   * on full" is a question somebody will have - see lib/plan.
+   */
+  const move = async (r: TenantRow) => {
+    const to = cleanPlan(r.plan) === "free" ? "" : "free";
+    const why = await confirmReason({
+      title: to === "" ? `Put ${r.name} on the full plan?` : `Put ${r.name} back on the free tier?`,
+      body: to === ""
+        ? "They can take on as many clients as they like, and hand clients to shops that are not"
+          + " on Ridgeline yet. Do this once they have actually paid."
+        : `They keep every record they have - nothing is deleted and nothing is hidden - but they`
+          + ` stop at ${FREE_CLIENTS} client and cannot invite a shop from outside.`,
+      action: to === "" ? "Move to full" : "Move to free",
+      tone: to === "" ? "primary" : "bad",
+    });
+    if (why === null) return;
+    startTransition(async () => {
+      const res = await setWorkspacePlan(r.id, to, why);
+      if (res?.error) { toast({ message: res.error, tone: "bad" }); return; }
+      toast({ message: `${r.name} is on ${PLAN_LABEL[to].toLowerCase()}` });
+      router.refresh();
+    });
+  };
 
   const submit = () => {
     setError("");
@@ -44,7 +79,7 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
   return (
     <div>
       <PageHead title="Service companies"
-        sub="Seats, clients, systems, machines per tenant."
+        sub="Seats, clients, systems, machines per tenant. Free tiers came in through a hand-off."
         actions={
           <button className="btn sm accent" onClick={() => setOpen((v) => !v)}>
             {open ? "Cancel" : "+ Open a workspace"}
@@ -80,6 +115,7 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
       <DataTable
         cols={[
           { key: "name", label: "Company", width: "minmax(160px, 1.6fr)" },
+          { key: "plan", label: "Plan", width: "150px" },
           { key: "seats", label: "Seats", width: "90px", align: "right" },
           { key: "clients", label: "Clients", width: "70px", align: "right", hideMobile: true },
           { key: "logins", label: "Client logins", width: "100px", align: "right", hideMobile: true },
@@ -95,6 +131,16 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
               <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                 <b className="t-body">{r.name}</b>
                 {r.id === rootOrgId && <Pill tone="info">runs the platform</Pill>}
+              </span>
+            ),
+            plan: r.id === rootOrgId ? <span className="mut t-small">-</span> : (
+              <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <Pill tone={cleanPlan(r.plan) === "free" ? "warn" : "good"}>
+                  {PLAN_LABEL[cleanPlan(r.plan)]}
+                </Pill>
+                <button className="btn link t-meta" disabled={pending} onClick={() => move(r)}>
+                  {cleanPlan(r.plan) === "free" ? "to full" : "to free"}
+                </button>
               </span>
             ),
             seats: <span style={{ fontSize: 13 }}>{r.staff}{r.owners > 0 && <span className="mut"> ({r.owners} owner{r.owners === 1 ? "" : "s"})</span>}</span>,

@@ -790,7 +790,8 @@ export async function notifyHandoffInvite(opts: {
         ${opts.note ? quote(esc(opts.note)) : ""}
         ${mutedLine("You will see the equipment and roughly where it is. Who the client is stays with them until you accept.")}
         ${btn(opts.url, "See what is on offer")}
-        ${mutedLine("Accepting opens a Ridgeline workspace for your company with this client already in it - the sites, the systems, the serials, the maintenance and the paper. Nothing to type in.")}`,
+        ${mutedLine("Accepting opens a Ridgeline workspace for your company with this client already in it - the sites, the systems, the serials, the maintenance and the paper. Nothing to type in.")}
+        ${mutedLine("That workspace is free for this client, with no clock on it and no card asked for. Taking on a client of your own is where a subscription starts.")}`,
     });
   } catch (e) {
     console.error("[notify] handoff invite email failed:", (e as Error).message);

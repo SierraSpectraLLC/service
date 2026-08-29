@@ -62,6 +62,12 @@ export default async function TenantsPage() {
     // Work another operator has invited them onto: the collaboration the shared
     // instance exists for, and not something they are charged twice for.
     invitedOnto: shareRows.filter((s) => s.orgId === o.id).length,
+    // What they are entitled to. Blank is full and is what every workspace
+    // opened through the form on this page has - a free one arrived by
+    // accepting somebody's hand-off, which nobody here was asked about. See
+    // lib/plan.
+    plan: o.plan,
+    planSince: o.planSince,
     since: shopTime(o.createdAt),
   }));
 

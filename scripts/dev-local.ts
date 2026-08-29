@@ -51,6 +51,19 @@ const FIXTURE = `
       'Dana Whitfield', 'dana@nwinstrument.test', 'nwinstrument.test')
     ON CONFLICT DO NOTHING;
 
+  -- A THIRD shop, and the state that has no other way of being looked at: one
+  -- that arrived by accepting a hand-off rather than by being sold to. Free
+  -- tier, holding the single client it was handed - so the wall, the plan pill
+  -- on the tenant console and what a limited workspace actually feels like are
+  -- all reachable locally. See lib/plan.
+  INSERT INTO orgs (id, name, kind, is_operator, plan, plan_since) VALUES
+    (40, 'Cascade Instrument Works', 'provider', true, 'free', to_char(now() - interval '9 days', 'YYYY-MM-DD'));
+  INSERT INTO orgs (id, name, kind, parent_org_id) VALUES
+    (41, 'Puget Diagnostics', 'client', 40);
+  INSERT INTO instruments (external_id, client, model, manufacturer, serial, owner_org_id, tenant_org_id, source_ref, notes)
+    VALUES ('CIW-001', 'Puget Diagnostics', 'Agilent 6470 LC-MS', 'Agilent', 'US2409881', 41, 40,
+      'SS-014', 'Copied from Sierra Spectra on handover - this snapshot does not update.');
+
   UPDATE app_settings SET operator_org_id = (SELECT id FROM orgs WHERE name = 'Sierra Spectra') WHERE id = 1;
   UPDATE app_settings SET public_contact_email = 'hello@ridgelinefield.test' WHERE id = 1;
   -- The trail on, so the fixture exercises what a problem report ATTACHES:
@@ -79,12 +92,16 @@ const FIXTURE = `
     -- The OTHER service company's owner. Half of what the network is for can
     -- only be checked from a second workspace: a client handed over has to be
     -- accepted by somebody who is not us.
-    ('dev-dana', 'Dana Whitfield', 'dana@nwinstrument.test', 'owner', now());
+    ('dev-dana', 'Dana Whitfield', 'dana@nwinstrument.test', 'owner', now()),
+    -- The owner of the shop that came in through a hand-off. Signing in as her
+    -- is the only way to see a free workspace from the inside.
+    ('dev-cass', 'Cass Ibarra', 'cass@cascadeworks.test', 'owner', now());
   INSERT INTO sessions (session_token, user_id, expires) VALUES
     ('devtoken', 'dev-user', now() + interval '30 days'),
     ('stafftoken', 'dev-bill', now() + interval '30 days'),
     ('newtoken', 'dev-new', now() + interval '30 days'),
-    ('danatoken', 'dev-dana', now() + interval '30 days');
+    ('danatoken', 'dev-dana', now() + interval '30 days'),
+    ('freetoken', 'dev-cass', now() + interval '30 days');
 
   -- The directory is assembled from these, never typed in: staff are house
   -- members of the operator, clients are allowlist rows on their org.
@@ -93,7 +110,8 @@ const FIXTURE = `
     ('sam@sierraspectra.test', 3, 'staff', 'Sam Ortiz'),
     ('bill@sierraspectra.test', 3, 'staff', 'Bill Reyes'),
     -- The other shop's owner, so a handed-over client has somebody to accept it.
-    ('dana@nwinstrument.test', 30, 'owner', 'Dana Whitfield');
+    ('dana@nwinstrument.test', 30, 'owner', 'Dana Whitfield'),
+    ('cass@cascadeworks.test', 40, 'owner', 'Cass Ibarra');
   INSERT INTO client_allowlist (entry, org_id, can_edit) VALUES
     ('maria@labzen.test', 1, true),
     ('accounts@coastal.test', 2, false);
@@ -500,8 +518,13 @@ const FIXTURE = `
   -- orgs hang off their operator, and the bench belongs to the workspace.
   -- Without these the digest - which scopes strictly, as a send must - sees
   -- an empty board, and the partner preview calls every org a stranger.
-  UPDATE orgs SET parent_org_id = 3 WHERE kind = 'client';
-  UPDATE instruments SET tenant_org_id = 3;
+  -- Only what nobody has claimed. These used to be unqualified, which meant
+  -- the fixture quietly took every other workspace's client and every other
+  -- workspace's bench as soon as one existed - a second operator's rows
+  -- reparented onto the first. A seed that cannot represent two workspaces
+  -- cannot be used to check anything about two workspaces.
+  UPDATE orgs SET parent_org_id = 3 WHERE kind = 'client' AND parent_org_id IS NULL;
+  UPDATE instruments SET tenant_org_id = 3 WHERE tenant_org_id IS NULL;
   UPDATE eod_updates SET tenant_org_id = 3;
 
   -- A Stripe account in TEST MODE, so the portal's pay buttons render against
@@ -789,6 +812,7 @@ async function main() {
   await seed();
   console.log(`[dev:local] session cookie: authjs.session-token=devtoken (owner ${OWNER})`);
   console.log("[dev:local] ... stafftoken (Bill Reyes, staff at Sierra Spectra - not the owner)");
+  console.log("[dev:local] ... freetoken (Cass Ibarra, a shop on the free tier - see lib/plan)");
   const child = spawn("npx", ["next", "dev", "-p", PORT], {
     stdio: "inherit",
     env: {
