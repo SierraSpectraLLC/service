@@ -8,6 +8,7 @@ import { isStaffRole } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import { reimbursementPool } from "@/lib/expenseReports";
 import { needsApproval } from "@/lib/expensePolicy";
+import { paidMonths } from "@/lib/reportExportData";
 import { mayAdminPeople } from "@/lib/hr";
 import { listReportSubjects } from "@/app/actions";
 import { shopToday } from "@/lib/shopday";
@@ -80,6 +81,9 @@ export default async function ExpensesPage({ searchParams }: {
   // Empty for anybody who is not HR - the action refuses on the same rule, so
   // this only decides whether the control is drawn.
   const subjects = await listReportSubjects();
+  /* The months a bookkeeper's export would find anything in. Empty for anyone
+     who may not read everybody's claims, on the same rule the route enforces. */
+  const months = (await paidMonths(user)).slice(0, 12);
 
   const pool = reimbursementPool(expenseRows, { name: user.name, email: user.email })
     .map((e) => ({
@@ -128,6 +132,7 @@ export default async function ExpensesPage({ searchParams }: {
         subjects={subjects}
         me={user.name}
         openFor={openFor}
+        paidMonths={months}
         today={shopToday()}
         categories={categoryRows.map((c) => c.name)}
         workOrders={allWos.map((w) => ({

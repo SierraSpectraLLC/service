@@ -3038,6 +3038,66 @@ export const driveCache = pgTable("drive_cache", {
   computedAt: timestamp("computed_at").notNull().defaultNow(),
 }, (t) => [unique("drive_cache_member_site").on(t.memberEmail, t.siteId)]);
 
+/**
+ * A standing arrangement to reimburse somebody the same amount every month:
+ * the internet stipend, the phone allowance, the tool allowance.
+ *
+ * WHY THIS IS NOT PAYROLL, which is the whole reason the table exists. An
+ * engineer on a $35/month internet stipend is being paid back for something
+ * they bought, not paid for working - it is a business expense with their name
+ * on it, and running it through the payroll register would tax it as income,
+ * bury it in a wage line, and make it invisible to the person trying to work
+ * out what the shop spends on connectivity. So it flows through the
+ * reimbursement desk like every other out-of-pocket cost: rows on a report,
+ * paid with a reference, exportable to a bookkeeper as an expense.
+ *
+ * WHAT THE OWNER IS ACTUALLY DECIDING. Setting one of these up is a standing
+ * commitment of company money - which is why creating and changing them is the
+ * owner's alone, while HR reads them (they run the payout). The monthly claim
+ * that comes out the far end needs no further approval precisely because the
+ * approval happened here: $35, every month, for this person, until stopped.
+ *
+ * The schedule is the same arithmetic a retainer uses - see lib/recurring,
+ * which this deliberately reuses rather than reimplementing - so a stipend
+ * dated the 31st behaves in February the way a contract does.
+ */
+export const stipends = pgTable("stipends", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** Whose it is - a directory name, the same convention expense_reports.person uses. */
+  person: text("person").notNull(),
+  /** What it is called on the row it raises: "Internet stipend". */
+  label: text("label").notNull().default(""),
+  amountCents: integer("amount_cents").notNull().default(0),
+  /** Which expense category the raised row carries. Free text, like every kind. */
+  kind: text("kind").notNull().default("Other"),
+  /** 1 = monthly. Reused from the retainer cadence so quarterly is free. */
+  everyMonths: integer("every_months").notNull().default(1),
+  dayOfMonth: integer("day_of_month").notNull().default(1),
+  startsOn: text("starts_on").notNull().default(""),      // YYYY-MM-DD
+  /** Blank = runs until somebody stops it. */
+  endsOn: text("ends_on").notNull().default(""),
+  /**
+   * Paused rather than deleted is the normal way one of these ends: the rows
+   * it already raised are real money that was really paid, and deleting the
+   * arrangement would orphan the reason they exist.
+   */
+  active: boolean("active").notNull().default(true),
+  /**
+   * The last cycle actually raised. Written in the same breath as the expense
+   * row, and the pass refuses a cycle at or before it - so a job that runs
+   * twice raises nothing the second time by construction rather than by luck.
+   * The same discipline lib/recurringRun states at length.
+   */
+  lastOn: text("last_on").notNull().default(""),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("stipends_tenant_idx").on(t.tenantOrgId),
+  index("stipends_person_idx").on(t.person),
+]);
+
 export const expenseCategories = pgTable("expense_categories", {
   id: serial("id").primaryKey(),
   tenantOrgId: tenantStamp(),
@@ -3118,11 +3178,23 @@ export const expenses = pgTable("expenses", {
    * demoting an overnight to a day trip.
    */
   allowanceNights: integer("allowance_nights").notNull().default(0),
+  /**
+   * The standing arrangement that raised this row, for a stipend. Null for
+   * every receipt a person actually filed.
+   *
+   * This is the never-pay-twice guard as much as it is provenance: the pass
+   * asks whether a row already exists for (stipend, month) before it writes
+   * one, so a cron that fires twice - or a catch-up that overlaps a normal
+   * run - cannot reimburse the same $35 internet bill two months running under
+   * one month's date. Set null on delete: the payment outlives the arrangement.
+   */
+  stipendId: integer("stipend_id").references((): AnyPgColumn => stipends.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("expenses_wo_idx").on(t.workOrderId),
   index("expenses_report_idx").on(t.reportId),
   index("expenses_allowance_idx").on(t.allowanceState),
+  index("expenses_stipend_idx").on(t.stipendId),
 ]);
 
 /**
@@ -3182,6 +3254,16 @@ export const expenseReports = pgTable("expense_reports", {
    * because the column was set at creation and never touched again.
    */
   openedBy: text("opened_by").notNull().default(""),
+  /**
+   * Where this report came from. "" is somebody opening one by hand, which is
+   * every report until stipends existed; "stipend" is the monthly perks claim
+   * the recurring pass assembles.
+   *
+   * A column rather than a guess at the title, because the pass has to FIND
+   * this month's perks report to add the second stipend to it, and matching on
+   * a name an owner can rename is how a shop ends up with four of them.
+   */
+  source: text("source").notNull().default(""),
   submittedBy: text("submitted_by").notNull().default(""),
   submittedAt: timestamp("submitted_at").notNull().defaultNow(),
   /** Payout facts, written when it is paid. */

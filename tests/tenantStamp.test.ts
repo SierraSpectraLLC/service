@@ -37,6 +37,11 @@ const STAMPED = [
   // Perks are the payroll family: stamped for housekeeping, gated by
   // lib/payroll's employer-only rule rather than by the stamp.
   "perks",
+  // Standing monthly compensation, and the same family again: the stamp says
+  // whose workspace the arrangement belongs to, and lib/payroll decides who may
+  // read it. Missed when the table landed on main - both the DDL and this line
+  // were, which is what the completeness check below exists to catch.
+  "stipends",
 ];
 
 const walk = (dir: string): string[] =>

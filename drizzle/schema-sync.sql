@@ -3754,3 +3754,37 @@ CREATE INDEX IF NOT EXISTS "client_shares_invite_idx" ON "client_shares" ("invit
 -- happens on the hand-off acceptance path alone. See lib/plan.
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "plan" text NOT NULL DEFAULT '';
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "plan_since" text NOT NULL DEFAULT '';
+
+-- Standing monthly compensation - a phone allowance, a tool stipend - that is
+-- owed whether or not anybody files a claim, and the recurring pass that turns
+-- it into expense rows. Recovered on the merge of main into this branch: the
+-- table was added to schema.ts without its DDL, which meant it did not exist on
+-- any deployed database and /people read a table that was never created. The
+-- second such loss on a merge into main; check-schema-mirror is what catches it
+-- and it has to be run before a merge lands, not after.
+CREATE TABLE IF NOT EXISTS "stipends" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer REFERENCES "orgs"("id") ON DELETE SET NULL,
+  "person" text NOT NULL,
+  "label" text NOT NULL DEFAULT '',
+  "amount_cents" integer NOT NULL DEFAULT 0,
+  "kind" text NOT NULL DEFAULT 'Other',
+  "every_months" integer NOT NULL DEFAULT 1,
+  "day_of_month" integer NOT NULL DEFAULT 1,
+  "starts_on" text NOT NULL DEFAULT '',
+  "ends_on" text NOT NULL DEFAULT '',
+  "active" boolean NOT NULL DEFAULT true,
+  "last_on" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "stipends_tenant_idx" ON "stipends" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "stipends_person_idx" ON "stipends" ("person");
+
+-- The expense a stipend cycle raised, and the report the pass files it onto.
+-- expense_reports.source is a column rather than a guess at the title because
+-- the pass has to FIND this month's report to add the next stipend to it.
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "stipend_id" integer REFERENCES "stipends"("id") ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS "expenses_stipend_idx" ON "expenses" ("stipend_id");
+ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "source" text NOT NULL DEFAULT '';

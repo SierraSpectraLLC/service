@@ -463,6 +463,22 @@ export default function ExpenseReportDetail({
         )}
       </div>
 
+      {/* The accountant's copy, under the actions because it is what you do
+          WITH a claim rather than to it. Three formats because they are not a
+          superset of one another: the PDF is what gets attached to an email
+          (the claim, then its receipts on the pages after it), the CSV is what
+          gets imported, and the packet is the CSV plus the receipt files named
+          to match its rows. Plain links - the browser downloads them the way
+          it downloads everything else, and they work on a phone. */}
+      <Panel title="Send it to the bookkeeper"
+        hint="The claim and the paper behind it, in whichever shape your accountant asks for.">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <a className="btn sm" href={`/api/export/report/${report.id}?format=pdf`}>PDF with receipts</a>
+          <a className="btn sm" href={`/api/export/report/${report.id}?format=csv`}>CSV</a>
+          <a className="btn sm" href={`/api/export/report/${report.id}?format=zip`}>CSV + receipt files</a>
+        </div>
+      </Panel>
+
       {adding && (
         <Dialog open onClose={() => setAdding(false)} size="sm" title="New expense"
           context={busy || "One receipt, one row"}
