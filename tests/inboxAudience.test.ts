@@ -88,7 +88,10 @@ describe("the door behind the hidden switch", () => {
 
   it("filters both surfaces that render the list", () => {
     // The inbox, and the very first screen somebody ever sees.
-    expect(read("src/components/InboxPanel.tsx")).toMatch(/notifyKindsFor\(isStaff\)\.map/);
+    /* The switches left the inbox for /account/notifications - the preference
+       is not part of reading the mail, and the account menu's one word for it
+       used to open the letters. Same filter, its own room. */
+    expect(read("src/components/NotificationPrefs.tsx")).toMatch(/notifyKindsFor\(isStaff\)\.map/);
     expect(read("src/app/welcome/page.tsx")).toMatch(/notifyKindsFor\(isStaffRole\(user\.role\)\)/);
   });
 

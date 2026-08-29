@@ -373,11 +373,13 @@ describe("the reseller's own shape", () => {
   });
 
   it("gives a reseller a pipeline door and a lab a parts door", () => {
-    const layout = read("src/app/layout.tsx");
-    expect(layout).toMatch(/resells \? "Your pipeline" : "Your lab"/);
-    expect(layout).toMatch(/href: "\/listings", label: "Listings"/);
+    // The nav moved out of the layout and into one builder - see lib/nav. The
+    // shape it builds is the same shape; this is where it is decided now.
+    const nav = read("src/lib/nav.ts");
+    expect(nav).toMatch(/ctx\.resells \? "Your pipeline" : "Your lab"/);
+    expect(nav).toMatch(/href: "\/listings", label: "Listings"/);
     // The parts store does not vanish for a reseller; it moves one level down.
-    expect(layout).toMatch(/resells && isClientOrg \? \[\{ href: "\/store", label: "Parts" \}\]/);
+    expect(nav).toMatch(/ctx\.resells && ctx\.isClientOrg \? \[\{ href: "\/store", label: "Parts" \}\]/);
   });
 });
 
@@ -432,7 +434,9 @@ describe("what is an alert on a reseller's landing, and what is not", () => {
        person who switched would have got a pipeline nav over a lab page. One
        rule, read by all of them. */
     for (const f of [
-      "src/app/layout.tsx", "src/app/(dashboard)/page.tsx", "src/app/units/page.tsx",
+      // The shell reads it through lib/navData, which is the one place the
+      // nav's facts are gathered now.
+      "src/lib/navData.ts", "src/app/(dashboard)/page.tsx", "src/app/units/page.tsx",
     ]) {
       expect(read(f), f).toMatch(/resellerView\(/);
     }
@@ -486,10 +490,13 @@ describe("the roster a reseller could not reach", () => {
   });
 
   it("gives it a door without disturbing the primary five", () => {
-    const layout = read("src/app/layout.tsx");
-    expect(layout).toMatch(/href: "\/units", label: resells \? "All units" : "All instruments"/);
-    // The five stayed five: the roster lives in the account group.
-    expect(layout).toMatch(/\{ href: "\/", label: resells \? "Your pipeline" : "Your lab" \}/);
+    const nav = read("src/lib/nav.ts");
+    /* The roster is the client section's HUB now, not a row inside it: a
+       section is a place, and "everything you have" is the place. */
+    expect(nav).toMatch(/href: "\/units",/);
+    expect(nav).toMatch(/homeLabel: ctx\.resells \? "All units" : "All instruments"/);
+    // The primary row stayed the primary row: the roster is a section, not a door in it.
+    expect(nav).toMatch(/\{ href: "\/", label: ctx\.resells \? "Your pipeline" : "Your lab" \}/);
   });
 
   it("does not crush the id on a phone", () => {

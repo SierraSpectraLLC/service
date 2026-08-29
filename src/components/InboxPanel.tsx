@@ -2,10 +2,9 @@
 
 import Link from "next/link";
 import { useTransition } from "react";
-import { markNotificationRead, markAllNotificationsRead, setNotificationPref } from "@/app/actions";
-import { NOTIFY_KINDS, notifyKindsFor } from "@/lib/inbox";
-import DesktopAlerts from "@/components/DesktopAlerts";
-import { DataTable, Dot, FacetStrip, Legend, PageHead, Panel, Toolbar } from "@/components/ui";
+import { markNotificationRead, markAllNotificationsRead } from "@/app/actions";
+import { NOTIFY_KINDS } from "@/lib/inbox";
+import { DataTable, Dot, FacetStrip, Legend, PageHead, Toolbar } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 
 export type InboxItem = {
@@ -14,22 +13,21 @@ export type InboxItem = {
   read: boolean;
 };
 
-export default function InboxPanel({ items, prefs, filter, isStaff }: {
+/**
+ * The mail itself, and nothing else.
+ *
+ * The email switches used to sit under this list, which is how the account
+ * menu came to point "Notifications & email" at a page of letters. They are a
+ * preference, so they live in the account section now - see
+ * components/NotificationPrefs. This page is what the system has told you.
+ */
+export default function InboxPanel({ items, filter }: {
   items: InboxItem[];
-  prefs: { kind: string; emailOn: boolean }[];
   /** From the URL (?kind=, ?unread=1), so a filtered inbox is a link. */
   filter: { kind?: string; unread?: string };
-  /**
-   * Staff get every switch; a client gets only the kinds that can actually
-   * reach them. See notifyKindsFor - a switch that can never do anything is
-   * not a neutral extra row, it is a claim about this instance being read by
-   * somebody it was not written for.
-   */
-  isStaff: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const unread = items.filter((i) => !i.read).length;
-  const emailOn = (kind: string) => prefs.find((p) => p.kind === kind)?.emailOn ?? true;
   const kindLabel = (k: string) => NOTIFY_KINDS.find((x) => x.kind === k)?.label ?? k;
 
   const activeKind = filter.kind ?? "";
@@ -47,7 +45,7 @@ export default function InboxPanel({ items, prefs, filter, isStaff }: {
 
   return (
     <>
-      <PageHead title="Inbox"
+      <PageHead title="Inbox" sub="What the system has told you."
         actions={unread > 0 && (
           <button className="btn sm" disabled={pending}
             onClick={() => startTransition(async () => {
@@ -98,25 +96,12 @@ export default function InboxPanel({ items, prefs, filter, isStaff }: {
         empty="Nothing yet."
       />
       <Legend items={[{ tone: "info", label: "unread" }]} />
-
-      <DesktopAlerts />
-
-      <Panel title="Email preferences"
-        hint="Which kinds also email you.">
-        {notifyKindsFor(isStaff).map((k) => (
-          <label key={k.kind} className="t-body" style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", cursor: "pointer" }}>
-            <input type="checkbox" checked={emailOn(k.kind)} disabled={pending} className="check"
-              onChange={(e) => {
-                const on = e.target.checked;
-                startTransition(async () => {
-                  await setNotificationPref(k.kind, on);
-                  toast({ message: `${k.label} emails ${on ? "on" : "off"}` });
-                });
-              }} />
-            {k.label}
-          </label>
-        ))}
-      </Panel>
+      {/* Where the switches went. One line rather than the panel that used to
+          live here: the preference is not part of reading the mail. */}
+      <div className="mut t-small" style={{ marginTop: 12 }}>
+        Which of these also email you is set in{" "}
+        <Link href="/account/notifications">Account · Notifications</Link>.
+      </div>
     </>
   );
 }

@@ -9,6 +9,7 @@ import {
   PageHead, Panel, Pill, RowActions, SaveBar, SectionHead, Seg, Tabs, Toolbar, Id,
 } from "@/components/ui";
 import MobileNav from "@/components/MobileNav";
+import { buildNav } from "@/lib/nav";
 import SettingsNav from "@/components/SettingsNav";
 import type { Tone } from "@/lib/tones";
 
@@ -49,23 +50,12 @@ const NAV_FRAME_CSS = `
   .navframe .mnav-pane a { display: block; padding: 9px 18px; font-size: 14px; font-weight: 500; color: var(--ink); text-decoration: none; }
   .navframe .mnav-pane a.active { background: var(--t-info-bg); color: var(--navy); font-weight: 600; }
 
-  /* Sidebar and drilldown side by side, whatever the viewport. */
-  .navframe .settings-shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 12px 20px; padding: 12px; }
-  .navframe .settings-side { display: block; position: static; grid-column: 1; grid-row: 1 / span 2; }
-  .navframe .settings-shell > div { grid-column: 2; grid-row: 1; min-width: 0; }
-  .navframe .settings-mobnav {
-    display: block; grid-column: 2; grid-row: 2;
-    background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
-  }
-  .navframe .settings-mobnav > summary {
-    list-style: none; cursor: pointer; padding: 11px 14px;
-    font-size: 13.5px; font-weight: 600; color: var(--navy);
-    display: flex; justify-content: space-between; align-items: center;
-  }
-  .navframe .settings-mobnav nav { border-top: 1px solid var(--line); padding-bottom: 8px; }
+  /* The section rail, in its desktop form whatever the viewport - the app
+     swaps it for the sideways chip strip at 960px. */
+  .navframe .rail-body { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 12px 20px; padding: 12px; align-items: start; }
+  .navframe .rail { position: static; }
   @media (max-width: 639px) {
-    .navframe .settings-shell { grid-template-columns: minmax(0, 1fr); }
-    .navframe .settings-side, .navframe .settings-shell > div, .navframe .settings-mobnav { grid-column: 1; grid-row: auto; }
+    .navframe .rail-body { grid-template-columns: minmax(0, 1fr); }
   }
 `;
 
@@ -255,33 +245,15 @@ export default function DevUiGallery() {
       </div>
       <div className="navframe" id="nav-mobile">
         <div className="navframe-bar">
+          {/* The real builder, on a demo context - so the gallery cannot show
+              a drawer the app does not ship. See lib/nav. */}
           <MobileNav
-            tabs={[
-              { href: "/", label: "Today", icon: "home" },
-              { href: "/work", label: "Work", icon: "work" },
-              { href: "/assets", label: "Assets", icon: "assets" },
-              { href: "/inbox", label: "Inbox", icon: "inbox" },
-              { href: "/documents", label: "Library", icon: "library" },
-            ]}
-            links={[
-              { href: "/", label: "Dashboard" },
-              { href: "/work", label: "Work orders" },
-              { href: "/assets", label: "Assets" },
-              { href: "/stock", label: "Inventory" },
-            ]}
-            groups={[
-              { label: "Operations", items: [
-                { href: "/eod", label: "EOD update" }, { href: "/maintenance", label: "Maintenance" },
-                { href: "/money/purchasing", label: "Purchasing" }, { href: "/remote", label: "Remote support" },
-                { href: "/metrics", label: "Metrics" }, { href: "/archive", label: "Archived" },
-              ] },
-              { label: "Library", items: [
-                { href: "/settings/catalog", label: "Equipment catalog" }, { href: "/settings/parts", label: "Parts catalog" },
-                { href: "/documents", label: "Files" }, { href: "/gallery", label: "Gallery" },
-                { href: "/pdf", label: "PDF studio" }, { href: "/import", label: "Import spreadsheet" },
-              ] },
-            ]}
-            settingsHref="/settings"
+            nav={buildNav({
+              signedIn: true, isStaff: true, resells: false, isClientOrg: false, hasOrg: false,
+              modules: { eod: true, remote: true, sheetSync: true },
+              hasStock: true, orgRemoteOn: false, seesBooks: true, seesPayroll: true,
+              seesOwnMoney: true, adminsPeople: true, openDiffs: 3, settingsHref: "/settings",
+            })}
             userName="Rita Vasquez" orgName="Sierra Spectral" />
           <b style={{ letterSpacing: "-0.2px" }}>RIDGELINE</b>
           <span className="t-meta" style={{ opacity: 0.75 }}>burger opens the drawer inline here</span>
@@ -289,17 +261,17 @@ export default function DevUiGallery() {
       </div>
 
       <div className="mut t-small" style={{ margin: "0 0 4px 2px" }}>
-        SettingsNav: the sidebar is the desktop variant; the drilldown beneath the panel is the
-        mobile variant, forced visible. The real page shows one or the other, split at 900px.
+        SettingsNav: the section rail, in its desktop form. Settings renders the same
+        `.rail` every other section does; below 960px it becomes one sideways chip strip.
       </div>
       <div className="navframe" id="nav-settings">
-        <div className="settings-shell">
+        <div className="rail-body">
           <SettingsNav isOwner isPlatform={false} />
-          <div style={{ minWidth: 0 }}>
-            <Panel title="Equipment catalog" hint="The page the sidebar frames - fixture body.">
-              <div className="mut t-small">Sidebar from 900px up; the drilldown below is the phone variant.</div>
+          <main className="rail-main">
+            <Panel title="Equipment catalog" hint="The page the rail frames - fixture body.">
+              <div className="mut t-small">One secondary-nav pattern, for Financial, Operations, Library, Settings and Account alike.</div>
             </Panel>
-          </div>
+          </main>
         </div>
       </div>
 

@@ -11,6 +11,8 @@ import { getSystemLabels } from "@/lib/systemLabel";
 import { findOutsideMatches } from "@/lib/serialLookup";
 import { MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { alnum, searchTerms } from "@/lib/search";
+import { navIndex } from "@/lib/nav";
+import { navTree } from "@/lib/navData";
 import SearchBox from "@/components/SearchBox";
 import { RequestAccessCard, CreateSystemForm } from "@/components/LookupPanels";
 import { DataTable, FacetStrip, PageHead, Toolbar } from "@/components/ui";
@@ -174,6 +176,25 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       ...auditRows.map((a) => ({ id: a.id, group: "History", title: a.action.slice(0, 120), sub: a.actor.split("@")[0], ...place(a) })),
     ];
   }
+
+  /*
+   * PLACES, from the nav tree - the command-palette index, for free.
+   *
+   * This box searched records and only records, so typing "parity" found every
+   * row that happened to mention the word and never the room called Sheet
+   * parity. One tree means one index: whatever this reader's nav contains is
+   * what they can find here, with the same gates, because it IS their nav.
+   * They lead the results - somebody typing the name of a page wants the page.
+   */
+  const places = terms.length
+    ? navIndex(await navTree())
+        .filter((p) => terms.every((t) => `${p.label} ${p.section}`.toLowerCase().includes(t.toLowerCase())))
+        .map((p, i) => ({
+          id: -1 - i, group: "Places", title: p.label,
+          sub: p.section, href: p.href, where: p.section || "Navigation",
+        }))
+    : [];
+  hits = [...places, ...hits];
 
   const groups = [...new Set(hits.map((h) => h.group))];
   // The cross-workspace half: an exact serial elsewhere on the platform.

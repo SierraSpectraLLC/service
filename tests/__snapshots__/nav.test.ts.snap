@@ -1,0 +1,258 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildNav, per persona > builds one tree for a HR with payroll 1`] = `
+{
+  "primary": [
+    "Today → /",
+    "Work orders → /work",
+    "Assets → /assets",
+    "Inventory → /stock",
+  ],
+  "sections": [
+    {
+      "Financial → /money": [
+        "Financial home (home)",
+        "Purchasing → /money/purchasing",
+        "Reimbursements → /money/reimbursements",
+        "Payroll → /money/payroll",
+      ],
+    },
+    {
+      "Operations → /ops": [
+        "Operations home (home)",
+        "EOD update → /eod",
+        "Calendar → /calendar",
+        "Maintenance → /maintenance",
+        "Service companies → /network",
+        "Remote support → /remote",
+        "Metrics → /metrics",
+        "Archived → /archive",
+      ],
+    },
+    {
+      "Library → /library": [
+        "Library home (home)",
+        "Equipment catalog → /settings/catalog",
+        "Parts catalog → /settings/parts",
+        "Documents → /documents",
+        "Gallery → /gallery",
+        "PDF studio → /pdf",
+        "Import spreadsheet → /import",
+      ],
+    },
+    {
+      "Account → /account": [
+        "Account home (home)",
+        "Profile → /account/profile",
+        "Sign-in & security → /account/security",
+        "Notifications → /account/notifications",
+        "My pay → /account/pay",
+      ],
+    },
+  ],
+  "tabs": [
+    "Today → /",
+    "Work orders → /work",
+    "Assets → /assets",
+    "Inbox → /inbox",
+    "Library → /library",
+  ],
+}
+`;
+
+exports[`buildNav, per persona > builds one tree for a client lab 1`] = `
+{
+  "primary": [
+    "Your lab → /",
+    "Requests → /work",
+    "Approvals → /orders",
+    "Your account → /owner",
+    "Parts → /store",
+    "Documents → /documents",
+  ],
+  "sections": [
+    {
+      "Your equipment → /units": [
+        "All instruments (home)",
+        "Your inventory → /stock",
+        "Remote support → /remote",
+      ],
+    },
+    {
+      "Account → /account": [
+        "Account home (home)",
+        "Profile → /account/profile",
+        "Sign-in & security → /account/security",
+        "Notifications → /account/notifications",
+        "Organization settings → /settings/organizations/12",
+      ],
+    },
+  ],
+  "tabs": [
+    "Your lab → /",
+    "Requests → /work",
+    "Approvals → /orders",
+    "Parts → /store",
+    "Documents → /documents",
+  ],
+}
+`;
+
+exports[`buildNav, per persona > builds one tree for a client reseller 1`] = `
+{
+  "primary": [
+    "Your pipeline → /",
+    "Requests → /work",
+    "Approvals → /orders",
+    "Listings → /listings",
+    "Documents → /documents",
+  ],
+  "sections": [
+    {
+      "Your equipment → /units": [
+        "All units (home)",
+        "Parts → /store",
+      ],
+    },
+    {
+      "Account → /account": [
+        "Account home (home)",
+        "Profile → /account/profile",
+        "Sign-in & security → /account/security",
+        "Notifications → /account/notifications",
+        "Organization settings → /settings/organizations/12",
+      ],
+    },
+  ],
+  "tabs": [
+    "Your pipeline → /",
+    "Requests → /work",
+    "Approvals → /orders",
+    "Listings → /listings",
+    "Documents → /documents",
+  ],
+}
+`;
+
+exports[`buildNav, per persona > builds one tree for a staff engineer 1`] = `
+{
+  "primary": [
+    "Today → /",
+    "Work orders → /work",
+    "Assets → /assets",
+    "Inventory → /stock",
+  ],
+  "sections": [
+    {
+      "Operations → /ops": [
+        "Operations home (home)",
+        "EOD update → /eod",
+        "Calendar → /calendar",
+        "Maintenance → /maintenance",
+        "Service companies → /network",
+        "Purchasing → /money/purchasing",
+        "Reimbursements → /money/reimbursements",
+        "Remote support → /remote",
+        "Metrics → /metrics",
+        "Archived → /archive",
+      ],
+    },
+    {
+      "Library → /library": [
+        "Library home (home)",
+        "Equipment catalog → /settings/catalog",
+        "Parts catalog → /settings/parts",
+        "Documents → /documents",
+        "Gallery → /gallery",
+        "PDF studio → /pdf",
+        "Import spreadsheet → /import",
+      ],
+    },
+    {
+      "Account → /account": [
+        "Account home (home)",
+        "Profile → /account/profile",
+        "Sign-in & security → /account/security",
+        "Notifications → /account/notifications",
+        "My pay → /account/pay",
+      ],
+    },
+  ],
+  "tabs": [
+    "Today → /",
+    "Work orders → /work",
+    "Assets → /assets",
+    "Inbox → /inbox",
+    "Library → /library",
+  ],
+}
+`;
+
+exports[`buildNav, per persona > builds one tree for a staff owner 1`] = `
+{
+  "primary": [
+    "Today → /",
+    "Work orders → /work",
+    "Assets → /assets",
+    "Inventory → /stock",
+  ],
+  "sections": [
+    {
+      "Financial → /money": [
+        "Financial home (home)",
+        "Quotes → /money/quotes",
+        "Invoices → /money/invoices",
+        "Collections → /money/collections",
+        "Contracts → /money/contracts",
+        "Purchasing → /money/purchasing",
+        "Reimbursements → /money/reimbursements",
+        "Overhead → /money/expenses",
+        "Payroll → /money/payroll",
+        "Job costing → /money/costing",
+      ],
+    },
+    {
+      "Operations → /ops": [
+        "Operations home (home)",
+        "EOD update → /eod",
+        "Calendar → /calendar",
+        "Maintenance → /maintenance",
+        "Service companies → /network",
+        "People → /people",
+        "Remote support → /remote",
+        "Metrics → /metrics",
+        "Sheet parity [3] → /parity",
+        "Archived → /archive",
+      ],
+    },
+    {
+      "Library → /library": [
+        "Library home (home)",
+        "Equipment catalog → /settings/catalog",
+        "Parts catalog → /settings/parts",
+        "Documents → /documents",
+        "Gallery → /gallery",
+        "PDF studio → /pdf",
+        "Import spreadsheet → /import",
+      ],
+    },
+    {
+      "Account → /account": [
+        "Account home (home)",
+        "Profile → /account/profile",
+        "Sign-in & security → /account/security",
+        "Notifications → /account/notifications",
+        "My pay → /account/pay",
+        "Organization settings → /settings",
+      ],
+    },
+  ],
+  "tabs": [
+    "Today → /",
+    "Work orders → /work",
+    "Assets → /assets",
+    "Inbox → /inbox",
+    "Library → /library",
+  ],
+}
+`;

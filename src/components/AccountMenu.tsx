@@ -14,14 +14,23 @@ import Dropdown from "@/components/Dropdown";
  * The initials disc is the affordance. It also answers a question the old header
  * couldn't: WHICH account, which matters on a shared bench machine.
  */
-export default function AccountMenu({ name, email, orgName, roleLabel, settingsHref, viewAs, viewSwitch }: {
+export default function AccountMenu({ name, email, orgName, roleLabel, orgSettingsHref, viewAs, viewSwitch }: {
   name: string;
   email: string;
   /** The organization whose workspace this is, if any. */
   orgName: string;
   roleLabel: string;
-  /** Where this person's own settings live - null when they have none. */
-  settingsHref: string | null;
+  /**
+   * The COMPANY's settings - null when this person administers none.
+   *
+   * It is no longer what "Settings" in this menu means. That word pointed
+   * here, at pages about the catalog and the tenants and the billing, so a
+   * person looking for their own name or their own password landed in the
+   * organization's configuration and found neither. Their own settings are
+   * /account; this is a room inside it, and stays in the menu as its own
+   * named link for whoever lives there.
+   */
+  orgSettingsHref: string | null;
   /** The owner's persona switcher, rendered inside the menu. */
   viewAs?: React.ReactNode;
   /** Which half of the app I work in, where my company does both. */
@@ -39,9 +48,14 @@ export default function AccountMenu({ name, email, orgName, roleLabel, settingsH
           {orgName ? `${orgName} · ${roleLabel}` : roleLabel}
         </div>
       </div>
-      {settingsHref && <Link href={settingsHref}>Settings</Link>}
-      <Link href="/inbox">Notifications &amp; email</Link>
-      <Link href="/documents">My files</Link>
+      <Link href="/account">Account</Link>
+      {/* Preferences, not mail. "Notifications & email" used to point at the
+          inbox, which is where messages LAND - the switches that decide which
+          ones are sent had nowhere to live at all. */}
+      <Link href="/account/notifications">Notifications</Link>
+      <Link href="/inbox">Inbox</Link>
+      <Link href="/documents">Documents</Link>
+      {orgSettingsHref && <Link href={orgSettingsHref}>Organization settings</Link>}
       {/* The persona switcher opens a second step inside the menu, so its clicks
           must not reach the panel's close-on-choose handler. */}
       {viewAs && <div className="menu-sub" onClick={(e) => e.stopPropagation()}>{viewAs}</div>}

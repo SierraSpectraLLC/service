@@ -4,10 +4,12 @@ import { maySeeTrail } from "@/lib/trail";
 import SettingsNav, { SettingsCrumb } from "@/components/SettingsNav";
 
 /**
- * The settings shell: one sidebar (drilldown on a phone) and one breadcrumb
- * for every page under /settings, so no settings page carries its own tab
- * row again. Pages keep their own auth guards - this only draws the frame,
- * and draws none at all for a signed-out request on its way to /login.
+ * The settings shell: the section rail and one breadcrumb for every page under
+ * /settings, so no settings page carries its own tab row again. The frame is
+ * the same `.rail-body` the financial section uses - settings stopped being
+ * its own third navigation pattern. Pages keep their own auth guards; this
+ * only draws the frame, and draws none at all for a signed-out request on its
+ * way to /login.
  */
 export default async function SettingsLayout({ children }: { children: React.ReactNode }) {
   const user = await currentUser();
@@ -17,13 +19,13 @@ export default async function SettingsLayout({ children }: { children: React.Rea
 
   return (
     <div className="container settings">
-      <div className="settings-shell">
+      <div className="rail-body">
         <SettingsNav isOwner={isOwner} isPlatform={isPlatform}
           isTrailAdmin={maySeeTrail(user?.email)} />
-        <div className="settings-main">
+        <main className="rail-main">
           <SettingsCrumb />
           {children}
-        </div>
+        </main>
       </div>
     </div>
   );
