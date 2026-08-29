@@ -5,9 +5,10 @@
 // is nowhere to put a price - and these hold the composer to it.
 import { describe, expect, it } from "vitest";
 import {
-  blindSummary, freeTag, identifyingBits, isOpen, mayAnswerCounter, mayCounter,
-  mayDecide, mayWithdraw, noteLeaks, parsePayload, provenanceLine, redactPayload,
-  shareProblems, stateOf, summarize, SHARE_VERSION, type SharePayload,
+  blindSummary, freeTag, identifyingBits, inventoryLines, inventoryOf, isOpen,
+  mayAnswerCounter, mayCounter, mayDecide, mayWithdraw, noteLeaks, parsePayload,
+  provenanceLine, recordLines, redactPayload, shareProblems, stateOf, summarize,
+  SHARE_VERSION, type SharePayload,
 } from "@/lib/clientShare";
 
 const PAYLOAD: SharePayload = {
@@ -28,6 +29,33 @@ const PAYLOAD: SharePayload = {
   ],
   from: { operator: "Sierra Spectra", by: "joe@sierra.test", on: "2026-08-27" },
   note: "They asked about the Alameda GCs.",
+};
+
+/** The same client with the whole record on it, and the sender's opt-in taken. */
+const PRICED: SharePayload = {
+  ...PAYLOAD,
+  pms: [
+    { sourceRef: "EP-001", moduleIndex: null, title: "Annual PM", everyDays: 365,
+      nextDue: "2026-11-02", lastDone: "2025-11-02" },
+    // On the mass spec itself rather than on the system around it.
+    { sourceRef: "EP-001", moduleIndex: 0, title: "Quarterly source clean", everyDays: 90,
+      nextDue: "2026-09-14", lastDone: "2026-06-16" },
+  ],
+  parts: [
+    { sourceRef: "EP-001", name: "Roughing pump oil", partNumber: "6040-0855", qty: "2", installedAt: "2026-03-04" },
+  ],
+  refs: [
+    { assetType: "Mass Spec", model: "6495C", kind: "note", title: "Rebuild the roughing pump",
+      url: "/api/files/91", body: "Emery's unit sits behind the bench - pull the left panel first." },
+  ],
+  pricing: {
+    years: [
+      { year: "2025", billedCents: 4800000, visits: 11 },
+      { year: "2024", billedCents: 3910000, visits: 9 },
+    ],
+    laborRateCents: 19500,
+    note: "",
+  },
 };
 
 describe("what a handover is", () => {
@@ -53,18 +81,67 @@ describe("what a handover is", () => {
 });
 
 describe("what must never cross", () => {
-  it("has no field for money at all", () => {
-    /*
-     * The type is the guard, not the renderer: there is nowhere to put a
-     * price, so no later edit can add one without changing SharePayload and
-     * meeting the comment above it. What a client pays us is ours and theirs.
-     */
+  /*
+   * THIS TEST USED TO SAY "has no field for money at all", AND IT WAS RIGHT.
+   *
+   * The rule was that the type is the guard: there was nowhere to put a price,
+   * so no later edit could add one without changing SharePayload and meeting
+   * the comment above it. That rule has been deliberately broken once, and
+   * this is the record of why and how far.
+   *
+   * WHY. A referral and an account SALE are different acts. A shop buying a
+   * book of business cannot price the work without knowing what the client is
+   * used to paying; withholding it does not protect the client, it just makes
+   * the first quote wrong and the relationship start badly. So one summary may
+   * travel - see SharedPricing.
+   *
+   * HOW FAR, which is the part this test now pins:
+   *   - it is OPTIONAL and absent unless the sender ticked a box;
+   *   - it is a per-year SUMMARY and a rate, never a document, never a line
+   *     item, never what they paid late or whether they paid at all;
+   *   - it is zeroed by redactPayload, so figures never reach a stranger;
+   *   - and nothing else in the payload gained a money field.
+   */
+  it("keeps every money field out except the one summary, by name", () => {
     const json = JSON.stringify(PAYLOAD);
     expect(json).not.toContain("$");
     for (const k of ["cost", "price", "rate", "invoice", "agreement", "allowance"]) {
       expect(Object.keys(PAYLOAD)).not.toContain(k);
       expect(Object.keys(PAYLOAD.systems[0])).not.toContain(k);
     }
+    // The default really is nothing: a payload composed without the opt-in has
+    // no pricing key at all, not a zeroed one.
+    expect(PAYLOAD.pricing).toBeUndefined();
+    // And the parts history - the one place a cost would be natural and
+    // useful - still has nowhere to put one.
+    expect(Object.keys(PRICED.parts![0])).not.toContain("cost");
+    expect(Object.keys(PRICED.parts![0])).not.toContain("costCents");
+  });
+
+  it("holds the figures back from anybody who has not accepted", () => {
+    const blind = redactPayload(PRICED);
+    // The SHAPE survives - "three years of billing behind it" is exactly the
+    // thing worth knowing when deciding whether to take an account on.
+    expect(blind.pricing?.years.map((y) => y.year)).toEqual(["2025", "2024"]);
+    // The figures do not.
+    expect(blind.pricing?.years.every((y) => y.billedCents === 0 && y.visits === 0)).toBe(true);
+    expect(blind.pricing?.laborRateCents).toBe(0);
+    expect(JSON.stringify(blind)).not.toContain("4800000");
+    expect(JSON.stringify(blind)).not.toContain("19500");
+  });
+
+  it("hands a stranger a reference's label and not its contents", () => {
+    /*
+     * The line is free prose against structured labels. "Annual PM" gives
+     * nothing away; the BODY of a field note is somebody typing, and somebody
+     * typing eventually types the customer's name. The url goes too - it is a
+     * live link to the sender's own material.
+     */
+    const blind = redactPayload(PRICED);
+    expect(blind.refs![0].title).toBe("Rebuild the roughing pump");
+    expect(blind.refs![0].url).toBe("");
+    expect(blind.refs![0].body).toBe("");
+    expect(JSON.stringify(blind)).not.toContain("Emery");
   });
 
   it("survives a payload that has gone bad without half-applying it", () => {
@@ -75,8 +152,77 @@ describe("what must never cross", () => {
     expect(parsePayload("[1,2,3]")?.systems).toEqual([]);
   });
 
-  it("round-trips a real one", () => {
-    expect(parsePayload(JSON.stringify(PAYLOAD))).toEqual(PAYLOAD);
+  it("round-trips a real one, whole record and all", () => {
+    expect(parsePayload(JSON.stringify(PRICED))).toEqual(PRICED);
+  });
+
+  it("reads a snapshot frozen before the record existed", () => {
+    /*
+     * A payload sits in client_shares until somebody answers, however long
+     * they take, and what they approve is what they get - so an offer written
+     * last month has to still parse today. The optional halves come back as
+     * empty lists rather than missing keys, which is what lets every reader
+     * treat them the same way without a null check apiece.
+     */
+    const old = parsePayload(JSON.stringify(PAYLOAD));
+    expect(old).toEqual({ ...PAYLOAD, pms: [], parts: [], refs: [], pricing: undefined });
+    expect(old?.systems).toEqual(PAYLOAD.systems);
+  });
+});
+
+/*
+ * WHAT AN OFFER MAY ADVERTISE.
+ *
+ * The counts are the pitch on the hand-off page - the reason a shop with no
+ * account opens the link at all - so the one property that matters is that
+ * they are honest. Every figure here has to be something materialize actually
+ * writes, and something that survives blinding, or the page is either lying to
+ * a stranger or leaking to one.
+ */
+describe("the inventory an offer advertises", () => {
+  it("counts the whole record, not just the machines", () => {
+    expect(inventoryOf(PRICED)).toEqual({
+      systems: 2, sites: 2, modules: 1, pms: 2, parts: 1, refs: 1, pricingYears: 2,
+    });
+  });
+
+  it("survives blinding, every figure of it", () => {
+    // The guarantee behind the pitch: a stranger is shown the same counts the
+    // sender sees, because redaction rewrites rows and never drops one.
+    expect(inventoryOf(redactPayload(PRICED))).toEqual(inventoryOf(PRICED));
+  });
+
+  it("reads back an old payload without pretending it had nothing", () => {
+    // pms, parts, refs and pricing are all optional - a snapshot frozen before
+    // they existed still parses, and counts as zero rather than throwing.
+    const inv = inventoryOf(PAYLOAD);
+    expect(inv.systems).toBe(2);
+    expect([inv.pms, inv.parts, inv.refs, inv.pricingYears]).toEqual([0, 0, 0, 0]);
+  });
+
+  it("drops the zeroes instead of printing them", () => {
+    /*
+     * "0 maintenance schedules" is an argument against taking the offer, and
+     * printing it beside four real numbers makes the whole list read as a form
+     * somebody half-filled.
+     */
+    expect(inventoryLines(inventoryOf(PAYLOAD))).toEqual(["2 systems", "1 module on them"]);
+    expect(recordLines(inventoryOf(PAYLOAD))).toEqual([]);
+  });
+
+  it("says the record in the words somebody taking it on would use", () => {
+    expect(recordLines(inventoryOf(PRICED))).toEqual([
+      "2 maintenance schedules",
+      "1 part on the history",
+      "1 manual and field note",
+      "2 years of what they have been charged",
+    ]);
+    expect(inventoryLines(inventoryOf(PRICED))[0]).toBe("2 systems");
+  });
+
+  it("counts one of a thing as one", () => {
+    const one = inventoryOf({ ...PAYLOAD, systems: [PAYLOAD.systems[0]], sites: [] });
+    expect(inventoryLines(one)).toEqual(["1 system", "1 module on them"]);
   });
 });
 

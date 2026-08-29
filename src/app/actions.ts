@@ -167,13 +167,13 @@ import {
 } from "@/lib/fleetBrief";
 import { fleetRowsFor, scopeProblem } from "@/lib/fleetBriefData";
 import {
-  blindSummary, mayAnswerCounter, mayCounter, mayDecide, mayWithdraw, noteLeaks,
-  parsePayload, shareProblems, summarize, SHARE_LABEL,
+  blindSummary, inventoryOf, mayAnswerCounter, mayCounter, mayDecide, mayWithdraw, noteLeaks,
+  parsePayload, recordLines, redactPayload, shareProblems, summarize, SHARE_LABEL,
 } from "@/lib/clientShare";
 import {
   companyProblems, HANDOFF_DAYS, inviteOpen, inviteState, looksLikeToken,
 } from "@/lib/handoff";
-import { composePayload, materialize } from "@/lib/clientShareData";
+import { composePayload, composePricing, materialize } from "@/lib/clientShareData";
 import {
   accruedCents, feeStanding, outstandingCents, resolveChoice, termsLine,
   feeLine, termsProblems, windowEnd, type FeeTerms,
@@ -17074,7 +17074,7 @@ export async function unlinkProvider(providerOrgId: number): Promise<{ error?: s
  * exactly what they get, however long they take.
  */
 export async function shareClient(orgId: number, data: {
-  toOrgIds: number[]; note: string; terms?: FeeTerms; blind?: boolean;
+  toOrgIds: number[]; note: string; terms?: FeeTerms; blind?: boolean; pricing?: boolean;
 }): Promise<{ error?: string; sent?: number }> {
   const u = await requireStaff();
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
@@ -17105,6 +17105,18 @@ export async function shareClient(orgId: number, data: {
     by: u.email, on: shopToday(), note: data.note,
   });
   if (!payload) return { error: "Not found" };
+  /*
+   * The one money field in the payload, and it travels only because somebody
+   * ticked a box. Everything else here is equipment - facts about machines,
+   * which belong to whoever services them next - and what a client has been
+   * charged is not that. See SharedPricing in lib/clientShare, and note that
+   * redactPayload zeroes the figures, so a blind recipient learns that a
+   * billing history exists and over how long and nothing more.
+   */
+  if (data.pricing) {
+    const pricing = await composePricing({ orgId, tenantOrgId: tenant });
+    if (pricing) payload.pricing = pricing;
+  }
   const problems = shareProblems({ payload, toOrgId: picked[0], fromTenantOrgId: tenant });
   if (problems.length) return { error: problems[0] };
 
@@ -17203,7 +17215,7 @@ export async function shareClient(orgId: number, data: {
  * somebody who may simply read it and close the tab.
  */
 export async function inviteHandoff(orgId: number, data: {
-  email: string; note: string; terms?: FeeTerms;
+  email: string; note: string; terms?: FeeTerms; pricing?: boolean;
 }): Promise<{ error?: string; token?: string }> {
   const u = await requireStaff();
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
@@ -17227,6 +17239,12 @@ export async function inviteHandoff(orgId: number, data: {
     by: u.email, on: shopToday(), note: data.note,
   });
   if (!payload) return { error: "Not found" };
+  /* As in shareClient: off unless asked for, and blinded out of the page a
+     stranger reads. See SharedPricing in lib/clientShare. */
+  if (data.pricing) {
+    const pricing = await composePricing({ orgId, tenantOrgId: tenant });
+    if (pricing) payload.pricing = pricing;
+  }
   const problems = shareProblems({ payload, toOrgId: 0, fromTenantOrgId: tenant });
   if (problems.length) return { error: problems[0] };
 
@@ -17268,6 +17286,10 @@ export async function inviteHandoff(orgId: number, data: {
     to,
     fromName: brand.operatorName || brand.name,
     summary: blindSummary(payload),
+    // Counted off the REDACTED payload for the same reason the page is: a
+    // count survives blinding, and this way the email can never say more than
+    // the page it links to.
+    record: recordLines(inventoryOf(redactPayload(payload))),
     terms: terms.kind === "none" ? "" : termsLine(terms, formatCents),
     note: data.note,
     url: `${appUrl()}/handoff/${token}`,

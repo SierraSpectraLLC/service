@@ -2,17 +2,103 @@
 // The rules are lib/clientShare and stay pure; this is the fetching and the
 // one write that crosses a workspace boundary in the whole application.
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, or } from "drizzle-orm";
 import { db } from "@/db";
-import { assets, clientShares, instruments, orgSites, orgs, providerProfiles } from "@/db/schema";
+import {
+  assets, catalogRefs, clientShares, instruments, invoiceLines, invoices, orgSites, orgs,
+  parts, pmSchedules, providerProfiles,
+} from "@/db/schema";
 import { forTenant } from "@/lib/tenancy";
 import { siteLabel } from "@/lib/sites";
+import { refsForUnits } from "@/lib/catalogRefs";
+import { isPublishable } from "@/lib/provenance";
 import {
   freeTag, parsePayload, provenanceLine, redactPayload, SHARE_VERSION,
-  type SharePayload, type SharedSite, type SharedSystem,
+  type SharePayload, type SharedPart, type SharedPm, type SharedPricing, type SharedRef,
+  type SharedSite, type SharedSystem,
 } from "@/lib/clientShare";
 import type { ProviderListing } from "@/lib/providerDirectory";
 import type { FeeTerms } from "@/lib/referral";
+
+/**
+ * WHAT THIS ACCOUNT HAS BILLED, when the sender chose to send it.
+ *
+ * Read straight off the sender's own invoices and reduced to a summary before
+ * it leaves: a total and a visit count per calendar year, plus the hour rate
+ * that appears most often on labour lines. No documents, no line items, no
+ * dates money arrived, nothing about whether they pay late - see SharedPricing
+ * in lib/clientShare for why this is the one money field in the payload and
+ * what it is deliberately not.
+ *
+ * Drafts and voids are left out for the reason lib/referralData gives: neither
+ * is money anybody asked for, and an unsent draft in a sale figure is a number
+ * the buyer would price against and never see again.
+ */
+export async function composePricing(opts: {
+  orgId: number;
+  tenantOrgId: number | null;
+}): Promise<SharedPricing | null> {
+  if (opts.tenantOrgId === null) return null;
+  const inv = await db.select({
+    id: invoices.id, issuedOn: invoices.issuedOn, workOrderId: invoices.workOrderId,
+  }).from(invoices).where(and(
+    eq(invoices.tenantOrgId, opts.tenantOrgId),
+    eq(invoices.orgId, opts.orgId),
+    ne(invoices.status, "draft"),
+    ne(invoices.status, "void"),
+  ));
+  const sent = inv.filter((r) => r.issuedOn.length >= 4);
+  if (!sent.length) return null;
+
+  const lines = await db.select({
+    invoiceId: invoiceLines.invoiceId, kind: invoiceLines.kind, qty: invoiceLines.qty,
+    unitCents: invoiceLines.unitCents, covered: invoiceLines.covered,
+  }).from(invoiceLines).where(inArray(invoiceLines.invoiceId, sent.map((r) => r.id)));
+
+  // The same arithmetic an invoice total uses - qty is thousandths, a covered
+  // line prices at zero because the contract already paid for it.
+  const totalOf = new Map<number, number>();
+  for (const l of lines) {
+    const add = l.covered ? 0 : Math.round((l.qty / 1000) * l.unitCents);
+    totalOf.set(l.invoiceId, (totalOf.get(l.invoiceId) ?? 0) + add);
+  }
+
+  const byYear = new Map<string, { billedCents: number; visits: Set<string> }>();
+  for (const r of sent) {
+    const y = r.issuedOn.slice(0, 4);
+    const bucket = byYear.get(y) ?? { billedCents: 0, visits: new Set<string>() };
+    bucket.billedCents += totalOf.get(r.id) ?? 0;
+    // A visit is a job, not a bill: several invoices against one work order are
+    // one trip, and an invoice with no work order behind it is counted once on
+    // its own. Getting this wrong flatters the account, which is the direction
+    // that costs the buyer money.
+    bucket.visits.add(r.workOrderId !== null ? `w${r.workOrderId}` : `i${r.id}`);
+    byYear.set(y, bucket);
+  }
+
+  /*
+   * The rate somebody would quote against: the labour price that shows up on
+   * the most lines, not the average and not the highest. An average is dragged
+   * around by one long warranty job at zero, and the highest is the emergency
+   * call-out nobody is charged twice a year.
+   */
+  const seen = new Map<number, number>();
+  for (const l of lines) {
+    if (l.kind !== "labor" || l.unitCents <= 0) continue;
+    seen.set(l.unitCents, (seen.get(l.unitCents) ?? 0) + 1);
+  }
+  const laborRateCents = [...seen.entries()]
+    .sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0] ?? 0;
+
+  return {
+    years: [...byYear.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .slice(0, 20)
+      .map(([year, v]) => ({ year, billedCents: v.billedCents, visits: v.visits.size })),
+    laborRateCents,
+    note: "",
+  };
+}
 
 /**
  * The snapshot, taken now.
@@ -50,6 +136,7 @@ export async function composePayload(opts: {
       .where(and(eq(orgSites.orgId, opts.orgId), forTenant(orgSites.tenantOrgId, opts.tenantOrgId))),
     rows.length
       ? db.select({
+          id: assets.id,
           instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model,
           serial: assets.serial, manufacturer: assets.manufacturer, sortOrder: assets.sortOrder,
         }).from(assets).where(inArray(assets.instrumentId, rows.map((r) => r.id)))
@@ -78,10 +165,122 @@ export async function composePayload(opts: {
     })),
   }));
 
+  // The rest of the record. Everything below is keyed to the fleet we just
+  // read, which is already scoped on owner AND tenant - so a part cannot
+  // arrive from a machine this caller was not allowed to see.
+  const instIds = rows.map((r) => r.id);
+  const tagOf = new Map(rows.map((r) => [r.id, r.externalId]));
+  /*
+   * Every module, by id, to the machine it is on and its position in that
+   * machine's list - the same order composePayload emits them in below and the
+   * same order materialize writes them in. It is what lets a schedule filed on
+   * the PUMP travel as a schedule on the pump.
+   */
+  const moduleAt = new Map<number, { instrumentId: number; index: number }>();
+  for (const r of rows) {
+    assetRows.filter((a) => a.instrumentId === r.id)
+      .forEach((a, index) => moduleAt.set(a.id, { instrumentId: r.id, index }));
+  }
+  const assetIds = [...moduleAt.keys()];
+
+  const [pmRows, partRows, refRowsAll] = await Promise.all([
+    /*
+     * Scoped on the FLEET, not on the stamp. A schedule hangs off a system or
+     * a module, and a record hanging off one of those takes that record's
+     * tenant - the rule tests/tenantStamp spells out - so the instrument list
+     * above, which is itself scoped on owner AND tenant, is the scope here.
+     * Reading the stamp as well would be stricter in appearance and wrong in
+     * practice: rows written before pm_schedules carried a stamp have a null
+     * in that column, and a null is not a scope - it would silently drop real
+     * maintenance out of a hand-off the page had already advertised.
+     */
+    instIds.length
+      ? db.select({
+          instrumentId: pmSchedules.instrumentId, assetId: pmSchedules.assetId,
+          title: pmSchedules.title,
+          everyDays: pmSchedules.everyDays, nextDue: pmSchedules.nextDue,
+          lastDone: pmSchedules.lastDone, paused: pmSchedules.paused,
+        }).from(pmSchedules)
+          .where(or(
+            inArray(pmSchedules.instrumentId, instIds),
+            assetIds.length ? inArray(pmSchedules.assetId, assetIds) : undefined,
+          ))
+          .orderBy(asc(pmSchedules.nextDue))
+      : Promise.resolve([]),
+    // parts carries no tenant stamp - a part belongs to its instrument and
+    // dies with it - so the instrument list above IS the scope.
+    instIds.length
+      ? db.select({
+          instrumentId: parts.instrumentId, name: parts.name,
+          partNumber: parts.partNumber, qty: parts.qty,
+          installedAt: parts.installedAt, status: parts.status,
+        }).from(parts).where(inArray(parts.instrumentId, instIds))
+          .orderBy(asc(parts.installedAt))
+      : Promise.resolve([]),
+    db.select().from(catalogRefs)
+      .where(forTenant(catalogRefs.tenantOrgId, opts.tenantOrgId))
+      .orderBy(asc(catalogRefs.assetType), asc(catalogRefs.model), asc(catalogRefs.id))
+      .catch(() => []),
+  ]);
+
+  /* Bounded to the same numbers parsePayload enforces on the way back in.
+     Without that a very large fleet would freeze a payload whose tail the
+     reader silently drops, and the sender's audit line would name a figure
+     nobody ever receives. Cut here, and the offer, the page and what
+     materialize writes are all the same list. */
+  const pms: SharedPm[] = pmRows
+    .map((r): SharedPm | null => {
+      // A module schedule resolves through the module to its machine; a system
+      // schedule already names one. Anything that resolves to neither is not
+      // on this fleet and does not travel.
+      const on = r.assetId !== null ? moduleAt.get(r.assetId) : null;
+      const instrumentId = on?.instrumentId ?? r.instrumentId;
+      if (r.paused || instrumentId === null || !tagOf.has(instrumentId)) return null;
+      return {
+        sourceRef: tagOf.get(instrumentId)!,
+        moduleIndex: on ? on.index : null,
+        title: r.title, everyDays: r.everyDays,
+        nextDue: r.nextDue, lastDone: r.lastDone,
+      };
+    })
+    .filter((x) => x !== null)
+    .slice(0, 500);
+
+  // Fitted parts only. A request nobody ordered and an order still in transit
+  // are the sender's business, not a history of this fleet.
+  const partsOut: SharedPart[] = partRows
+    .filter((r) => r.status === "Installed" && r.instrumentId !== null)
+    .slice(0, 2000)
+    .map((r) => ({
+      sourceRef: tagOf.get(r.instrumentId!) ?? "",
+      name: r.name, partNumber: r.partNumber,
+      qty: r.qty, installedAt: r.installedAt,
+    }));
+
+  /*
+   * References are filed on a MODEL, not on a machine, so what travels is
+   * whatever covers the equipment in this fleet - and only what the shop is
+   * entitled to pass on. lib/provenance already decides that question for the
+   * licensed library, and a hand-off is the same question with a different
+   * buyer: our own work and our own restatement of facts may go, a
+   * manufacturer's words may not, and unreviewed counts as not ours. The
+   * inventory the recipient is shown is counted off this list, so what an
+   * offer advertises is exactly what acceptance delivers.
+   */
+  const units = assetRows.map((a) => ({ kind: a.kind ?? "", model: a.model ?? "" }));
+  const refs: SharedRef[] = refsForUnits(
+    refRowsAll.filter((r) => isPublishable(r.provenance)),
+    units,
+  ).slice(0, 500).map((r) => ({
+    assetType: r.assetType, model: r.model, kind: r.kind,
+    title: r.title, url: r.url, body: r.body,
+  }));
+
   return {
     version: SHARE_VERSION,
     client: { name: org.name, kind: "client" },
     sites, systems,
+    pms, parts: partsOut, refs,
     from: { operator: opts.operatorName, by: opts.by, on: opts.on },
     note: opts.note.trim().slice(0, 500),
   };
@@ -133,6 +332,11 @@ export async function materialize(opts: {
     .map((r) => r.externalId);
 
   let systems = 0;
+  // The sender's tag to the id it landed on here, so the record that hangs off
+  // a machine can find the machine after it was renamed.
+  const idOf = new Map<string, number>();
+  /** And its modules, in payload order - see SharedPm.moduleIndex. */
+  const modulesOf = new Map<string, number[]>();
   for (const s of p.systems) {
     const tag = freeTag(s.sourceRef, taken);
     taken.push(tag);
@@ -149,15 +353,106 @@ export async function materialize(opts: {
       notes: provenanceLine(p),
     }).returning({ id: instruments.id });
     systems++;
+    if (s.sourceRef) idOf.set(s.sourceRef, inst.id);
     if (s.modules.length) {
-      await db.insert(assets).values(s.modules.map((m, i) => ({
+      // Inserted in payload order and returned in it, which is what makes
+      // SharedPm.moduleIndex resolvable on this side.
+      const made = await db.insert(assets).values(s.modules.map((m, i) => ({
         tenantOrgId: opts.destTenantOrgId,
         instrumentId: inst.id,
         kind: m.kind, model: m.model, serial: m.serial, manufacturer: m.manufacturer,
         sortOrder: i,
+      }))).returning({ id: assets.id, sortOrder: assets.sortOrder });
+      if (s.sourceRef) {
+        modulesOf.set(s.sourceRef,
+          made.slice().sort((a, b) => a.sortOrder - b.sortOrder).map((a) => a.id));
+      }
+    }
+  }
+
+  // The maintenance rhythm, arriving live: a schedule that landed paused would
+  // be a list of jobs nobody is ever told about, which is worse than not
+  // sending it. Dates come across as they stood - a cycle that was overdue at
+  // the sender is overdue here, and that is the fact the new shop needs on
+  // Monday rather than a clock reset to make the handover look tidy.
+  const pmRows = (p.pms ?? [])
+    .map((m) => ({
+      id: idOf.get(m.sourceRef),
+      // Back onto the module it was on, when it was on one and that module
+      // travelled. Null otherwise, and then it hangs on the system: a pump
+      // schedule landing on the instrument is a job somebody can still do, and
+      // landing on nothing is not - see SharedPm.moduleIndex.
+      assetId: m.moduleIndex === null || m.moduleIndex === undefined ? null
+        : (modulesOf.get(m.sourceRef) ?? [])[m.moduleIndex] ?? null,
+      m,
+    }))
+    .filter((x): x is { id: number; assetId: number | null; m: (typeof x)["m"] } =>
+      x.id !== undefined);
+  if (pmRows.length) {
+    await db.insert(pmSchedules).values(pmRows.map(({ id, assetId, m }) => ({
+      tenantOrgId: opts.destTenantOrgId,
+      // BOTH ids, when it is on a module: that is the shape resolveTarget
+      // writes for a module tagged from a system page, and it is what puts the
+      // job on the system's maintenance list as well as the module's.
+      instrumentId: id,
+      assetId,
+      title: m.title,
+      everyDays: m.everyDays,
+      nextDue: m.nextDue,
+      lastDone: m.lastDone,
+      body: provenanceLine(p),
+    })));
+  }
+
+  // The parts history, as history: every line lands Installed with the date it
+  // was fitted and no cost, because none crossed. A blank cost on a fitted part
+  // reads as "we do not know what this cost", which is the truth.
+  const partRows = (p.parts ?? [])
+    .map((r) => ({ id: idOf.get(r.sourceRef), r }))
+    .filter((x): x is { id: number; r: (typeof x)["r"] } => x.id !== undefined);
+  if (partRows.length) {
+    await db.insert(parts).values(partRows.map(({ id, r }) => ({
+      instrumentId: id,
+      name: r.name,
+      partNumber: r.partNumber,
+      qty: r.qty,
+      installedAt: r.installedAt,
+      status: "Installed",
+      note: provenanceLine(p),
+    })));
+  }
+
+  /*
+   * The reference library, filed on models rather than on this client's
+   * machines - so it outlives the account and is the part of a hand-off worth
+   * the most a year later.
+   *
+   * Two rules. Skipped when the recipient already files something under the
+   * same type, model and title, because a hand-off should not fill somebody's
+   * catalog with second copies of what they wrote themselves. And landing
+   * UNREVIEWED whatever the sender asserted: provenance is a claim about who
+   * owns the words, the sender's answer was about the sender's right to pass
+   * it on, and nobody here has decided whether this shop may license it out
+   * again. '' is the default that keeps it out of anything licensed until a
+   * person says otherwise - see lib/provenance.
+   */
+  if ((p.refs ?? []).length) {
+    const have = new Set((await db.select({
+      assetType: catalogRefs.assetType, model: catalogRefs.model, title: catalogRefs.title,
+    }).from(catalogRefs).where(eq(catalogRefs.tenantOrgId, opts.destTenantOrgId)))
+      .map((r) => `${r.assetType}|${r.model}|${r.title}`.toLowerCase()));
+    const fresh = (p.refs ?? [])
+      .filter((r) => !have.has(`${r.assetType}|${r.model}|${r.title}`.toLowerCase()));
+    if (fresh.length) {
+      await db.insert(catalogRefs).values(fresh.map((r) => ({
+        tenantOrgId: opts.destTenantOrgId,
+        assetType: r.assetType, model: r.model, kind: r.kind,
+        title: r.title, url: r.url, body: r.body,
+        createdBy: `${p.from.operator} (handed over)`,
       })));
     }
   }
+
   return { orgId: org.id, systems };
 }
 

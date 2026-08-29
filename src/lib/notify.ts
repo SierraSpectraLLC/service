@@ -770,8 +770,14 @@ export async function notifyLeadClaimed(opts: {
  */
 export async function notifyHandoffInvite(opts: {
   to: string; fromName: string; summary: string; terms: string; note: string; url: string;
+  /** The record beyond the equipment, already counted - see clientShare.recordLines. */
+  record?: string[];
 }) {
   try {
+    // Counts, never contents: this is the one message that reaches somebody
+    // who has agreed to nothing, and it has to be readable in a preview pane
+    // without giving away anything the page itself holds back.
+    const record = (opts.record ?? []).filter(Boolean);
     await deliver({
       to: [opts.to], kind: "client_share", href: opts.url,
       title: `${opts.fromName} wants to hand you ${opts.summary}`,
@@ -779,11 +785,12 @@ export async function notifyHandoffInvite(opts: {
       body: `<b>${esc(opts.fromName)}</b> uses Ridgeline to keep their instrument
         service records, and wants to hand a client over to you:
         <div style="margin-top:8px;font-size:15px;"><b>${esc(opts.summary)}</b></div>
+        ${record.length ? `<div style="margin-top:8px;">Coming with it: <b>${esc(record.join(", "))}</b></div>` : ""}
         ${opts.terms ? `<div style="margin-top:8px;">What they are asking: <b>${esc(opts.terms)}</b></div>` : ""}
         ${opts.note ? quote(esc(opts.note)) : ""}
         ${mutedLine("You will see the equipment and roughly where it is. Who the client is stays with them until you accept.")}
         ${btn(opts.url, "See what is on offer")}
-        ${mutedLine("Accepting opens a Ridgeline workspace for your company with this client already in it - the sites, the systems, the serials. Nothing to type in.")}`,
+        ${mutedLine("Accepting opens a Ridgeline workspace for your company with this client already in it - the sites, the systems, the serials, the maintenance and the paper. Nothing to type in.")}`,
     });
   } catch (e) {
     console.error("[notify] handoff invite email failed:", (e as Error).message);

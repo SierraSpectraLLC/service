@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { clientShares, orgs } from "@/db/schema";
 import { getBrand } from "@/lib/brand";
-import { blindSummary, parsePayload, redactPayload } from "@/lib/clientShare";
+import { blindSummary, inventoryLines, inventoryOf, parsePayload, redactPayload } from "@/lib/clientShare";
 import { daysLeft, inviteOpen, inviteState, looksLikeToken, pitchLine } from "@/lib/handoff";
 import { termsLine } from "@/lib/referral";
 import { formatCents } from "@/lib/money";
@@ -74,8 +74,8 @@ export default async function HandoffPage({ params }: { params: Promise<{ token:
             You have the client{dest?.name ? `, and ${dest.name} is on file` : ""}.
           </h1>
           <div className="t-body">
-            The sites, the systems and the serials {fromName} had on file are in your
-            workspace now - nothing to type in.
+            The sites, the systems, the serials, the maintenance schedules and the parts
+            history {fromName} had on file are in your workspace now - nothing to type in.
           </div>
           <div className="mut t-small" style={{ marginTop: 10 }}>
             Sign in as <span className="mono">{row.toEmail}</span>. We email a code;
@@ -113,6 +113,16 @@ export default async function HandoffPage({ params }: { params: Promise<{ token:
     maxCents: row.feeMaxCents, note: row.feeNote,
   };
   const left = daysLeft(row.expiresOn, today);
+  /*
+   * Counted off the REDACTED payload, which is the same count either way -
+   * redaction rewrites rows, it never drops one. Doing it here rather than off
+   * the original is the guarantee that this page can never advertise a number
+   * bigger than the thing it is showing, and materialize writes every one of
+   * these, so it can never advertise a number bigger than what acceptance
+   * delivers either.
+   */
+  const inv = inventoryOf(shown);
+  const lines = inventoryLines(inv);
 
   return (
     <PublicShell brandName={brand.name} tagline={brand.tagline} width={640}>
@@ -152,11 +162,48 @@ export default async function HandoffPage({ params }: { params: Promise<{ token:
           Who the client is, where exactly, and every serial arrive when you accept.
         </div>
 
+        {/*
+          * THE PAYOFF, and the only part of this page that is a pitch.
+          *
+          * Counts rather than contents, which is what lets it be both honest
+          * and safe: it is the full inventory of what materialize actually
+          * writes, and every figure in it survives blinding, so a stranger
+          * learns how much there is to take on without learning enough to go
+          * round the sender. What converts is that the list is real - accepting
+          * does not open a sign-up form, it opens a workspace with all of this
+          * already in it.
+          */}
+        {lines.length > 0 && (
+          <>
+            <div className="dialog-section" style={{ marginTop: 16 }}>What lands in your workspace</div>
+            <div className="t-body">
+              {lines.map((l, i) => (
+                <div key={i} style={{ padding: "3px 0" }}>{l}</div>
+              ))}
+            </div>
+            {inv.pricingYears > 0 && (
+              <div className="t-small" style={{ marginTop: 6 }}>
+                {fromName} is selling the account rather than making an introduction, so what
+                this client has been charged comes with it - you can quote the work the way
+                they are used to being quoted instead of guessing at it.
+              </div>
+            )}
+            {/* The closer, and it earns a rule of its own: everything above it
+                is a list, and this is the sentence somebody is meant to leave
+                the page with. */}
+            <div className="t-lead" style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+              <b>View all this and more in Ridgeline.</b>
+            </div>
+          </>
+        )}
+
         {terms.kind !== "none" && (
           <>
             <div className="dialog-section" style={{ marginTop: 14 }}>What they are asking</div>
+            {/* termsLine already carries the note as its tail - see
+                lib/referral - so printing it again underneath said the same
+                sentence twice. */}
             <div className="t-body"><b>{termsLine(terms, formatCents)}</b></div>
-            {terms.note && <div className="mut t-small">{terms.note}</div>}
           </>
         )}
 

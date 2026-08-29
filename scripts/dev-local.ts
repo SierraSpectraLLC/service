@@ -565,10 +565,22 @@ const FIXTURE = `
     WHERE client = 'Lab Zen' AND external_id = 'LZ-003';
 
 
-  INSERT INTO pm_schedules (instrument_id, title, assignee, every_days, next_due, last_done) VALUES
-    (1, 'Quarterly source clean', 'joe', 90, to_char(now() - interval '5 days', 'YYYY-MM-DD'), to_char(now() - interval '95 days', 'YYYY-MM-DD')),
-    (3, 'Annual desolvation line swap', '', 365, to_char(now() + interval '200 days', 'YYYY-MM-DD'), ''),
-    (6, 'Rough pump oil change', 'joe', 180, to_char(now() + interval '20 days', 'YYYY-MM-DD'), '');
+  -- Stamped, like every other row here. An unstamped schedule is invisible to
+  -- the pages that read with forTenant, which makes the local fixture disagree
+  -- with production in exactly the way a fixture must not.
+  INSERT INTO pm_schedules (tenant_org_id, instrument_id, title, assignee, every_days, next_due, last_done) VALUES
+    (3, 1, 'Quarterly source clean', 'joe', 90, to_char(now() - interval '5 days', 'YYYY-MM-DD'), to_char(now() - interval '95 days', 'YYYY-MM-DD')),
+    (3, 3, 'Annual desolvation line swap', '', 365, to_char(now() + interval '200 days', 'YYYY-MM-DD'), ''),
+    (3, 6, 'Rough pump oil change', 'joe', 180, to_char(now() + interval '20 days', 'YYYY-MM-DD'), '');
+
+  -- A reference library, so the hand-off has paper to carry. Provenance is
+  -- what decides whether a row may travel - see lib/provenance - so the
+  -- fixture has one of each answer.
+  INSERT INTO catalog_refs (tenant_org_id, asset_type, model, kind, title, url, body, provenance, created_by) VALUES
+    (3, 'Mass Spec', '', 'note', 'Source clean, our way', '', 'Vent, cool, bead blast the cone, sonicate 15 min.', 'original', '${OWNER}'),
+    (3, 'Mass Spec', '6495C', 'link', 'Vent and pump-down sequence', 'https://example.test/vent', '', 'facts', '${OWNER}'),
+    (3, 'Mass Spec', '6495C', 'link', 'Agilent service manual', 'https://example.test/oem', '', 'oem', '${OWNER}'),
+    (3, 'Pump', '', 'note', 'Nobody has said where this came from', '', 'Tip seal every 12 months.', '', '${OWNER}');
 
   INSERT INTO sheet_diffs (external_id, field, sheet_value, db_value) VALUES
     ('LZ-002', 'stage', 'Checkout', 'Refurbishment, System setup'),

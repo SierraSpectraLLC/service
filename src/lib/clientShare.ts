@@ -65,15 +65,163 @@ export type SharedSite = {
  * client is, where their buildings are and how to get into them, what machines
  * are there and what is inside each one.
  */
+/** A maintenance rhythm: what, how often, and when it is next owed. */
+export type SharedPm = {
+  sourceRef: string;   // which system, by the SENDER's tag
+  /**
+   * Which MODULE of that system, by its position in the system's module list -
+   * a pump oil change belongs to the pump, not to the LC-MS around it.
+   *
+   * A position rather than a serial, because the serial is the one field
+   * blinding removes, and a reference that survives redaction is one this can
+   * never leak through. Both sides walk the same list in the same order:
+   * materialize writes modules in payload order, so index 1 here is the second
+   * module it inserted. Absent or null = the schedule is on the system itself.
+   */
+  moduleIndex?: number | null;
+  title: string;
+  everyDays: number;
+  nextDue: string;     // YYYY-MM-DD
+  lastDone: string;
+};
+
+/**
+ * A part that went into this fleet.
+ *
+ * What it is and when, never what it cost. A parts history is the most useful
+ * thing a shop taking over an account can have - it says what this lab burns
+ * through and how often - and none of that requires a price.
+ */
+export type SharedPart = {
+  sourceRef: string;
+  name: string;
+  partNumber: string;
+  qty: string;
+  installedAt: string;
+};
+
+/** A manual or a field note, filed on a model rather than on a machine. */
+export type SharedRef = {
+  assetType: string;
+  model: string;
+  kind: string;        // link | note
+  title: string;
+  url: string;
+  body: string;
+};
+
+/**
+ * WHAT THE ACCOUNT HAS BEEN WORTH, and the one thing here that is money.
+ *
+ * Everything else in this payload is equipment: facts about machines, which
+ * belong to whoever services them next. This does not. It is what one company
+ * charged another, and it moves only because an account SALE is a different
+ * act from a referral - a shop buying a book of business cannot price the work
+ * without knowing what the client is used to paying, and withholding it does
+ * not protect anybody, it just makes the first quote wrong.
+ *
+ * So it is OPTIONAL and off unless the sender turns it on, it is a summary
+ * rather than the invoices (per-year totals and the rates that were charged -
+ * never a document, never what they paid late, never their credit standing),
+ * and it is stripped from every blind view. A stranger reading an offer learns
+ * that billing history EXISTS and over how long; the figures arrive only with
+ * acceptance.
+ */
+export type SharedPricing = {
+  /** Whole years, newest first: { year, billedCents, visits }. */
+  years: { year: string; billedCents: number; visits: number }[];
+  /** What an hour and a visit were charged at, when the record says. */
+  laborRateCents: number;
+  note: string;
+};
+
 export type SharePayload = {
   version: number;
   client: { name: string; kind: string };
   sites: SharedSite[];
   systems: SharedSystem[];
+  /**
+   * The rest of the record, and the reason a hand-off is worth taking: the
+   * maintenance rhythm, what the fleet consumes, and the paper behind it.
+   * Optional so a payload written before they existed still parses.
+   */
+  pms?: SharedPm[];
+  parts?: SharedPart[];
+  refs?: SharedRef[];
+  /** Only when the sender chose to include it. See SharedPricing. */
+  pricing?: SharedPricing;
   /** Who sent it and when, frozen into the copy itself. */
   from: { operator: string; by: string; on: string };
   note: string;
 };
+
+/**
+ * What is in this record, as the counts that make an offer worth opening.
+ *
+ * Deliberately counts rather than contents: it is what a blind page may say
+ * about a client whose name it must not print, and it is the honest inventory
+ * of what actually crosses on acceptance - so nothing here can promise
+ * something materialize does not deliver.
+ */
+export type ShareInventory = {
+  systems: number;
+  sites: number;
+  modules: number;
+  pms: number;
+  parts: number;
+  refs: number;
+  /** Years of billing history, or 0 when the sender did not include any. */
+  pricingYears: number;
+};
+
+export function inventoryOf(p: SharePayload): ShareInventory {
+  return {
+    systems: p.systems.length,
+    sites: p.sites.length,
+    modules: p.systems.reduce((n, s) => n + s.modules.length, 0),
+    pms: p.pms?.length ?? 0,
+    parts: p.parts?.length ?? 0,
+    refs: p.refs?.length ?? 0,
+    pricingYears: p.pricing?.years.length ?? 0,
+  };
+}
+
+/**
+ * The inventory as a list somebody reads down before deciding.
+ *
+ * Zeroes are dropped rather than printed. "0 maintenance schedules" is an
+ * argument against taking the offer, and printing it next to four real numbers
+ * makes the whole list read as a form somebody half-filled.
+ */
+const countLine = (v: number, one: string, many: string) =>
+  v > 0 ? `${v} ${v === 1 ? one : many}` : "";
+
+/**
+ * The half of the inventory that is not equipment - the RECORD.
+ *
+ * Split out because the equipment is usually already on the screen beside it
+ * (summarize says how many systems, and a list of them is often right there),
+ * and repeating it turns a summary into a stutter. This is the half people do
+ * not expect to get, which makes it the half worth naming.
+ */
+export function recordLines(inv: ShareInventory): string[] {
+  return [
+    countLine(inv.pms, "maintenance schedule", "maintenance schedules"),
+    countLine(inv.parts, "part on the history", "parts on the history"),
+    countLine(inv.refs, "manual and field note", "manuals and field notes"),
+    inv.pricingYears > 0
+      ? `${inv.pricingYears} year${inv.pricingYears === 1 ? "" : "s"} of what they have been charged`
+      : "",
+  ].filter(Boolean);
+}
+
+export function inventoryLines(inv: ShareInventory): string[] {
+  return [
+    countLine(inv.systems, "system", "systems"),
+    countLine(inv.modules, "module on them", "modules on them"),
+    ...recordLines(inv),
+  ].filter(Boolean);
+}
 
 /**
  * The state an address is in, and nothing finer.
@@ -116,6 +264,35 @@ export function redactPayload(p: SharePayload): SharePayload {
   const states = [...new Set(p.sites.map((s) => stateOf(s.address)).filter(Boolean))];
   return {
     ...p,
+    /*
+     * The figures never cross before acceptance. What survives is the SHAPE -
+     * how many years there are - because "this account has three years of
+     * billing behind it" is the thing worth knowing when deciding whether to
+     * take it on, and the rates are the thing worth paying for. Same rule the
+     * rest of this function follows: enough to decide, not enough to act.
+     */
+    pricing: p.pricing
+      ? {
+        years: p.pricing.years.map((y) => ({ year: y.year, billedCents: 0, visits: 0 })),
+        laborRateCents: 0,
+        note: "",
+      }
+      : undefined,
+    // A parts history names the machines it went into by the sender's own tag,
+    // and those tags are minted per system below - so they are renumbered here
+    // for the same reason the systems are.
+    parts: (p.parts ?? []).map((x) => ({ ...x, sourceRef: "" })),
+    pms: (p.pms ?? []).map((x) => ({ ...x, sourceRef: "" })),
+    /*
+     * References keep their labels and lose their contents. The line this
+     * draws is free prose against structured labels: "Annual PM" and "Pump
+     * rebuild" are equipment vocabulary and give nothing away, whereas the
+     * BODY of a field note is somebody typing, and somebody typing eventually
+     * types the customer's name. The url goes for a second reason - it is a
+     * live link to the sender's own material, and a stranger who has agreed to
+     * nothing should not be able to fetch it.
+     */
+    refs: (p.refs ?? []).map((x) => ({ ...x, url: "", body: "" })),
     client: { ...p.client, name: "A client" },
     sites: p.sites.map((_, i) => ({
       name: states.length === 1 ? `Site ${i + 1}, ${states[0]}` : `Site ${i + 1}`,
@@ -276,6 +453,11 @@ export function freeTag(preferred: string, taken: Iterable<string>): string {
 }
 
 /** Tolerant parse. A payload that has gone bad is refused, never half-applied. */
+/** Anything that is not a list is an empty one. Same posture as the rest of the parse. */
+const arr = (v: unknown): Record<string, unknown>[] =>
+  (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> =>
+    typeof x === "object" && x !== null) : []);
+
 export function parsePayload(raw: string): SharePayload | null {
   if (!raw.trim()) return null;
   try {
@@ -303,6 +485,40 @@ export function parsePayload(raw: string): SharePayload | null {
           serial: String(m?.serial ?? ""), manufacturer: String(m?.manufacturer ?? ""),
         })) : [],
       })),
+      /* Bounded on the way in, like every other list here: a payload is a
+         string somebody else's database handed us, and the parse is the only
+         place that knows how big is too big. */
+      pms: arr(v.pms).slice(0, 500).map((x) => ({
+        sourceRef: String(x?.sourceRef ?? ""), title: String(x?.title ?? ""),
+        // A module position only counts if it is a whole number at or above
+        // zero. Anything else is a schedule on the system.
+        moduleIndex: Number.isInteger(x?.moduleIndex) && (x.moduleIndex as number) >= 0
+          ? (x.moduleIndex as number) : null,
+        everyDays: Math.max(0, Math.round(Number(x?.everyDays) || 0)),
+        nextDue: String(x?.nextDue ?? ""), lastDone: String(x?.lastDone ?? ""),
+      })),
+      parts: arr(v.parts).slice(0, 2000).map((x) => ({
+        sourceRef: String(x?.sourceRef ?? ""), name: String(x?.name ?? ""),
+        partNumber: String(x?.partNumber ?? ""), qty: String(x?.qty ?? ""),
+        installedAt: String(x?.installedAt ?? ""),
+      })),
+      refs: arr(v.refs).slice(0, 500).map((x) => ({
+        assetType: String(x?.assetType ?? ""), model: String(x?.model ?? ""),
+        kind: String(x?.kind ?? "link"), title: String(x?.title ?? ""),
+        url: String(x?.url ?? ""), body: String(x?.body ?? ""),
+      })),
+      // Absent unless the sender chose to send it - see SharedPricing.
+      pricing: v.pricing && Array.isArray(v.pricing.years)
+        ? {
+          years: v.pricing.years.slice(0, 20).map((y) => ({
+            year: String(y?.year ?? ""),
+            billedCents: Math.max(0, Math.round(Number(y?.billedCents) || 0)),
+            visits: Math.max(0, Math.round(Number(y?.visits) || 0)),
+          })),
+          laborRateCents: Math.max(0, Math.round(Number(v.pricing.laborRateCents) || 0)),
+          note: String(v.pricing.note ?? ""),
+        }
+        : undefined,
       from: {
         operator: String(v.from?.operator ?? ""), by: String(v.from?.by ?? ""),
         on: String(v.from?.on ?? ""),

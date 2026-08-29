@@ -6,7 +6,10 @@ import { useState, useTransition } from "react";
 import {
   answerCounterOffer, counterClientShare, decideClientShare, withdrawClientShare,
 } from "@/app/actions";
-import { blindSummary, summarize, SHARE_LABEL, SHARE_LABEL_IN, type ShareState } from "@/lib/clientShare";
+import {
+  blindSummary, inventoryOf, recordLines, summarize, SHARE_LABEL, SHARE_LABEL_IN,
+  type ShareState,
+} from "@/lib/clientShare";
 import { INVITE_LABEL, INVITE_TONE, inviteState } from "@/lib/handoff";
 import {
   boundsPhrase, choicesFor, FEE_KINDS, FEE_LABEL, termsLine, termsProblems, type FeeKind,
@@ -108,6 +111,16 @@ export default function ClientShareBoard({ inbox, sent, today }: {
                   : "contents unreadable"}
                 {` · offered ${s.createdOn} by ${s.createdBy}`}
               </div>
+              {/* The record, which summarize deliberately leaves out - it says
+                  how much EQUIPMENT there is, and the schedules, the parts
+                  history and the paper are the half nobody expects to get.
+                  Counted off the payload as it stands, so it is the same list
+                  materialize writes. See clientShare.recordLines. */}
+              {s.payload && recordLines(inventoryOf(s.payload)).length > 0 && (
+                <div className="t-small" style={{ marginTop: 2 }}>
+                  With {recordLines(inventoryOf(s.payload)).join(", ")}.
+                </div>
+              )}
               {/* Said before they look, not discovered while they read: the
                   list is deliberately short of the things that would let them
                   go round the sender. */}

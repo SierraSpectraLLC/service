@@ -34,6 +34,10 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
     && note.toLowerCase().includes(orgName.trim().toLowerCase());
   const [error, setError] = useState("");
   const [blind, setBlind] = useState(true);
+  /* OFF, and it stays off unless somebody decides otherwise. Everything else
+     that travels is equipment; this is what the client has been charged. See
+     SharedPricing in lib/clientShare. */
+  const [pricing, setPricing] = useState(false);
   /* The other lane: a shop with no workspace here yet. Same snapshot, same
      terms, and accepting opens the workspace - see lib/handoff. */
   const [inviting, setInviting] = useState(false);
@@ -56,7 +60,7 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
   const sendInvite = () =>
     startTransition(async () => {
       setError("");
-      const res = await inviteHandoff(orgId, { email: inviteEmail, note, terms });
+      const res = await inviteHandoff(orgId, { email: inviteEmail, note, terms, pricing });
       if (res.error) { setError(res.error); return; }
       toast({ message: `Invitation sent to ${inviteEmail.trim()}` });
       setInviting(false); setInviteEmail(""); setNote("");
@@ -139,13 +143,42 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
     </>
   );
 
+  /*
+   * The one money question, asked once for both lanes.
+   *
+   * Off by default and phrased as what it is, because the honest version of
+   * this decision is uncomfortable and hiding that would not make it less so:
+   * it moves a client's commercial history to another company without the
+   * client in the room. Worth doing when an account is being SOLD - a buyer
+   * who does not know what the lab is used to paying will quote it wrong and
+   * both of you will wear it - and not worth doing for an ordinary referral.
+   * What crosses is per-year totals and the rate, never an invoice and never
+   * anything about how they pay. See SharedPricing in lib/clientShare.
+   */
+  const pricingControl = (
+    <>
+      <label className="t-small" style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 10 }}>
+        <input type="checkbox" className="check" checked={pricing} disabled={pending}
+          onChange={(e) => setPricing(e.target.checked)} />
+        include what this account has billed
+      </label>
+      <div className="mut t-meta" style={{ marginTop: 2 }}>
+        {pricing
+          ? "A total and a visit count per year, and your hour rate - never an invoice, never"
+            + " what they paid late. It is your client's commercial history and they are not"
+            + " being asked. Fair on a sale of the account; heavy-handed on a referral."
+          : "Off. They get the equipment and the record, and price the work themselves."}
+      </div>
+    </>
+  );
+
   const toggle = (id: number) =>
     setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
 
   const send = () =>
     startTransition(async () => {
       setError("");
-      const res = await shareClient(orgId, { toOrgIds: picked, note, terms, blind });
+      const res = await shareClient(orgId, { toOrgIds: picked, note, terms, blind, pricing });
       if (res.error) { setError(res.error); return; }
       toast({ message: `Offered to ${res.sent} ${res.sent === 1 ? "company" : "companies"} - waiting on them` });
       setPicked([]); setNote("");
@@ -161,7 +194,7 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
         <div className="mut t-small">
           No service companies on your list yet. Find them in{" "}
           <a href="/network">Service companies</a>, or{" "}
-          <button className="btn link" style={{ fontSize: 13 }} onClick={() => setInviting(true)}>
+          <button className="btn link t-small" onClick={() => setInviting(true)}>
             invite a shop that is not on Ridgeline
           </button>.
         </div>
@@ -172,9 +205,10 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
               only difference being that there is no workspace on the other
               end yet, so accepting opens one. See lib/handoff. */}
           <div className="mut t-small" style={{ marginBottom: 8 }}>
-            They see the equipment, how many sites and which state - never {orgName}&apos;s
-            name, and no addresses or serials - until they accept. Accepting opens a
-            Ridgeline workspace for them with this client already in it.
+            They see how much there is to take on - the equipment, how many sites and which
+            state - never {orgName}&apos;s name, and no addresses or serials, until they
+            accept. Accepting opens a Ridgeline workspace for them with this client already in
+            it: the systems, the schedules, the parts history and the paper.
           </div>
           <label>Their email</label>
           <input value={inviteEmail} aria-label="Their email" disabled={pending}
@@ -190,6 +224,7 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
             </div>
           )}
           {feeControls}
+          {pricingControl}
           <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
             <button className="btn accent" disabled={pending || !inviteEmail.trim()}
               onClick={sendInvite}>
@@ -205,7 +240,9 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
         <>
           <div className="mut t-small" style={{ marginBottom: 8 }}>
             {orgName} and its {systems} system{systems === 1 ? "" : "s"} - names, sites, models and
-            serials. <b>Not</b> your contracts, rates, invoices, notes or work history.
+            serials, the maintenance schedules, what has been fitted, and the manuals and field
+            notes you have cleared to pass on. <b>Not</b> your contracts, your invoices, your work
+            history or your notes on the account.
           </div>
           {providers.map((p) => (
             <label key={p.id} className="t-body"
@@ -252,6 +289,8 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
             </div>
           )}
 
+          {pricingControl}
+
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
             <button className="btn accent"
               disabled={pending || picked.length === 0 || systems === 0 || !!feeProblem}
@@ -265,6 +304,17 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
           <div className="mut t-meta" style={{ marginTop: 8 }}>
             Nothing is written into their workspace until somebody there accepts. The copy is a
             snapshot taken now - it does not update afterwards, and neither does theirs.
+          </div>
+          {/* The other lane, and it has to be reachable from HERE.
+              It used to live only in the empty state, which meant the day a
+              shop added their first contact was the day they lost the ability
+              to reach anybody new - and the shops worth reaching are exactly
+              the ones with no account yet. */}
+          <div className="mut t-small" style={{ marginTop: 8 }}>
+            Not on this list?{" "}
+            <button className="btn link t-small" onClick={() => setInviting(true)}>
+              invite a shop that is not on Ridgeline
+            </button>
           </div>
         </>
       )}

@@ -43,6 +43,34 @@ const PAYLOAD: SharePayload = {
     { sourceRef: "EP-008", model: "ISQ 7000", category: "GC-MS", siteName: "Alameda", location: "",
       modules: [] },
   ],
+  pms: [
+    { sourceRef: "EP-001", title: "Annual PM", everyDays: 365, nextDue: "2026-11-02", lastDone: "2025-11-02" },
+    // On the Edwards pump, which is module 1 of EP-001.
+    { sourceRef: "EP-001", moduleIndex: 1, title: "Rough pump oil change", everyDays: 180,
+      nextDue: "2026-10-01", lastDone: "" },
+    // Already overdue at the sender, and it has to still be overdue here.
+    { sourceRef: "EP-008", title: "Source clean", everyDays: 90, nextDue: "2026-06-14", lastDone: "2026-03-16" },
+    // Points at a machine the payload does not carry. It must be dropped, not
+    // landed on nothing - see the test below.
+    { sourceRef: "EP-999", title: "Orphan", everyDays: 30, nextDue: "2026-09-01", lastDone: "" },
+  ],
+  parts: [
+    { sourceRef: "EP-001", name: "Roughing pump oil", partNumber: "6040-0855", qty: "2", installedAt: "2026-03-04" },
+    { sourceRef: "EP-001", name: "Calibrant vial", partNumber: "G1969-85000", qty: "1", installedAt: "2025-12-11" },
+  ],
+  refs: [
+    { assetType: "Mass Spec", model: "6495C", kind: "note", title: "Rebuild the roughing pump",
+      url: "/api/files/91", body: "Pull the left panel first." },
+    // The recipient already files this one under the same type, model and
+    // title. It must not land twice.
+    { assetType: "Pump", model: "nXDS15i", kind: "link", title: "Edwards manual",
+      url: "https://example.test/nxds", body: "" },
+  ],
+  pricing: {
+    years: [{ year: "2025", billedCents: 4800000, visits: 11 }],
+    laborRateCents: 19500,
+    note: "",
+  },
   from: { operator: "Sierra Spectra", by: "joe@sierra.test", on: "2026-08-27" },
   note: "",
 };
@@ -63,6 +91,10 @@ beforeAll(async () => {
     -- And the SENDER already has a client called Emery Pharma, which is the
     -- whole point: it is the same company seen from two sides.
     INSERT INTO orgs (name, kind, parent_org_id) VALUES ('Emery Pharma', 'client', 3);
+    -- The recipient's own library already covers the Edwards pump. A hand-off
+    -- should not fill somebody's catalog with a second copy of what they wrote.
+    INSERT INTO catalog_refs (tenant_org_id, asset_type, model, kind, title, provenance)
+      VALUES (4, 'Pump', 'nXDS15i', 'link', 'Edwards manual', 'original');
   `);
   made = await materialize({ payload: PAYLOAD, destTenantOrgId: 4, actor: "bill@nwis.test" });
 });
@@ -172,5 +204,120 @@ describe("what arrived", () => {
 
   it("reports what it did", () => {
     expect(made.systems).toBe(2);
+  });
+});
+
+/*
+ * THE RECORD, which is the half that makes a hand-off worth accepting.
+ *
+ * The equipment is what the offer looks like; the maintenance rhythm, what the
+ * fleet consumes and the paper behind it are what the buyer is actually
+ * getting. The hand-off page advertises these by count, so every one of them
+ * has to arrive - a page that promises four schedules and delivers none is a
+ * bait-and-switch at the exact moment somebody converts.
+ */
+describe("the record that comes with it", () => {
+  const copies = async () => testDb.select().from(schema.instruments)
+    .where(eq(schema.instruments.ownerOrgId, made.orgId));
+
+  it("lands the maintenance schedules live and stamped to the recipient", async () => {
+    const ids = (await copies()).map((c) => c.id);
+    const pms = (await testDb.select().from(schema.pmSchedules))
+      .filter((r) => r.instrumentId !== null && ids.includes(r.instrumentId));
+    expect(pms).toHaveLength(3);
+    expect(pms.every((r) => r.tenantOrgId === 4)).toBe(true);
+    // Not paused. A schedule that arrived paused would be a list of jobs
+    // nobody is ever told about, which is worse than not sending it.
+    expect(pms.every((r) => !r.paused)).toBe(true);
+  });
+
+  it("keeps a schedule overdue instead of resetting the clock to look tidy", async () => {
+    const [ep8] = await testDb.select().from(schema.instruments)
+      .where(eq(schema.instruments.sourceRef, "EP-008"));
+    const [pm] = (await testDb.select().from(schema.pmSchedules))
+      .filter((r) => r.instrumentId === ep8.id);
+    expect(pm.nextDue).toBe("2026-06-14");
+    expect(pm.lastDone).toBe("2026-03-16");
+    expect(pm.everyDays).toBe(90);
+  });
+
+  it("puts a module's schedule back on the module", async () => {
+    /*
+     * A pump oil change belongs to the pump. It arrives carrying the module's
+     * POSITION - materialize writes modules in payload order, so index 1 is
+     * the second one it inserted - and lands with BOTH ids set, which is the
+     * shape a module schedule tagged from a system page has: on the module's
+     * list, and on the system's.
+     */
+    const [ep1] = await testDb.select().from(schema.instruments)
+      .where(eq(schema.instruments.sourceRef, "EP-001"));
+    const [pump] = (await testDb.select().from(schema.assets))
+      .filter((a) => a.instrumentId === ep1.id && a.kind === "Pump");
+    const [pm] = (await testDb.select().from(schema.pmSchedules))
+      .filter((r) => r.title === "Rough pump oil change");
+    expect(pm.assetId).toBe(pump.id);
+    expect(pm.instrumentId).toBe(ep1.id);
+    // And a system's own schedule did not acquire one.
+    const [annual] = (await testDb.select().from(schema.pmSchedules))
+      .filter((r) => r.title === "Annual PM");
+    expect(annual.assetId).toBeNull();
+  });
+
+  it("drops a row pointing at a machine that did not travel", async () => {
+    /*
+     * The sender chose which systems to hand over; a schedule hanging off one
+     * they kept has nothing to hang on here. Dropped rather than landed with a
+     * null instrument, because a maintenance schedule attached to no machine
+     * is a job nobody can ever do.
+     */
+    const all = await testDb.select().from(schema.pmSchedules);
+    expect(all.some((r) => r.title === "Orphan")).toBe(false);
+    expect(all.every((r) => r.instrumentId !== null)).toBe(true);
+  });
+
+  it("lands the parts history as history, with no money on it", async () => {
+    const [ep1] = await testDb.select().from(schema.instruments)
+      .where(eq(schema.instruments.sourceRef, "EP-001"));
+    const fitted = (await testDb.select().from(schema.parts))
+      .filter((r) => r.instrumentId === ep1.id);
+    expect(fitted).toHaveLength(2);
+    expect(fitted.every((r) => r.status === "Installed")).toBe(true);
+    expect(fitted.map((r) => r.installedAt).sort()).toEqual(["2025-12-11", "2026-03-04"]);
+    /*
+     * No cost crossed, so none is written. A blank reads as "we do not know
+     * what this cost", which is the truth - a zero would read as free.
+     */
+    expect(fitted.every((r) => r.cost === "" && r.costCents === null)).toBe(true);
+  });
+
+  it("adds the references it is entitled to and skips the one they already have", async () => {
+    const refs = await testDb.select().from(schema.catalogRefs)
+      .where(eq(schema.catalogRefs.tenantOrgId, 4));
+    expect(refs).toHaveLength(2);
+    const fresh = refs.find((r) => r.title === "Rebuild the roughing pump")!;
+    expect(fresh.body).toBe("Pull the left panel first.");
+    expect(fresh.createdBy).toContain("Sierra Spectra");
+    /*
+     * UNREVIEWED, whatever the sender asserted. Provenance is a claim about
+     * who owns the words; the sender answered whether THEY could pass it on,
+     * and nobody has decided whether this shop may license it out again. ''
+     * keeps it out of anything licensed until a person says otherwise - see
+     * lib/provenance.
+     */
+    expect(fresh.provenance).toBe("");
+    // Theirs is untouched, and there is exactly one of it.
+    expect(refs.filter((r) => r.title === "Edwards manual")).toHaveLength(1);
+    expect(refs.find((r) => r.title === "Edwards manual")!.provenance).toBe("original");
+  });
+
+  it("writes no money row of any kind", async () => {
+    /*
+     * The payload carries a billing SUMMARY so the buyer can price the work -
+     * see SharedPricing - and it stops at being read. It becomes no invoice,
+     * no agreement and no line item in the recipient's ledger, because those
+     * would be records of transactions that never happened here.
+     */
+    expect(await testDb.select().from(schema.invoices)).toHaveLength(0);
+    expect(await testDb.select().from(schema.agreements)).toHaveLength(0);
   });
 });
