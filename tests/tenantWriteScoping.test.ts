@@ -110,6 +110,21 @@ const REVIEWED: Record<string, string> = {
     + "update. Moving this OUT of app/actions is what this test caused - "
     + "recordStripePayment had been sitting in the action surface, where any "
     + "session could have called it and marked any invoice paid.",
+  "acceptHandoff":
+    "Public on purpose, and there is no tenant to scope by: the caller is a "
+    + "stranger with no account, which is the whole point of a hand-off "
+    + "invitation. The TOKEN is the authorization, the same doctrine the share "
+    + "page runs on, and it is narrowed three further ways the scanner cannot "
+    + "see - the row is fetched by an 18-byte token, the claiming UPDATE "
+    + "carries status='pending' in its own WHERE so two clicks open one "
+    + "workspace, and the address the account is created for is read off the "
+    + "ROW rather than taken from the caller, so a stolen link can only ever "
+    + "post keys to the inbox the sender chose.",
+  "markHandoffOpened":
+    "Same public token, and it sets one timestamp once - the WHERE carries the "
+    + "token AND opened_at IS NULL. Nothing about a workspace is reachable "
+    + "through it; the worst a stolen link can do is report that somebody "
+    + "looked, which is what the link is for.",
 };
 
 describe("writes to a tenant-stamped table", () => {

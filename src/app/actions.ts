@@ -87,7 +87,7 @@ import {
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyBugReport, notifyClientShared, notifyLeadClaimed, notifyLeadOffered, notifyMessage, notifyModelProposed, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
+import { notifyBugReport, notifyClientShared, notifyHandoffInvite, notifyHandoffJoined, notifyLeadClaimed, notifyLeadOffered, notifyMessage, notifyModelProposed, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -170,6 +170,9 @@ import {
   blindSummary, mayAnswerCounter, mayCounter, mayDecide, mayWithdraw, noteLeaks,
   parsePayload, shareProblems, summarize, SHARE_LABEL,
 } from "@/lib/clientShare";
+import {
+  companyProblems, HANDOFF_DAYS, inviteOpen, inviteState, looksLikeToken,
+} from "@/lib/handoff";
 import { composePayload, materialize } from "@/lib/clientShareData";
 import {
   accruedCents, feeStanding, outstandingCents, resolveChoice, termsLine,
@@ -17184,6 +17187,196 @@ export async function shareClient(orgId: number, data: {
 }
 
 /**
+ * Offer a client to a shop that is not on Ridgeline yet.
+ *
+ * shareClient can only address a workspace that already exists, because it
+ * picks from provider_links - which is exactly backwards for reaching anybody
+ * new. The shops most worth having are the ones with no account, and the
+ * moment they are most persuadable is the moment somebody is trying to give
+ * them paying work.
+ *
+ * So this is the same frozen snapshot pointed at an EMAIL, opened through an
+ * unguessable link, and ALWAYS BLIND - the equipment, how many sites, which
+ * state, what the fee is, and not a word about whose lab it is. Not blind by
+ * default, blind full stop: the recipient is a stranger who has agreed to
+ * nothing, and the sender has not consented to hand their client's identity to
+ * somebody who may simply read it and close the tab.
+ */
+export async function inviteHandoff(orgId: number, data: {
+  email: string; note: string; terms?: FeeTerms;
+}): Promise<{ error?: string; token?: string }> {
+  const u = await requireStaff();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  const tenant = orgTenant(org);
+  if (tenant === null) return { error: "That organization has no workspace behind it" };
+
+  const to = data.email.trim().toLowerCase().slice(0, 200);
+  if (!validHouseEmail(to)) return { error: "Give one exact email address" };
+  /* Somebody already here is not an invite - they have a workspace, a
+     directory listing and a picker entry, and sending them a sign-up link
+     would be the wrong door. Say which door instead. */
+  const [existing] = await db.select().from(houseMembers).where(eq(houseMembers.email, to));
+  if (existing) {
+    return { error: "That address already has a Ridgeline account - add their company under Service companies and share it there." };
+  }
+
+  const brand = await brandForTenant(tenant);
+  const payload = await composePayload({
+    orgId, tenantOrgId: tenant, operatorName: brand.operatorName || brand.name,
+    by: u.email, on: shopToday(), note: data.note,
+  });
+  if (!payload) return { error: "Not found" };
+  const problems = shareProblems({ payload, toOrgId: 0, fromTenantOrgId: tenant });
+  if (problems.length) return { error: problems[0] };
+
+  const terms: FeeTerms = {
+    kind: data.terms?.kind ?? "none",
+    feeCents: Math.max(0, Math.round(data.terms?.feeCents ?? 0)),
+    feeBps: Math.max(0, Math.round(data.terms?.feeBps ?? 0)),
+    windowMonths: Math.max(0, Math.round(data.terms?.windowMonths ?? 12)),
+    minCents: Math.max(0, Math.round(data.terms?.minCents ?? 0)),
+    maxCents: Math.max(0, Math.round(data.terms?.maxCents ?? 0)),
+    note: (data.terms?.note ?? "").trim().slice(0, 200),
+  };
+  const termProblems = termsProblems(terms);
+  if (termProblems.length) return { error: termProblems[0] };
+  // The covering note is checked the same way a blind offer's is - an invite
+  // is blind, so a note that names the client would undo it in the one place
+  // nobody thinks to look. See clientShare.noteLeaks.
+  const said = noteLeaks(data.note, payload);
+  if (said.length) {
+    return {
+      error: `Your note gives away "${said[0]}". They see the work, not who it is, until they accept.`,
+    };
+  }
+
+  const token = crypto.randomBytes(18).toString("base64url");
+  const [row] = await db.insert(clientShares).values({
+    tenantOrgId: tenant, toOrgId: null, toEmail: to, inviteToken: token,
+    sourceOrgId: orgId, payload: JSON.stringify(payload), status: "pending",
+    note: data.note.trim().slice(0, 500),
+    feeKind: terms.kind, feeCents: terms.feeCents, feeBps: terms.feeBps,
+    feeWindowMonths: terms.windowMonths, feeNote: terms.note,
+    feeMinCents: terms.minCents, feeMaxCents: terms.maxCents,
+    blind: true,
+    expiresOn: addDays(shopToday(), HANDOFF_DAYS),
+    createdBy: u.email,
+  }).returning();
+
+  await notifyHandoffInvite({
+    to,
+    fromName: brand.operatorName || brand.name,
+    summary: blindSummary(payload),
+    terms: terms.kind === "none" ? "" : termsLine(terms, formatCents),
+    note: data.note,
+    url: `${appUrl()}/handoff/${token}`,
+  }).catch(() => {});
+  await audit({
+    actor: u.email, entityType: "client_share", entityId: row.id, tenantOrgId: tenant,
+    action: `invited ${to} to take on ${org.name} - ${summarize(payload)}`,
+  });
+  revalidatePath("/network");
+  revalidatePath(`/settings/organizations/${orgId}`);
+  return { token };
+}
+
+/**
+ * A stranger takes the offer, and Ridgeline opens around it.
+ *
+ * PUBLIC, and the token is the authorization - the same doctrine the share
+ * page runs on. What keeps that narrow: the address is taken from the ROW and
+ * never from the caller, so the workspace can only ever land on the inbox the
+ * sender chose; the status predicate is in the UPDATE's own WHERE, so two
+ * clicks make one workspace; and the link has a clock on it.
+ *
+ * The conversion is the last step rather than the pitch. This does not drop
+ * somebody on a sign-up form: it opens their workspace with the client already
+ * in it - sites, systems, modules, serials - so the first thing they ever see
+ * here is real work of theirs instead of an empty database and an afternoon of
+ * typing.
+ */
+export async function acceptHandoff(token: string, data: {
+  companyName: string;
+}): Promise<{ error?: string; joined?: boolean }> {
+  if (!looksLikeToken(token)) return { error: "Not found" };
+  const [row] = await db.select().from(clientShares)
+    .where(eq(clientShares.inviteToken, token));
+  if (!row || row.toOrgId !== null || !row.toEmail) return { error: "Not found" };
+  if (!inviteOpen(inviteState(row, shopToday()))) {
+    return { error: "That invitation is no longer open." };
+  }
+  const problems = companyProblems(data.companyName);
+  if (problems.length) return { error: problems[0] };
+  const name = data.companyName.trim();
+
+  const payload = parsePayload(row.payload);
+  if (!payload) return { error: "That offer's contents could not be read" };
+
+  // Same two refusals createOperator makes, for the same reasons - among
+  // OPERATORS only, and one person is staff of one company.
+  const orgRows = await db.select({ name: orgs.name, isOperator: orgs.isOperator }).from(orgs);
+  if (orgRows.some((o) => o.isOperator && o.name.toLowerCase() === name.toLowerCase())) {
+    return { error: `A company called ${name} is already on Ridgeline - ask them to invite you in.` };
+  }
+  const [taken] = await db.select().from(houseMembers).where(eq(houseMembers.email, row.toEmail));
+  if (taken) return { error: "That address already has an account - sign in and it will be waiting." };
+
+  /* Claimed before anything is created. Two clicks on one link would
+     otherwise open two workspaces and copy the client into both, and the
+     second is unreachable by anybody - the same race the lead board settles
+     the same way. */
+  const won = await db.update(clientShares)
+    .set({ status: "accepted", decidedBy: row.toEmail, decidedAt: new Date() })
+    .where(and(eq(clientShares.id, row.id), eq(clientShares.status, "pending")))
+    .returning({ id: clientShares.id });
+  if (!won.length) return { error: "That invitation has already been answered." };
+
+  const [org] = await db.insert(orgs).values({
+    name, kind: "provider", isOperator: true, parentOrgId: null,
+  }).returning();
+  await db.insert(houseMembers).values({
+    email: row.toEmail, role: "owner", name: "", addedBy: row.createdBy, orgId: org.id,
+  });
+  await db.insert(expenseCategories).values(missingStarters([]).map((n, i) => ({
+    tenantOrgId: org.id, name: n, sortOrder: i + 1, createdBy: row.toEmail,
+  })));
+
+  const made = await materialize({ payload, destTenantOrgId: org.id, actor: row.toEmail });
+  await raiseReferralFee(row, org.id, made.orgId, "");
+  await db.update(clientShares).set({ destOrgId: made.orgId }).where(eq(clientShares.id, row.id));
+
+  const [sender] = row.tenantOrgId === null ? []
+    : await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, row.tenantOrgId));
+  await audit({
+    actor: row.toEmail, entityType: "org", entityId: org.id, tenantOrgId: org.id,
+    action: `opened a workspace for "${name}" by accepting ${sender?.name ?? "a"} hand-off`
+      + ` - ${payload.client.name}, ${made.systems} systems`,
+  });
+  await notifyHandoffJoined({
+    to: await houseEmails(row.tenantOrgId),
+    company: name, clientName: payload.client.name, systems: made.systems,
+  }).catch(() => {});
+  await notifyInvite({ to: row.toEmail, inviterName: sender?.name ?? "Ridgeline", orgName: name })
+    .catch(() => {});
+  revHouse();
+  revalidatePath("/network");
+  return { joined: true };
+}
+
+/** They opened the link. Recorded once, so the sender can tell read from ignored. */
+export async function markHandoffOpened(token: string): Promise<void> {
+  try {
+    if (!looksLikeToken(token)) return;
+    await db.update(clientShares)
+      .set({ openedAt: new Date() })
+      .where(and(eq(clientShares.inviteToken, token), isNull(clientShares.openedAt)));
+  } catch {
+    // A page must never fail on its own bookkeeping.
+  }
+}
+
+/**
  * The recipient answers. Accepting is the one write that crosses a workspace
  * boundary in the whole application, so the gate is narrow: it is our row only
  * because it is addressed to us, and only while it is still open.
@@ -17557,7 +17750,11 @@ export async function answerCounterOffer(
   if (tenant !== null && row.tenantOrgId !== tenant) return { error: "Not found" };
   if (!mayAnswerCounter(row.status)) return { error: "There is no counter outstanding on that offer." };
 
-  const [to] = await db.select().from(orgs).where(eq(orgs.id, row.toOrgId));
+  /* Only a workspace can counter - an invite has no seat to argue from, and
+     the public page offers no way to. So a null recipient here is a row that
+     could not have reached this state, and the name simply stays blank. */
+  const [to] = row.toOrgId === null ? []
+    : await db.select().from(orgs).where(eq(orgs.id, row.toOrgId));
   const countered: FeeTerms = {
     kind: row.counterKind, feeCents: row.counterCents, feeBps: row.counterBps,
     windowMonths: row.counterWindowMonths, note: row.counterNote,
@@ -17581,6 +17778,9 @@ export async function answerCounterOffer(
 
   const payload = parsePayload(row.payload);
   if (!payload) return { error: "That offer's contents could not be read" };
+  // Same reasoning as the name above: a counter can only exist on an offer
+  // made to a workspace, so there is always somewhere for this to land.
+  if (row.toOrgId === null) return { error: "Not found" };
   const made = await materialize({
     payload, destTenantOrgId: row.toOrgId, actor: u.email,
   });

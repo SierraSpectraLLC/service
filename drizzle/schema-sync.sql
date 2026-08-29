@@ -3737,3 +3737,13 @@ CREATE TABLE IF NOT EXISTS "bug_reports" (
 );
 CREATE INDEX IF NOT EXISTS "bug_reports_status_idx" ON "bug_reports" ("status");
 CREATE INDEX IF NOT EXISTS "bug_reports_tenant_idx" ON "bug_reports" ("tenant_org_id");
+
+-- Handing a client to a shop that is not on the instance yet. to_org_id gives
+-- way to "one of a workspace or an email" - DROP NOT NULL is safe on a column
+-- every existing row has filled.
+ALTER TABLE "client_shares" ALTER COLUMN "to_org_id" DROP NOT NULL;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "to_email" text NOT NULL DEFAULT '';
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "invite_token" text NOT NULL DEFAULT '';
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "opened_at" timestamp;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "expires_on" text NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS "client_shares_invite_idx" ON "client_shares" ("invite_token");

@@ -761,6 +761,57 @@ export async function notifyLeadClaimed(opts: {
 }
 
 /**
+ * A hand-off offered to a shop with no account yet.
+ *
+ * The only email this app sends to somebody who is not a user, so it has to
+ * carry the whole proposition and none of the client: what the work is, what
+ * it costs to take, and one door. Blind, like the page it opens - see
+ * lib/handoff for why that is the honest shape as well as the persuasive one.
+ */
+export async function notifyHandoffInvite(opts: {
+  to: string; fromName: string; summary: string; terms: string; note: string; url: string;
+}) {
+  try {
+    await deliver({
+      to: [opts.to], kind: "client_share", href: opts.url,
+      title: `${opts.fromName} wants to hand you ${opts.summary}`,
+      subject: `${opts.fromName} has service work for you`,
+      body: `<b>${esc(opts.fromName)}</b> uses Ridgeline to keep their instrument
+        service records, and wants to hand a client over to you:
+        <div style="margin-top:8px;font-size:15px;"><b>${esc(opts.summary)}</b></div>
+        ${opts.terms ? `<div style="margin-top:8px;">What they are asking: <b>${esc(opts.terms)}</b></div>` : ""}
+        ${opts.note ? quote(esc(opts.note)) : ""}
+        ${mutedLine("You will see the equipment and roughly where it is. Who the client is stays with them until you accept.")}
+        ${btn(opts.url, "See what is on offer")}
+        ${mutedLine("Accepting opens a Ridgeline workspace for your company with this client already in it - the sites, the systems, the serials. Nothing to type in.")}`,
+    });
+  } catch (e) {
+    console.error("[notify] handoff invite email failed:", (e as Error).message);
+  }
+}
+
+/** They took it, and opened a workspace to do it in. The sender wants to know. */
+export async function notifyHandoffJoined(opts: {
+  to: string[]; company: string; clientName: string; systems: number;
+}) {
+  try {
+    const url = appUrl();
+    await deliver({
+      to: opts.to, kind: "client_share", href: "/network",
+      title: `${opts.company} joined Ridgeline and took ${opts.clientName}`,
+      subject: `${opts.company} accepted your hand-off`,
+      body: `<b>${esc(opts.company)}</b> opened a Ridgeline workspace and accepted
+        <b>${esc(opts.clientName)}</b> - ${opts.systems} system${opts.systems === 1 ? "" : "s"}
+        copied across.
+        ${mutedLine("Your copy is untouched. Anything you agreed on the fee is on the network page.")}
+        ${url ? btn(`${url}/network`, "Open the network") : ""}`,
+    });
+  } catch (e) {
+    console.error("[notify] handoff joined email failed:", (e as Error).message);
+  }
+}
+
+/**
  * Somebody on the staff hit a snag and said so.
  *
  * Goes to the workspace's owners rather than to everybody: it is a thing to

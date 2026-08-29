@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { shareClient } from "@/app/actions";
+import { inviteHandoff, shareClient } from "@/app/actions";
 import { MIN_IDENTIFYING } from "@/lib/clientShare";
 import { FEE_KINDS, FEE_LABEL, termsLine, termsProblems, type FeeKind } from "@/lib/referral";
 import { formatCents, parseMoney } from "@/lib/money";
@@ -34,6 +34,10 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
     && note.toLowerCase().includes(orgName.trim().toLowerCase());
   const [error, setError] = useState("");
   const [blind, setBlind] = useState(true);
+  /* The other lane: a shop with no workspace here yet. Same snapshot, same
+     terms, and accepting opens the workspace - see lib/handoff. */
+  const [inviting, setInviting] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
   const [fee, setFee] = useState({
     kind: "none" as FeeKind, flat: "", pct: "5", months: "12", min: "", max: "", note: "",
   });
@@ -48,6 +52,92 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
     note: fee.note,
   };
   const feeProblem = termsProblems(terms)[0] ?? null;
+
+  const sendInvite = () =>
+    startTransition(async () => {
+      setError("");
+      const res = await inviteHandoff(orgId, { email: inviteEmail, note, terms });
+      if (res.error) { setError(res.error); return; }
+      toast({ message: `Invitation sent to ${inviteEmail.trim()}` });
+      setInviting(false); setInviteEmail(""); setNote("");
+      router.refresh();
+    });
+
+  /* One fee editor, both lanes. The picker and the invitation ask for exactly
+     the same thing, and two copies of a form with a floor, a cap and an
+     either/or in it is two places for them to drift apart. */
+  const feeControls = (
+    <>
+            <div className="dialog-section" style={{ marginTop: 12 }}>What you are asking for</div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <label style={{ display: "block" }}>
+                <span className="mut t-meta" style={{ display: "block" }}>Fee</span>
+                <select value={fee.kind} aria-label="Fee" disabled={pending} style={{ width: "auto" }}
+                  onChange={(e) => setFee({ ...fee, kind: e.target.value as FeeKind })}>
+                  {FEE_KINDS.map((k) => <option key={k} value={k}>{FEE_LABEL[k]}</option>)}
+                </select>
+              </label>
+              {(fee.kind === "flat" || fee.kind === "either") && (
+                <label style={{ display: "block" }}>
+                  <span className="mut t-meta" style={{ display: "block" }}>To accept</span>
+                  <input className="mono t-small" style={{ width: 100 }} value={fee.flat}
+                    aria-label="Fee to accept" placeholder="2000" disabled={pending}
+                    onChange={(e) => setFee({ ...fee, flat: e.target.value })} />
+                </label>
+              )}
+              {(fee.kind === "percent" || fee.kind === "either") && (
+                <>
+                  <label style={{ display: "block" }}>
+                    <span className="mut t-meta" style={{ display: "block" }}>Share, %</span>
+                    <input className="mono t-small" style={{ width: 64 }} value={fee.pct}
+                      aria-label="Share percent" disabled={pending}
+                      onChange={(e) => setFee({ ...fee, pct: e.target.value })} />
+                  </label>
+                  <label style={{ display: "block" }}>
+                    <span className="mut t-meta" style={{ display: "block" }}>For, months</span>
+                    <input className="mono t-small" style={{ width: 64 }} value={fee.months}
+                      aria-label="Window months" disabled={pending}
+                      onChange={(e) => setFee({ ...fee, months: e.target.value })} />
+                  </label>
+                  {/* Both optional, and blank is the common case. The floor is
+                      the one that needs its condition said out loud - see
+                      lib/referral: it waits for the first dollar billed. */}
+                  <label style={{ display: "block" }}>
+                    <span className="mut t-meta" style={{ display: "block" }}>Floor</span>
+                    <input className="mono t-small" style={{ width: 84 }} value={fee.min}
+                      aria-label="Floor" placeholder="none" disabled={pending}
+                      onChange={(e) => setFee({ ...fee, min: e.target.value })} />
+                  </label>
+                  <label style={{ display: "block" }}>
+                    <span className="mut t-meta" style={{ display: "block" }}>Cap</span>
+                    <input className="mono t-small" style={{ width: 84 }} value={fee.max}
+                      aria-label="Cap" placeholder="none" disabled={pending}
+                      onChange={(e) => setFee({ ...fee, max: e.target.value })} />
+                  </label>
+                </>
+              )}
+            </div>
+            {fee.kind !== "none" && (
+              <>
+                <label style={{ marginTop: 8 }}>What the fee is for</label>
+                <input value={fee.note} aria-label="Fee note" disabled={pending}
+                  placeholder="introduction and handover of the account"
+                  onChange={(e) => setFee({ ...fee, note: e.target.value })} />
+                <div className="t-small" style={{ marginTop: 6 }}>
+                  They will see: <b>{termsLine(terms, formatCents)}</b>
+                </div>
+                {fee.kind !== "flat" && (
+                  <div className="mut t-meta" style={{ marginTop: 2 }}>
+                    Worked out from what they invoice this client in Ridgeline. You see the total
+                    and what it comes to - never their invoices. A floor costs them nothing until
+                    they have billed something: a minimum charged on a client who never spent a
+                    dollar is a charge for nothing.
+                  </div>
+                )}
+              </>
+            )}
+    </>
+  );
 
   const toggle = (id: number) =>
     setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
@@ -67,11 +157,50 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
       title="Hand this client over"
       hint="A copy lands in their workspace once they accept. Different from sharing the fleet above, which is only a page they read."
     >
-      {providers.length === 0 ? (
+      {providers.length === 0 && !inviting ? (
         <div className="mut t-small">
           No service companies on your list yet. Find them in{" "}
-          <a href="/network">Service companies</a> first.
+          <a href="/network">Service companies</a>, or{" "}
+          <button className="btn link" style={{ fontSize: 13 }} onClick={() => setInviting(true)}>
+            invite a shop that is not on Ridgeline
+          </button>.
         </div>
+      ) : inviting ? (
+        <>
+          {/* The lane that reaches anybody new. Everything the picker sends is
+              also sent here - the same frozen snapshot, the same terms - the
+              only difference being that there is no workspace on the other
+              end yet, so accepting opens one. See lib/handoff. */}
+          <div className="mut t-small" style={{ marginBottom: 8 }}>
+            They see the equipment, how many sites and which state - never {orgName}&apos;s
+            name, and no addresses or serials - until they accept. Accepting opens a
+            Ridgeline workspace for them with this client already in it.
+          </div>
+          <label>Their email</label>
+          <input value={inviteEmail} aria-label="Their email" disabled={pending}
+            placeholder="owner@theirshop.com"
+            onChange={(e) => setInviteEmail(e.target.value)} />
+          <label style={{ marginTop: 8 }}>A line for them</label>
+          <input value={note} aria-label="Note to them" disabled={pending}
+            placeholder="four LC-MS on your patch - we cannot cover it any more"
+            onChange={(e) => setNote(e.target.value)} />
+          {noteNames && (
+            <div className="t-meta" style={{ color: "var(--t-warn-fg)", marginTop: 4 }}>
+              Your note says &ldquo;{orgName}&rdquo; - they do not get the name until they accept.
+            </div>
+          )}
+          {feeControls}
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <button className="btn accent" disabled={pending || !inviteEmail.trim()}
+              onClick={sendInvite}>
+              {pending ? "Sending…" : "Send the invitation"}
+            </button>
+            <button className="btn" disabled={pending} onClick={() => setInviting(false)}>
+              Cancel
+            </button>
+            {error && <span className="dialog-status err">{error}</span>}
+          </div>
+        </>
       ) : (
         <>
           <div className="mut t-small" style={{ marginBottom: 8 }}>
@@ -106,74 +235,7 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
               taken on a client is not a price, it is a bill - so they see what
               accepting costs before they accept, and accepting is the
               agreement. See lib/referral. */}
-          <div className="dialog-section" style={{ marginTop: 12 }}>What you are asking for</div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-            <label style={{ display: "block" }}>
-              <span className="mut t-meta" style={{ display: "block" }}>Fee</span>
-              <select value={fee.kind} aria-label="Fee" disabled={pending} style={{ width: "auto" }}
-                onChange={(e) => setFee({ ...fee, kind: e.target.value as FeeKind })}>
-                {FEE_KINDS.map((k) => <option key={k} value={k}>{FEE_LABEL[k]}</option>)}
-              </select>
-            </label>
-            {(fee.kind === "flat" || fee.kind === "either") && (
-              <label style={{ display: "block" }}>
-                <span className="mut t-meta" style={{ display: "block" }}>To accept</span>
-                <input className="mono t-small" style={{ width: 100 }} value={fee.flat}
-                  aria-label="Fee to accept" placeholder="2000" disabled={pending}
-                  onChange={(e) => setFee({ ...fee, flat: e.target.value })} />
-              </label>
-            )}
-            {(fee.kind === "percent" || fee.kind === "either") && (
-              <>
-                <label style={{ display: "block" }}>
-                  <span className="mut t-meta" style={{ display: "block" }}>Share, %</span>
-                  <input className="mono t-small" style={{ width: 64 }} value={fee.pct}
-                    aria-label="Share percent" disabled={pending}
-                    onChange={(e) => setFee({ ...fee, pct: e.target.value })} />
-                </label>
-                <label style={{ display: "block" }}>
-                  <span className="mut t-meta" style={{ display: "block" }}>For, months</span>
-                  <input className="mono t-small" style={{ width: 64 }} value={fee.months}
-                    aria-label="Window months" disabled={pending}
-                    onChange={(e) => setFee({ ...fee, months: e.target.value })} />
-                </label>
-                {/* Both optional, and blank is the common case. The floor is
-                    the one that needs its condition said out loud - see
-                    lib/referral: it waits for the first dollar billed. */}
-                <label style={{ display: "block" }}>
-                  <span className="mut t-meta" style={{ display: "block" }}>Floor</span>
-                  <input className="mono t-small" style={{ width: 84 }} value={fee.min}
-                    aria-label="Floor" placeholder="none" disabled={pending}
-                    onChange={(e) => setFee({ ...fee, min: e.target.value })} />
-                </label>
-                <label style={{ display: "block" }}>
-                  <span className="mut t-meta" style={{ display: "block" }}>Cap</span>
-                  <input className="mono t-small" style={{ width: 84 }} value={fee.max}
-                    aria-label="Cap" placeholder="none" disabled={pending}
-                    onChange={(e) => setFee({ ...fee, max: e.target.value })} />
-                </label>
-              </>
-            )}
-          </div>
-          {fee.kind !== "none" && (
-            <>
-              <label style={{ marginTop: 8 }}>What the fee is for</label>
-              <input value={fee.note} aria-label="Fee note" disabled={pending}
-                placeholder="introduction and handover of the account"
-                onChange={(e) => setFee({ ...fee, note: e.target.value })} />
-              <div className="t-small" style={{ marginTop: 6 }}>
-                They will see: <b>{termsLine(terms, formatCents)}</b>
-              </div>
-              {fee.kind !== "flat" && (
-                <div className="mut t-meta" style={{ marginTop: 2 }}>
-                  Worked out from what they invoice this client in Ridgeline. You see the total
-                  and what it comes to - never their invoices. A floor costs them nothing until
-                  they have billed something: a minimum charged on a client who never spent a
-                  dollar is a charge for nothing.
-                </div>
-              )}
-            </>
-          )}
+          {feeControls}
 
           {/* On by default. A referral is worth something because they cannot
               go round you, and the full list is exactly what they would need

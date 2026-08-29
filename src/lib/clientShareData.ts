@@ -190,6 +190,24 @@ export type ShareRow = {
   counteredBy: string;
   /** True while the recipient is seeing a redacted view of it. */
   blind: boolean;
+  /**
+   * An INVITE - offered to an email rather than to a workspace, because the
+   * shop has no account here yet. See lib/handoff.
+   */
+  isInvite: boolean;
+  /** Invites only: whether they have opened the link, and when it lapses. */
+  openedAt: Date | null;
+  expiresOn: string;
+  /**
+   * The link itself, on the SENDER's own row only.
+   *
+   * They made it, and email is the one part of this that reliably fails - a
+   * spam filter between two service companies is the difference between a
+   * conversion and silence. So the sender can always copy the link and send it
+   * the way they were going to telephone anyway. Never on an inbox row: the
+   * token is the authorization, and a recipient has no use for one.
+   */
+  inviteToken: string;
   note: string;
   createdBy: string;
   createdOn: string;
@@ -235,8 +253,15 @@ export async function sharesFor(tenantOrgId: number | null): Promise<{
       : null,
     counteredBy: r.counteredBy,
     blind: r.blind && r.status !== "accepted",
+    isInvite: r.toOrgId === null && r.toEmail !== "",
+    openedAt: r.openedAt,
+    expiresOn: r.expiresOn,
+    inviteToken: "",
     createdOn: r.createdAt.toISOString().slice(0, 10),
-    otherName: (otherId !== null ? names.get(otherId) : "") ?? "another service company",
+    /* An invite has no workspace to name, so it is named by the address it
+       went to - which is also the only thing the sender knows about them. */
+    otherName: (otherId !== null ? names.get(otherId) : "")
+      || r.toEmail || "another service company",
     payload: parsePayload(r.payload),
     sourceOrgId: r.sourceOrgId, destOrgId: r.destOrgId,
   });
@@ -250,7 +275,8 @@ export async function sharesFor(tenantOrgId: number | null): Promise<{
     (r.blind && r.payload ? { ...r, payload: redactPayload(r.payload) } : r);
 
   return {
-    sent: sent.map((r) => shape(r, r.toOrgId)),
+    // The token only ever leaves on the sender's own rows - see the field.
+    sent: sent.map((r) => ({ ...shape(r, r.toOrgId), inviteToken: r.inviteToken })),
     inbox: inbox.map((r) => blindly(shape(r, r.tenantOrgId))),
   };
 }

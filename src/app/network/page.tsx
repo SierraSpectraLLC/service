@@ -60,7 +60,7 @@ export default async function NetworkPage() {
         sub="Who else is out there, who you work with, and the clients moving between you."
       />
 
-      <ClientShareBoard inbox={shares.inbox} sent={shares.sent} />
+      <ClientShareBoard inbox={shares.inbox} sent={shares.sent} today={shopToday()} />
 
       <LeadBoard mine={leadRows.mine} offered={leadRows.offered}
         providers={others.filter((l) => linked.has(l.orgId)).map((l) => ({ id: l.orgId, name: l.name }))} />

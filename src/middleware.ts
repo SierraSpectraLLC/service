@@ -29,9 +29,17 @@ export function middleware(req: NextRequest) {
 
 export const config = {
   // The public pages are the token-keyed ones - a listing's buyer view, a
-  // drop link's sender view, a share link's recipient view - plus the API
-  // routes that serve them. Every one of them treats its unguessable token as
-  // the credential and 404s anything it doesn't explicitly allow.
+  // drop link's sender view, a share link's recipient view, a hand-off
+  // invitation - plus the API routes that serve them. Every one of them treats
+  // its unguessable token as the credential and 404s anything it doesn't
+  // explicitly allow.
+  //
+  // /handoff is the one whose whole point is that the reader has no account:
+  // it is an offer of work sent to a shop that is not on Ridgeline yet, and a
+  // sign-in wall in front of it would be a sign-in wall in front of the only
+  // thing that could persuade them to want one. It shows the REDACTED
+  // snapshot - see lib/handoff and clientShare.redactPayload - so a stranger
+  // can read every word and still not be able to go round the sender.
   //
   // /equipment is the other kind of public: the indexable catalog library,
   // deliberately open to everyone including crawlers, which is why the sitemap
@@ -61,5 +69,5 @@ export const config = {
   // through the gate above; `/` decides for itself who it is talking to (see
   // app/(dashboard)/page.tsx), because the dashboard and the landing page are
   // the same address wearing two faces.
-  matcher: ["/((?!api/auth|api/cron|api/stripe|api/upload|api/files|api/drop|api/share|api/catalog|login|listing|drop|share|equipment|opengraph-image|sitemap.xml|robots.txt|_next/static|_next/image|favicon.ico).+)"],
+  matcher: ["/((?!api/auth|api/cron|api/stripe|api/upload|api/files|api/drop|api/share|api/catalog|login|listing|drop|share|handoff|equipment|opengraph-image|sitemap.xml|robots.txt|_next/static|_next/image|favicon.ico).+)"],
 };

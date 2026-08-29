@@ -365,6 +365,11 @@ const FIXTURE = `
     (2, 'Coastal Analytical - Dock 2', '88 Pier Road, Astoria, OR 97103', 'Sam Okafor', 610, '${OWNER}'),
     (1, 'Lab Zen - Sacramento annex', '2101 Capitol Ave, Sacramento, CA 95816', 'Dev Ito', 140, '${OWNER}');
   UPDATE org_sites SET tax_rate_bps = 1025 WHERE org_id = 1;
+  -- Stamped, like every other row. Unstamped sites are filtered out by
+  -- forTenant, so the fixture's clients had addresses everywhere EXCEPT the
+  -- places that read them through a tenant - a hand-off payload with no sites
+  -- in it, which is most of what a hand-off is for.
+  UPDATE org_sites SET tenant_org_id = 3 WHERE tenant_org_id IS NULL;
   -- Pins for the routed-miles path, so no seed-time network call: real
   -- coordinates for both Lab Zen labs, and the dev owner living in Elk Grove.
   -- Chosen to INVERT the shop's typed defaults: from the shop, Richmond is

@@ -565,8 +565,27 @@ export const leadOffers = pgTable("lead_offers", {
 export const clientShares = pgTable("client_shares", {
   id: serial("id").primaryKey(),
   tenantOrgId: tenantStamp(),
-  /** The operator being offered the client. */
-  toOrgId: integer("to_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  /**
+   * The operator being offered the client, when they are already here.
+   *
+   * NULL means an INVITE: the offer went to an email address belonging to a
+   * shop with no workspace on this instance yet, and to_email carries it.
+   * That is the whole conversion loop - the companies most worth reaching are
+   * by definition the ones not reachable through a picker of existing tenants.
+   */
+  toOrgId: integer("to_org_id").references(() => orgs.id, { onDelete: "cascade" }),
+  /** Invites only: who it went to, and the unguessable door they open it by. */
+  toEmail: text("to_email").notNull().default(""),
+  inviteToken: text("invite_token").notNull().default(""),
+  /**
+   * When they first opened it.
+   *
+   * Sent-and-ignored and sent-and-considered are different outcomes, and a
+   * sender deciding whether to pick up the telephone needs to tell them apart.
+   */
+  openedAt: timestamp("opened_at"),
+  /** An invite is a door, and a door with no clock on it is a liability. */
+  expiresOn: text("expires_on").notNull().default(""),   // YYYY-MM-DD
   /** The client organization in the sender's workspace. */
   sourceOrgId: integer("source_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
   /** What was created in the recipient's workspace on accept. Null until then. */

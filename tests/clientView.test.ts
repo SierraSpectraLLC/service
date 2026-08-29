@@ -160,8 +160,12 @@ describe("whose move it is", () => {
   it("says who holds it before it says whether it matters", () => {
     // Not theirs is not theirs, whatever state it is in: a system on the
     // bench being repaired is with the shop, not a chore on the client's list.
-    for (const s of CLIENT_STATES) {
-      expect(standingPill(s, false, "Sierra Spectra").label, s).toBe("With Sierra Spectra");
+    for (const p of [
+      { pmDue: false, blockedOnThem: false },
+      { pmDue: true, blockedOnThem: false },
+      { pmDue: false, blockedOnThem: true },
+    ]) {
+      expect(standingPill(p, false, "Sierra Spectra").label).toBe("With Sierra Spectra");
     }
   });
 });

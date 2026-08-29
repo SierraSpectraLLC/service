@@ -7,6 +7,7 @@ import {
   answerCounterOffer, counterClientShare, decideClientShare, withdrawClientShare,
 } from "@/app/actions";
 import { blindSummary, summarize, SHARE_LABEL, SHARE_LABEL_IN, type ShareState } from "@/lib/clientShare";
+import { INVITE_LABEL, INVITE_TONE, inviteState } from "@/lib/handoff";
 import {
   boundsPhrase, choicesFor, FEE_KINDS, FEE_LABEL, termsLine, termsProblems, type FeeKind,
 } from "@/lib/referral";
@@ -31,8 +32,10 @@ const TONE: Record<ShareState, "good" | "warn" | "bad" | "faint"> = {
  * nothing has been written yet - "a client was shared with you" reads like it
  * already happened.
  */
-export default function ClientShareBoard({ inbox, sent }: {
+export default function ClientShareBoard({ inbox, sent, today }: {
   inbox: ShareRow[]; sent: ShareRow[];
+  /** The shop's day, for reading whether an invitation has lapsed. */
+  today: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -220,9 +223,30 @@ export default function ClientShareBoard({ inbox, sent }: {
                     <span className="mut t-meta"> · {termsLine(s.terms, formatCents)}</span>
                   )}
                 </span>
-                <Pill tone={TONE[s.status as ShareState] ?? "faint"}>
-                  {SHARE_LABEL[s.status as ShareState] ?? s.status}
-                </Pill>
+                {/* An invite says something a share cannot: whether they
+                    opened it. Sent-and-ignored and sent-and-read are different
+                    outcomes and the difference is what decides whether
+                    somebody telephones - see lib/handoff. */}
+                {s.isInvite ? (() => {
+                  const st = inviteState(s, today);
+                  return <Pill tone={INVITE_TONE[st]}>{INVITE_LABEL[st]}</Pill>;
+                })() : (
+                  <Pill tone={TONE[s.status as ShareState] ?? "faint"}>
+                    {SHARE_LABEL[s.status as ShareState] ?? s.status}
+                  </Pill>
+                )}
+                {/* Email is the one part of this that reliably fails, and a
+                    spam filter between two service companies is the difference
+                    between a conversion and silence. */}
+                {s.isInvite && s.inviteToken && s.status === "pending" && (
+                  <button className="btn link" style={{ fontSize: 12 }}
+                    onClick={() => {
+                      const url = `${window.location.origin}/handoff/${s.inviteToken}`;
+                      void navigator.clipboard?.writeText(url)
+                        .then(() => toast({ message: "Link copied - send it however you like" }))
+                        .catch(() => toast({ message: url }));
+                    }}>copy link</button>
+                )}
                 {s.status === "pending" && (
                   <button className="btn link" style={{ fontSize: 12 }} disabled={pending}
                     onClick={() => pull(s.id)}>withdraw</button>
