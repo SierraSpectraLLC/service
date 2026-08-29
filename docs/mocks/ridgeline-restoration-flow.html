@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ridgeline — Restoration flow · T-003</title>
+<style>
+  :root{
+    --navy:#172A4A; --navy-2:#21395F;
+    --coral:#E8613C; --coral-2:#D4532F;
+    --sky:#5BA8D9; --slate:#64748B;
+    --bg:#F5F6F9; --card:#FFFFFF; --line:#E4E8EF;
+    --ink:#1E293B; --mut:#64748B; --link:#1D6396;
+    --shadow-sm:0 1px 2px rgba(23,42,74,.05);
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --fs-micro:10px; --fs-meta:11px; --fs-small:12px; --fs-body:13px;
+    --fs-lead:14px; --fs-title:16px; --fs-hero:19px; --fs-page:22px; --fs-metric:26px;
+    --t-neutral-bg:#EEF1F5; --t-neutral-fg:#475569;
+    --t-faint-bg:#F4F6F9;   --t-faint-fg:#94A3B8;
+    --t-info-bg:#E7F2FA;    --t-info-fg:#1D6396;
+    --t-good-bg:#E5F3E5;    --t-good-fg:#2E6B2E;
+    --t-warn-bg:#FAF0DC;    --t-warn-fg:#8A5410;
+    --t-accent-bg:#EDEBFA;  --t-accent-fg:#4F45A3;
+    --t-bad-bg:#FBE9E9;     --t-bad-fg:#A32D2D;
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px;
+  }
+  @media (pointer:coarse){
+    :root{--fs-micro:11px;--fs-meta:12px;--fs-small:13px;--fs-body:14px;--fs-lead:15px}
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    background:var(--bg);color:var(--ink);font-size:var(--fs-lead);line-height:1.45;
+  }
+  a{color:var(--link)}
+  .mono{font-family:var(--mono)}
+  .mut{color:var(--mut)}
+
+  .spectrum{height:3px;background:linear-gradient(90deg,#172A4A 0%,#2B5F8F 25%,#5BA8D9 50%,#1D9E75 72%,#E8613C 100%)}
+  .app-header{background:var(--navy);color:#fff}
+  .header-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 16px;max-width:1080px;margin:0 auto}
+  .brand-name{font-weight:800;font-size:var(--fs-title);letter-spacing:.4px;white-space:nowrap}
+  .brand-org{font-size:var(--fs-small);opacity:.72}
+  .header-nav{margin-left:auto;display:flex;gap:2px;flex-wrap:wrap;align-items:center}
+  .nav-link{display:inline-block;padding:6px 11px;border-radius:999px;color:inherit;text-decoration:none;font-size:var(--fs-body);font-weight:600;opacity:.85}
+  .nav-link:hover{background:rgba(255,255,255,.14);opacity:1}
+  .nav-link.active{background:rgba(255,255,255,.92);color:var(--navy);opacity:1;font-weight:700}
+
+  .container{width:100%;max-width:1080px;margin:0 auto;padding:16px}
+  .crumb{font-size:var(--fs-small);color:var(--mut);margin-bottom:4px}
+  .crumb a{color:var(--mut);text-decoration:none}
+  .crumb a:hover{color:var(--link);text-decoration:underline}
+  .crumb b{color:var(--ink);font-weight:500}
+  .pagehead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-4)}
+  .pagehead h1{font-size:var(--fs-page);font-weight:800;letter-spacing:-.3px;color:var(--navy);margin:0}
+  .sysid{font-family:var(--mono);font-size:var(--fs-small);font-weight:700;color:var(--t-info-fg);background:var(--t-info-bg);padding:2px 8px;border-radius:6px}
+
+  .pipeline{display:flex;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow-sm);margin-bottom:var(--sp-4)}
+  .stage{flex:1;padding:9px 12px;border-right:1px solid var(--line);min-width:0;cursor:pointer;background:none;text-align:left;font-family:inherit;border-top:none;border-bottom:none;border-left:none}
+  .stage:last-child{border-right:none}
+  .stage .num{font-family:var(--mono);font-size:var(--fs-micro);color:var(--mut);display:block;font-weight:700}
+  .stage .nm{font-size:var(--fs-small);font-weight:600;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+  .stage.done .num::after{content:" ✓";color:var(--t-good-fg)}
+  .stage.active{background:var(--navy)}
+  .stage.active .nm{color:#fff}
+  .stage.active .num{color:var(--sky)}
+  .stage:focus-visible{outline:2px solid var(--sky);outline-offset:-2px}
+  @media(max-width:720px){.stage .nm{display:none}.stage.active .nm{display:block}}
+
+  .grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:0 16px;align-items:start}
+  @media(max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}.side-wrap{position:static!important}}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:var(--shadow-sm)}
+  .card-title{font-weight:800;font-size:var(--fs-title);line-height:1.25;letter-spacing:-.2px;color:var(--navy);margin:0 0 var(--sp-3);display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .eyebrow{font-size:var(--fs-meta);color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+
+  .row{display:grid;grid-template-columns:190px minmax(0,1fr);gap:var(--sp-2);padding:7px 0;align-items:center;border-bottom:1px solid var(--bg)}
+  .row:last-child{border-bottom:none}
+  .row>label{font-size:var(--fs-meta);font-weight:700;color:var(--mut);margin:0}
+  @media(max-width:640px){.row{grid-template-columns:minmax(0,1fr)}}
+
+  input[type=text],input[type=password],select,textarea{
+    padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:#fff;width:100%;
+    font-family:inherit;font-size:var(--fs-body);color:var(--ink);
+    transition:border-color .12s ease,box-shadow .12s ease;
+  }
+  input:focus-visible,select:focus-visible,textarea:focus-visible{
+    outline:none;border-color:var(--sky);box-shadow:0 0 0 3px rgba(91,168,217,.22);
+  }
+  ::placeholder{color:#94A3B8}
+
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff}
+  .seg button{border:none;background:none;cursor:pointer;font-family:inherit;font-size:var(--fs-body);font-weight:600;color:var(--ink);padding:6px 12px}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button[aria-pressed="true"]{background:var(--navy);color:#fff}
+  .seg button:focus-visible{outline:2px solid var(--sky);outline-offset:-2px}
+
+  .pill{font-size:var(--fs-meta);font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;display:inline-block}
+  .pill.neutral{background:var(--t-neutral-bg);color:var(--t-neutral-fg)}
+  .pill.faint{background:var(--t-faint-bg);color:var(--t-faint-fg)}
+  .pill.info{background:var(--t-info-bg);color:var(--t-info-fg)}
+  .pill.good{background:var(--t-good-bg);color:var(--t-good-fg)}
+  .pill.warn{background:var(--t-warn-bg);color:var(--t-warn-fg)}
+  .pill.accent{background:var(--t-accent-bg);color:var(--t-accent-fg)}
+  .pill.bad{background:var(--t-bad-bg);color:var(--t-bad-fg)}
+
+  table{width:100%;border-collapse:collapse;font-size:var(--fs-body)}
+  th{text-align:left;font-size:var(--fs-meta);font-weight:700;color:var(--mut);padding:6px 8px;border-bottom:1px solid var(--line)}
+  td{padding:8px;border-bottom:1px solid var(--bg);vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  td.mono{font-size:var(--fs-small);color:var(--slate)}
+  .addrow{display:block;width:100%;background:none;border:1px dashed var(--line);border-radius:8px;color:var(--mut);font-family:inherit;font-size:var(--fs-body);font-weight:600;padding:9px;margin-top:var(--sp-2);cursor:pointer}
+  .addrow:hover{color:var(--link);border-color:var(--sky)}
+
+  .btn{cursor:pointer;border-radius:8px;font-weight:700;font-size:var(--fs-body);padding:8px 14px;border:1px solid var(--line);background:#fff;color:var(--navy);font-family:inherit;transition:background .12s ease,border-color .12s ease}
+  .btn:hover{background:#F4F7FB;border-color:#D3DAE4}
+  .btn:disabled{opacity:.55;cursor:default;pointer-events:none}
+  .btn.sm{font-size:var(--fs-small);padding:5px 10px}
+  .btn.primary{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .btn.primary:hover{background:var(--navy-2);border-color:var(--navy-2)}
+  .btn.accent{background:var(--coral);color:#fff;border-color:var(--coral)}
+  .btn.accent:hover{background:var(--coral-2);border-color:var(--coral-2)}
+  .btn.link{border:none;background:none;padding:0;color:var(--link);font-size:var(--fs-meta)}
+  .btn.link:hover{text-decoration:underline}
+  .btn:focus-visible{outline:2px solid var(--sky);outline-offset:1px}
+
+  .scanbar{display:flex;gap:8px;align-items:center}
+  .scanbar input{font-family:var(--mono);font-size:var(--fs-body)}
+  .scan-hint{font-size:var(--fs-meta);color:var(--mut);margin-top:6px}
+  .scan-hint b{color:var(--t-good-fg)}
+
+  .gchips{display:flex;gap:4px}
+  .gchips button{width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:#fff;color:var(--mut);font-family:var(--mono);font-size:var(--fs-small);font-weight:700;cursor:pointer;padding:0}
+  .gchips button[aria-pressed="true"]{background:var(--navy);border-color:var(--navy);color:#fff}
+
+  .finding{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--bg)}
+  .finding:last-child{border-bottom:none}
+  .fdot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:6px}
+  .fdot.bad{background:#C23A3A}.fdot.warn{background:#E0A100}.fdot.good{background:#2E8B3E}
+  .finding .fbody{min-width:0;flex:1}
+  .finding .ftitle{font-size:var(--fs-body);font-weight:600}
+  .finding .fmeta{font-size:var(--fs-meta);color:var(--mut);margin-top:2px}
+  .finding .fmeta .pill{margin-left:6px}
+
+  .iv-q{padding:9px 0;border-bottom:1px solid var(--bg)}
+  .iv-q:last-child{border-bottom:none}
+  .iv-q .q{font-size:var(--fs-body);font-weight:600;margin-bottom:6px}
+  .iv-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+  .cred{display:flex;gap:6px;align-items:center;min-width:0}
+  .cred input{font-family:var(--mono);font-size:var(--fs-small)}
+  .cred-note{font-size:var(--fs-meta);color:var(--mut);margin-top:5px}
+  .cred-note b{color:var(--t-good-fg);font-weight:700}
+
+  .gate-item{display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid var(--bg);font-size:var(--fs-body)}
+  .gate-item:last-child{border-bottom:none}
+  .gate-item .mark{width:18px;height:18px;border-radius:50%;flex:none;display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-micro);font-weight:800}
+  .mark.auto-ok{background:var(--t-good-bg);color:var(--t-good-fg)}
+  .mark.auto-wait{background:var(--t-warn-bg);color:var(--t-warn-fg)}
+  .mark.auto-bad{background:var(--t-bad-bg);color:var(--t-bad-fg)}
+  .gate-item .src{margin-left:auto;font-size:var(--fs-micro);color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+  .gate-item label{display:flex;align-items:center;gap:9px;cursor:pointer;font-weight:400;font-size:var(--fs-body);color:var(--ink);margin:0}
+  .gate-item input{accent-color:var(--navy);width:15px;height:15px}
+
+  .chk{display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid var(--bg);font-size:var(--fs-body);cursor:pointer}
+  .chk:last-child{border-bottom:none}
+  .chk input{accent-color:var(--navy);width:15px;height:15px;flex:none}
+  .chk .who{margin-left:auto;font-family:var(--mono);font-size:var(--fs-micro);color:var(--mut);font-weight:700}
+
+  .side-wrap{position:sticky;top:16px}
+  .prov-figure{font-size:var(--fs-metric);font-weight:800;color:var(--navy);font-variant-numeric:tabular-nums}
+  .prov-figure .unit{font-size:var(--fs-lead);color:var(--mut);font-weight:600}
+  .prov-sub{font-size:var(--fs-small);color:var(--mut);margin-bottom:var(--sp-2)}
+  .meter{height:8px;border-radius:999px;background:var(--t-faint-bg);overflow:hidden;margin-bottom:var(--sp-3)}
+  .meter .known{background:linear-gradient(90deg,var(--navy) 0%,var(--sky) 100%);height:100%;transition:width .35s ease}
+  .prov-list{list-style:none;margin:0;padding:0}
+  .prov-list li{font-size:var(--fs-small);padding:6px 0;border-bottom:1px solid var(--bg);display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .prov-list li:last-child{border-bottom:none}
+  .prov-note{font-size:var(--fs-meta);color:var(--mut);margin-top:var(--sp-3);padding-top:var(--sp-3);border-top:1px solid var(--line)}
+
+  .ledger{list-style:none;margin:0;padding:0}
+  .ledger li{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--bg);font-size:var(--fs-small)}
+  .ledger li:last-child{border-bottom:none}
+  .ledger .when{font-family:var(--mono);font-size:var(--fs-micro);color:var(--mut);flex:none;width:88px;padding-top:2px}
+  .ledger .what b{font-weight:700;color:var(--navy)}
+
+  .foot{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:var(--sp-3) 0 var(--sp-5)}
+  .foot .why{font-size:var(--fs-small);color:var(--mut)}
+
+  .screen{display:none}
+  .screen.on{display:block}
+
+  /* verdict block (Verify stage) */
+  .verdict{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--t-good-fg);background:var(--t-good-bg);border-radius:10px;margin-bottom:var(--sp-3)}
+  .verdict .v{font-size:var(--fs-hero);font-weight:800;color:var(--t-good-fg)}
+  .verdict .vd{font-size:var(--fs-small);color:var(--t-good-fg)}
+  .metric-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+  .metric{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .metric .mn{font-size:var(--fs-meta);font-weight:700;color:var(--mut)}
+  .metric .mv{font-family:var(--mono);font-size:var(--fs-body);font-weight:700;margin-top:2px}
+  .metric .mv .pill{margin-left:6px}
+
+  /* transfer hero (Commission stage) */
+  .transfer{border:1px solid var(--line);border-radius:12px;padding:16px;background:linear-gradient(180deg,#FFFFFF 0%,#F4F7FB 100%);text-align:center}
+  .transfer h3{margin:0 0 4px;font-size:var(--fs-hero);font-weight:800;color:var(--navy);letter-spacing:-.2px}
+  .transfer p{margin:0 0 12px;font-size:var(--fs-small);color:var(--mut)}
+
+  @media (prefers-reduced-motion:reduce){.meter .known{transition:none}}
+</style>
+</head>
+<body>
+
+<div class="spectrum"></div>
+<header class="app-header">
+  <div class="header-row">
+    <div>
+      <span class="brand-name">RIDGELINE</span>
+      <span class="brand-org" style="margin-left:8px">Lab Zen LLC</span>
+    </div>
+    <nav class="header-nav">
+      <a class="nav-link" href="#">Work</a>
+      <a class="nav-link active" href="#">Assets</a>
+      <a class="nav-link" href="#">Money</a>
+      <a class="nav-link" href="#">Settings</a>
+    </nav>
+  </div>
+</header>
+
+<div class="container">
+  <div class="crumb"><a href="#">Assets</a> / <a href="#">Restoration queue</a> / <b>T-003</b></div>
+  <div class="pagehead">
+    <h1>Thermo Trace 1310 GC · ISQ 7000 · TriPlus 500 HS</h1>
+    <span class="sysid">T-003</span>
+    <span class="pill info" id="stagePill">Receiving</span>
+  </div>
+
+  <nav class="pipeline" aria-label="Restoration stages" id="pipeline">
+    <button class="stage active" data-screen="s1"><span class="num">01</span><span class="nm">Receive</span></button>
+    <button class="stage" data-screen="s2"><span class="num">02</span><span class="nm">Restore</span></button>
+    <button class="stage" data-screen="s3"><span class="num">03</span><span class="nm">Verify</span></button>
+    <button class="stage" data-screen="s4"><span class="num">04</span><span class="nm">Ship</span></button>
+    <button class="stage" data-screen="s5"><span class="num">05</span><span class="nm">Commission</span></button>
+  </nav>
+
+  <div class="grid">
+    <main>
+
+      <!-- ════════ 01 RECEIVE ════════ -->
+      <div class="screen on" id="s1">
+        <section class="card">
+          <h2 class="card-title">Receive components <span class="eyebrow">serial-first</span></h2>
+          <div class="scanbar">
+            <input type="text" placeholder="Scan or type a serial number…" aria-label="Serial number">
+            <button class="btn primary">Add</button>
+          </div>
+          <div class="scan-hint">Serials resolve against the OEM catalog and the Ridgeline network. <b>ISQ7N2009006 matched ISQ 7000</b> — model, part number, and spec filled automatically.</div>
+          <table style="margin-top:12px">
+            <thead><tr><th>Component</th><th>Serial</th><th>Condition</th><th>Network</th></tr></thead>
+            <tbody>
+              <tr><td>ISQ 7000 Single Quad MS<br><span class="mono mut" style="font-size:var(--fs-micro)">ISQ7K-N0VPI</span></td><td class="mono">ISQ7N2009006</td>
+                <td><div class="gchips"><button aria-pressed="false">A</button><button aria-pressed="false">B</button><button aria-pressed="true">C</button><button aria-pressed="false">D</button><button aria-pressed="false">F</button></div></td>
+                <td><span class="pill faint">New to Ridgeline</span></td></tr>
+              <tr><td>Trace 1310 GC<br><span class="mono mut" style="font-size:var(--fs-micro)">14800403</span></td><td class="mono">720001783</td>
+                <td><div class="gchips"><button aria-pressed="false">A</button><button aria-pressed="true">B</button><button aria-pressed="false">C</button><button aria-pressed="false">D</button><button aria-pressed="false">F</button></div></td>
+                <td><span class="pill faint">New to Ridgeline</span></td></tr>
+              <tr><td>TriPlus 500 Headspace<br><span class="mono mut" style="font-size:var(--fs-micro)">25118100</span></td><td class="mono">820100261</td>
+                <td><div class="gchips"><button aria-pressed="false">A</button><button aria-pressed="false">B</button><button aria-pressed="false">C</button><button aria-pressed="true">D</button><button aria-pressed="false">F</button></div></td>
+                <td><span class="pill faint">New to Ridgeline</span></td></tr>
+              <tr><td>Edwards RV3 Rough Pump<br><span class="mono mut" style="font-size:var(--fs-micro)">A65201906</span></td><td class="mono">180675201</td>
+                <td><div class="gchips"><button aria-pressed="true">B</button><button aria-pressed="false">C</button><button aria-pressed="false">D</button></div></td>
+                <td><span class="pill faint">New to Ridgeline</span></td></tr>
+            </tbody>
+          </table>
+          <button class="addrow">+ Add without serial (consumables, filters, cables)</button>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Findings <span class="eyebrow">become Restore tasks</span></h2>
+          <div class="finding"><span class="fdot bad"></span>
+            <div class="fbody"><div class="ftitle">Headspace arm not operating properly</div>
+              <div class="fmeta">TriPlus 500 · logged by MH <span class="pill accent">Task queued — Restore</span></div></div>
+            <button class="btn sm">Edit</button></div>
+          <div class="finding"><span class="fdot warn"></span>
+            <div class="fbody"><div class="ftitle">Electron multiplier suspect — verify gain before release</div>
+              <div class="fmeta">ISQ 7000 · logged by MH <span class="pill accent">Task queued — Restore</span></div></div>
+            <button class="btn sm">Edit</button></div>
+          <button class="addrow">+ Log a finding — photo, component, severity</button>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Provenance interview <span class="eyebrow">asked once, travels forever</span></h2>
+          <div class="iv-q"><div class="q">Was the system running when it came off the bench?</div>
+            <div class="iv-row"><div class="seg"><button aria-pressed="false">Running</button><button aria-pressed="false">Down</button><button aria-pressed="true">Nobody knows</button></div></div></div>
+          <div class="iv-q"><div class="q">When was it last maintained, and is there paper?</div>
+            <div class="iv-row"><input type="text" placeholder="Last PM date — leave blank if unknown" style="max-width:260px">
+              <div class="seg"><button aria-pressed="false">Docs — attach</button><button aria-pressed="true">No docs</button></div></div></div>
+          <div class="iv-q"><div class="q">Any service contract in its past?</div>
+            <div class="iv-row"><div class="seg"><button aria-pressed="false">Yes</button><button aria-pressed="false">No</button><button aria-pressed="true">Unknown</button></div>
+              <span class="mut" style="font-size:var(--fs-small)">Honest gaps beat invented answers.</span></div></div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Handoff kit <span class="eyebrow">what the next owner needs</span></h2>
+          <div class="row"><label>Workstation</label>
+            <div style="min-width:0">
+              <div class="cred">
+                <input type="text" value="LZ1" style="max-width:130px" aria-label="Username">
+                <input type="password" value="secret" aria-label="Password">
+                <button class="btn sm reveal-btn">Reveal</button>
+              </div>
+              <div class="cred-note"><b>Vaulted.</b> Encrypted at rest, access logged, shared on transfer.</div>
+            </div>
+          </div>
+          <div class="row"><label>Acquisition software</label><input type="text" value="TraceFinder required — no active license on system"></div>
+          <div class="row"><label>Utilities & site needs</label><input type="text" value="100–240 V · 50/60 Hz · 50 A max · 6-15 plug · no vent required" style="font-family:var(--mono);font-size:var(--fs-small)"></div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Ready to advance? <span class="eyebrow">computed, not pinky-sworn</span></h2>
+          <div class="gate-item"><span class="mark auto-ok">✓</span> 4 components serialized against catalog <span class="src">system</span></div>
+          <div class="gate-item"><span class="mark auto-ok">✓</span> Condition graded on every component <span class="src">system</span></div>
+          <div class="gate-item"><span class="mark auto-wait">…</span> Arrival photos — 2 of 4 minimum attached <span class="src">system</span></div>
+          <div class="gate-item"><label><input type="checkbox"> Provenance interview complete (gaps allowed, skips aren't)</label> <span class="src">confirm</span></div>
+          <div class="gate-item"><label><input type="checkbox"> Handoff kit vaulted or marked none</label> <span class="src">confirm</span></div>
+        </section>
+        <div class="foot">
+          <button class="btn">Save & park</button>
+          <button class="btn accent" data-goto="s2">Advance to Restore</button>
+        </div>
+      </div>
+
+      <!-- ════════ 02 RESTORE ════════ -->
+      <div class="screen" id="s2">
+        <section class="card">
+          <h2 class="card-title">Restore tasks <span class="eyebrow">from receiving findings + plan</span></h2>
+          <div class="finding"><span class="fdot bad"></span>
+            <div class="fbody"><div class="ftitle">Repair headspace arm drive</div>
+              <div class="fmeta">TriPlus 500 · assigned SE · from finding #1 <span class="pill info">In progress</span></div></div>
+            <button class="btn sm">Open</button></div>
+          <div class="finding"><span class="fdot warn"></span>
+            <div class="fbody"><div class="ftitle">Replace electron multiplier, verify gain curve</div>
+              <div class="fmeta">ISQ 7000 · assigned SE <span class="pill neutral">Queued</span></div></div>
+            <button class="btn sm">Open</button></div>
+          <div class="finding"><span class="fdot good"></span>
+            <div class="fbody"><div class="ftitle">Full PM — source clean, filament, septa, liner, pump oil</div>
+              <div class="fmeta">System · assigned SE <span class="pill good">Done · Aug 30</span></div></div>
+            <button class="btn sm">Open</button></div>
+          <button class="addrow">+ Add task</button>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Parts used <span class="eyebrow">flows to cost & the record</span></h2>
+          <table>
+            <thead><tr><th>Part</th><th>PN</th><th>Qty</th><th>Source</th><th>Cost</th></tr></thead>
+            <tbody>
+              <tr><td>Electron multiplier</td><td class="mono">WE023950</td><td>1</td><td>Frit & Ferrule</td><td class="mono">$685.00</td></tr>
+              <tr><td>Filament assembly</td><td class="mono">1R120-1005</td><td>1</td><td>Stock</td><td class="mono">$212.00</td></tr>
+              <tr><td>RV3 pump oil (1L)</td><td class="mono">H11025011</td><td>2</td><td>Stock</td><td class="mono">$58.00</td></tr>
+            </tbody>
+          </table>
+          <button class="addrow">+ Add part — scan or search catalog</button>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Outside work <span class="eyebrow">3rd-party, documented or it didn't happen</span></h2>
+          <div class="finding"><span class="fdot good"></span>
+            <div class="fbody"><div class="ftitle">Headspace arm drive rebuild — Vendor: MotionRepair Co.</div>
+              <div class="fmeta">RMA #MR-2231 · report attached <span class="pill good">Docs on file</span></div></div>
+            <button class="btn sm">View</button></div>
+          <button class="addrow">+ Log outside work — vendor, RMA, attach report</button>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Ready to advance? <span class="eyebrow">computed</span></h2>
+          <div class="gate-item"><span class="mark auto-wait">…</span> 1 of 3 restore tasks still open <span class="src">system</span></div>
+          <div class="gate-item"><span class="mark auto-ok">✓</span> All parts logged with lot/PN <span class="src">system</span></div>
+          <div class="gate-item"><span class="mark auto-ok">✓</span> Outside work documented <span class="src">system</span></div>
+          <div class="gate-item"><label><input type="checkbox"> Before/after photos attached per task</label> <span class="src">confirm</span></div>
+        </section>
+        <div class="foot">
+          <button class="btn" data-goto="s1">← Receive</button>
+          <button class="btn accent" data-goto="s3">Advance to Verify</button>
+        </div>
+      </div>
+
+      <!-- ════════ 03 VERIFY ════════ -->
+      <div class="screen" id="s3">
+        <section class="card">
+          <h2 class="card-title">Bench setup <span class="eyebrow">everything talks before anything proves</span></h2>
+          <label class="chk"><input type="checkbox" checked> Gas lines connected & leak-checked <span class="who">TB</span></label>
+          <label class="chk"><input type="checkbox" checked> Power connected — correct receptacle confirmed <span class="who">TB</span></label>
+          <label class="chk"><input type="checkbox" checked> Software installed & communicates with all modules <span class="who">TB</span></label>
+          <label class="chk"><input type="checkbox" checked> Vacuum pulled — base pressure in range <span class="who">TB</span></label>
+          <label class="chk"><input type="checkbox"> Headspace pathway leak-free at temp <span class="who">—</span></label>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Instrument checkout <span class="eyebrow">tunecheck verdict attaches here</span></h2>
+          <div class="verdict">
+            <span class="v">PASS</span>
+            <span class="vd">EI tune · Aug 31, 14:22 · report parsed by tunecheck · full gauge set on file</span>
+            <button class="btn sm" style="margin-left:auto">View report</button>
+          </div>
+          <div class="metric-grid">
+            <div class="metric"><div class="mn">m/z 69 abundance</div><div class="mv">2.4e7 <span class="pill good">OK</span></div></div>
+            <div class="metric"><div class="mn">m/z 502/69 ratio</div><div class="mv">3.1% <span class="pill good">OK</span></div></div>
+            <div class="metric"><div class="mn">Peak width</div><div class="mv">0.58 <span class="pill good">OK</span></div></div>
+            <div class="metric"><div class="mn">EM gain @ target</div><div class="mv">1140 V <span class="pill good">OK</span></div></div>
+            <div class="metric"><div class="mn">Air/water</div><div class="mv">N2 1.8% <span class="pill good">OK</span></div></div>
+            <div class="metric"><div class="mn">Baseline noise</div><div class="mv">Low <span class="pill good">OK</span></div></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Application check <span class="eyebrow">only if the buyer needs one</span></h2>
+          <div class="row"><label>Buyer method required?</label>
+            <div class="seg"><button aria-pressed="true">Yes</button><button aria-pressed="false">No</button></div>
+          </div>
+          <div class="row"><label>Method</label><input type="text" value="EtO in headspace — SIM, qualifier ions added"></div>
+          <div class="row"><label>Demonstration</label><span><span class="pill good">LOD/LOQ study complete</span> <button class="btn link">Attach data package</button></span></div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Data hygiene <span class="eyebrow">the part lawyers ask about</span></h2>
+          <div class="row"><label>Instrument PC backup</label><span><span class="pill good">Imaged Aug 31</span></span></div>
+          <div class="row"><label>Prior-owner data wipe</label><span><span class="pill warn">Scheduled — after final runs</span></span></div>
+          <div class="row"><label>Wipe certificate</label><span class="mut" style="font-size:var(--fs-small)">Generated automatically at wipe — attaches to the record</span></div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Ready to advance? <span class="eyebrow">computed</span></h2>
+          <div class="gate-item"><span class="mark auto-ok">✓</span> Checkout verdict: PASS on file <span class="src">tunecheck</span></div>
+          <div class="gate-item"><span class="mark auto-wait">…</span> 1 bench setup item open <span class="src">system</span></div>
+          <div class="gate-item"><span class="mark auto-wait">…</span> Data wipe pending <span class="src">system</span></div>
+          <div class="gate-item"><label><input type="checkbox"> Application data package reviewed & attached</label> <span class="src">confirm</span></div>
+        </section>
+        <div class="foot">
+          <button class="btn" data-goto="s2">← Restore</button>
+          <button class="btn accent" data-goto="s4">Advance to Ship</button>
+        </div>
+      </div>
+
+      <!-- ════════ 04 SHIP ════════ -->
+      <div class="screen" id="s4">
+        <section class="card">
+          <h2 class="card-title">Destination <span class="eyebrow">pre-filled from the buyer's portal survey</span></h2>
+          <div class="row"><label>Ship to</label><input type="text" value="Testen Laboratories — 3148 MLK Blvd, Lynwood, CA 90262"></div>
+          <div class="row"><label>On-site contact</label><input type="text" value="Michael Kucharski · (562) 480-5350"></div>
+          <div class="row"><label>Facility</label>
+            <span>
+              <span class="pill good">Loading dock</span>
+              <span class="pill good">Ground floor</span>
+              <span class="pill warn">Liftgate requested anyway</span>
+            </span>
+          </div>
+          <div class="row"><label>Site utilities check</label><span><span class="pill good">Power verified vs handoff kit</span> <span class="pill good">No vent needed</span></span></div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Prep checklist <span class="eyebrow">GC/MS template — per instrument type</span></h2>
+          <label class="chk"><input type="checkbox" checked> System vented, source cooled <span class="who">BR</span></label>
+          <label class="chk"><input type="checkbox" checked> Rough pump oil drained <span class="who">BR</span></label>
+          <label class="chk"><input type="checkbox" checked> Transfer line disconnected, secured in "U" <span class="who">BR</span></label>
+          <label class="chk"><input type="checkbox" checked> Tray/carousel in park position <span class="who">BR</span></label>
+          <label class="chk"><input type="checkbox" checked> Vents & fittings capped/foiled <span class="who">BR</span></label>
+          <label class="chk"><input type="checkbox" checked> Wiring photographed before disconnect <span class="who">BR</span></label>
+          <label class="chk"><input type="checkbox"> Crated photos — system in crate, pre-lid <span class="who">—</span></label>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Manifest & crates <span class="eyebrow">every box, every serial</span></h2>
+          <table>
+            <thead><tr><th>Crate</th><th>Contents</th><th>Serial</th><th>Weight</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">CR-1</td><td>Trace 1310 GC + ISQ 7000</td><td class="mono">720001783 / ISQ7N2009006</td><td class="mono">410 lb</td></tr>
+              <tr><td class="mono">CR-2</td><td>TriPlus 500 + tower</td><td class="mono">820100261 / 820200166</td><td class="mono">180 lb</td></tr>
+              <tr><td class="mono">CR-3</td><td>Pump, PC, cables, kit box</td><td class="mono">180675201 + misc</td><td class="mono">120 lb</td></tr>
+            </tbody>
+          </table>
+          <div class="cred-note" style="margin-top:8px">Packing list prints per crate and rides inside the lid — receiving tech checks it off in the app at the dock.</div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Carrier & cover <span class="eyebrow">the money part</span></h2>
+          <div class="row"><label>Carrier</label><input type="text" value="XPO — liftgate service"></div>
+          <div class="row"><label>Tracking</label><input type="text" value="2454235234" style="font-family:var(--mono)"></div>
+          <div class="row"><label>Declared value</label><input type="text" value="$68,000" style="max-width:160px"></div>
+          <div class="row"><label>Pickup</label><input type="text" value="Sep 4, AM window" style="max-width:220px"></div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Ready to advance? <span class="eyebrow">computed</span></h2>
+          <div class="gate-item"><span class="mark auto-ok">✓</span> Prep checklist — 6 of 7, photos pending <span class="src">system</span></div>
+          <div class="gate-item"><span class="mark auto-ok">✓</span> All serials assigned to a crate <span class="src">system</span></div>
+          <div class="gate-item"><span class="mark auto-ok">✓</span> Declared value & tracking on file <span class="src">system</span></div>
+          <div class="gate-item"><label><input type="checkbox"> Crated photos attached (before lid-on)</label> <span class="src">confirm</span></div>
+        </section>
+        <div class="foot">
+          <button class="btn" data-goto="s3">← Verify</button>
+          <button class="btn accent" data-goto="s5">Mark shipped → Commission</button>
+        </div>
+      </div>
+
+      <!-- ════════ 05 COMMISSION ════════ -->
+      <div class="screen" id="s5">
+        <section class="card">
+          <h2 class="card-title">Install dispatch <span class="eyebrow">a Ridgeline job like any other</span></h2>
+          <div class="row"><label>Assigned FSE</label><input type="text" value="Sierra Spectra — J. (network provider)"></div>
+          <div class="row"><label>Scheduled</label><input type="text" value="Sep 9, on-site 09:00" style="max-width:220px"></div>
+          <div class="row"><label>Walk-in packet</label><span><span class="pill good">Full record shared</span> <span class="mut" style="font-size:var(--fs-small)">— findings, parts, tune history, handoff kit</span></span></div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">On-site checklist <span class="eyebrow">receive → install → prove</span></h2>
+          <label class="chk"><input type="checkbox" checked> Crates received — packing list verified, no damage <span class="who">JS</span></label>
+          <label class="chk"><input type="checkbox" checked> Uncrated & positioned, utilities connected <span class="who">JS</span></label>
+          <label class="chk"><input type="checkbox" checked> Pump-down — base vacuum in range <span class="who">JS</span></label>
+          <label class="chk"><input type="checkbox" checked> On-site EI tune — PASS <span class="who">JS</span></label>
+          <label class="chk"><input type="checkbox"> Buyer method run on-site (if contracted) <span class="who">—</span></label>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Acceptance <span class="eyebrow">buyer signs in their own portal</span></h2>
+          <div class="verdict" style="border-color:var(--line);background:#fff">
+            <span class="v" style="color:var(--navy)">On-site PASS</span>
+            <span class="vd" style="color:var(--mut)">Sep 9, 13:40 · tune report attached · awaiting buyer sign-off</span>
+          </div>
+          <div class="gate-item"><span class="mark auto-ok">✓</span> On-site checkout verdict on file <span class="src">tunecheck</span></div>
+          <div class="gate-item"><span class="mark auto-wait">…</span> Buyer acceptance — portal request sent to M. Kucharski <span class="src">portal</span></div>
+          <div class="cred-note" style="margin-top:8px">Acceptance is the release condition — when escrow is in play, funds move on this signature, not on a phone call.</div>
+        </section>
+
+        <section class="card">
+          <div class="transfer">
+            <h3>Transfer the record</h3>
+            <p>On acceptance, T-003's full history — findings, parts, outside work, tune verdicts, wipe certificate, handoff kit — moves to Testen Laboratories. Lab Zen keeps a provider copy. The serial keeps its story.</p>
+            <button class="btn accent">Transfer to buyer on acceptance</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Ledger <span class="eyebrow">the story so far</span></h2>
+          <ul class="ledger">
+            <li><span class="when">08-29 09:12</span><span class="what"><b>MH</b> opened receiving — 4 components matched to catalog</span></li>
+            <li><span class="when">08-30 16:05</span><span class="what"><b>SE</b> completed full PM · parts logged</span></li>
+            <li><span class="when">08-31 14:22</span><span class="what"><b>tunecheck</b> EI tune PASS — report parsed & attached</span></li>
+            <li><span class="when">09-04 08:40</span><span class="what"><b>BR</b> shipped 3 crates · XPO · declared $68,000</span></li>
+            <li><span class="when">09-09 13:40</span><span class="what"><b>JS</b> on-site tune PASS — acceptance requested</span></li>
+          </ul>
+        </section>
+        <div class="foot">
+          <button class="btn" data-goto="s4">← Ship</button>
+          <button class="btn primary" disabled>Awaiting buyer acceptance</button>
+        </div>
+      </div>
+
+    </main>
+
+    <aside class="side-wrap">
+      <div class="card">
+        <h2 class="card-title">Provenance</h2>
+        <div class="prov-figure" id="provPct">38<span class="unit">%</span></div>
+        <div class="prov-sub">of this system's history is documented</div>
+        <div class="meter"><div class="known" id="provBar" style="width:38%"></div></div>
+        <ul class="prov-list" id="provList"></ul>
+        <div class="prov-note" id="provNote"></div>
+      </div>
+      <div class="card" id="sessionCard">
+        <h2 class="card-title">Session</h2>
+        <div id="sessionBody"></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+  const stageMeta={
+    s1:{pill:['Receiving','info'],prov:38,list:[
+        ['Serials matched to catalog','good','4/4'],
+        ['Running at deinstall','warn','Unknown'],
+        ['Last PM','warn','Unknown'],
+        ['Contract history','warn','Unknown'],
+        ['Maintenance records','bad','Missing'],
+        ['Prior network record','faint','None']],
+      note:'Every gap is a question the next buyer will ask. A system that lived on Ridgeline arrives near 100%.',
+      session:[['Receiving tech','M. Hernandez'],['Opened','Aug 29 · 09:12'],['Source','Acquired — auction lot']]},
+    s2:{pill:['Restoring','info'],prov:61,list:[
+        ['Serials matched to catalog','good','4/4'],
+        ['Restore tasks','warn','1 open'],
+        ['Parts traceability','good','3 logged'],
+        ['Outside work','good','Documented'],
+        ['History before Lab Zen','warn','Unknown'],
+        ['Record since receiving','good','Complete']],
+      note:'From here forward the record is airtight — the unknowns are all pre-Ridgeline.',
+      session:[['Lead','Service Engineer'],['Tasks','2 done · 1 open'],['Parts cost to date','$955.00']]},
+    s3:{pill:['Verifying','info'],prov:74,list:[
+        ['Checkout verdict','good','PASS'],
+        ['Bench setup','warn','1 open'],
+        ['Application demo','good','LOD/LOQ done'],
+        ['PC backup','good','Imaged'],
+        ['Data wipe','warn','Scheduled'],
+        ['Record since receiving','good','Complete']],
+      note:'The tune report is parsed, not filed — its metrics live on the record forever.',
+      session:[['Lead','T. Beall'],['Verdict','PASS · Aug 31'],['Method','EtO headspace SIM']]},
+    s4:{pill:['Shipping','info'],prov:88,list:[
+        ['Prep checklist','good','6/7'],
+        ['Serial→crate map','good','Complete'],
+        ['Declared value','good','$68,000'],
+        ['Tracking','good','On file'],
+        ['Crated photos','warn','Pending'],
+        ['Record since receiving','good','Complete']],
+      note:'The buyer watches this stage live from their portal — no "where is it" phone calls.',
+      session:[['Packed by','B. (Brad)'],['Crates','3 · 710 lb'],['Pickup','Sep 4 AM · XPO']]},
+    s5:{pill:['Commissioning','good'],prov:96,list:[
+        ['Install','good','Complete'],
+        ['On-site checkout','good','PASS'],
+        ['Buyer acceptance','warn','Awaiting'],
+        ['Transfer','faint','Armed'],
+        ['Wipe certificate','good','On file'],
+        ['Record since receiving','good','Complete']],
+      note:'On acceptance, the record transfers with the serial. The next intake of this system starts at 96%, not 38%.',
+      session:[['FSE','Sierra Spectra · JS'],['On-site','Sep 9 · 09:00'],['Release','On buyer signature']]}
+  };
+
+  function setStage(id){
+    document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id===id));
+    document.querySelectorAll('#pipeline .stage').forEach(st=>{
+      const mine=st.dataset.screen===id;
+      st.classList.toggle('active',mine);
+      st.classList.toggle('done',parseInt(st.dataset.screen[1])<parseInt(id[1]));
+    });
+    const m=stageMeta[id];
+    const pill=document.getElementById('stagePill');
+    pill.textContent=m.pill[0];pill.className='pill '+m.pill[1];
+    document.getElementById('provPct').innerHTML=m.prov+'<span class="unit">%</span>';
+    document.getElementById('provBar').style.width=m.prov+'%';
+    document.getElementById('provList').innerHTML=m.list.map(([k,tone,v])=>'<li>'+k+' <span class="pill '+tone+'">'+v+'</span></li>').join('');
+    document.getElementById('provNote').textContent=m.note;
+    document.getElementById('sessionBody').innerHTML=m.session.map(([k,v])=>'<div class="row"><label>'+k+'</label><span style="font-size:var(--fs-body)">'+v+'</span></div>').join('');
+    window.scrollTo({top:0});
+  }
+  document.querySelectorAll('#pipeline .stage').forEach(st=>st.addEventListener('click',()=>setStage(st.dataset.screen)));
+  document.querySelectorAll('[data-goto]').forEach(b=>b.addEventListener('click',()=>setStage(b.dataset.goto)));
+  setStage('s1');
+
+  document.querySelectorAll('.seg').forEach(seg=>{
+    seg.querySelectorAll('button').forEach(b=>{
+      b.addEventListener('click',()=>{
+        seg.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed','false'));
+        b.setAttribute('aria-pressed','true');
+      });
+    });
+  });
+  document.querySelectorAll('.gchips').forEach(g=>{
+    g.querySelectorAll('button').forEach(b=>{
+      b.addEventListener('click',()=>{
+        g.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed','false'));
+        b.setAttribute('aria-pressed','true');
+      });
+    });
+  });
+  document.querySelectorAll('.reveal-btn').forEach(btn=>{
+    btn.addEventListener('click',e=>{
+      const pw=e.target.parentElement.querySelector('input[type=password],input.revealed');
+      if(pw.type==='password'){pw.type='text';pw.classList.add('revealed');e.target.textContent='Hide';}
+      else{pw.type='password';e.target.textContent='Reveal';}
+    });
+  });
+</script>
+</body>
+</html>
