@@ -2309,3 +2309,53 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
   font-size: var(--fs-meta); color: var(--mut);
   margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line);
 }
+
+/* Receive stage: the scan bar, grade chips, finding rows, interview rows,
+   and the vaulted-credential note. Same source mock as the pipeline above. */
+.scanbar { display: flex; gap: 8px; align-items: center; }
+/* Mono family only - a field's SIZE belongs to the base input rule and the
+   iOS block at the foot of this file, which must keep the last word. */
+.scanbar input { font-family: var(--mono); }
+.scan-hint { font-size: var(--fs-meta); color: var(--mut); margin-top: 4px; }
+.scan-hint b { color: var(--t-good-fg); }
+
+.gchips { display: flex; gap: 4px; }
+.gchips button {
+  width: 26px; height: 26px; border-radius: var(--radius); border: 1px solid var(--line);
+  background: #fff; color: var(--mut); font-family: var(--mono); font-size: var(--fs-small);
+  font-weight: 700; cursor: pointer; padding: 0;
+}
+.gchips button[aria-pressed="true"] { background: var(--navy); border-color: var(--navy); color: #fff; }
+.gchips button:disabled { cursor: default; opacity: 0.55; }
+.gchips button:focus-visible { outline: 2px solid var(--sky); outline-offset: 1px; }
+
+.finding { display: flex; gap: 8px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--bg); }
+.finding:last-child { border-bottom: none; }
+.fdot { width: 8px; height: 8px; border-radius: 999px; flex: none; margin-top: 6px; }
+.fdot.bad { background: var(--t-bad-fg); }
+.fdot.warn { background: var(--t-warn-fg); }
+.fdot.good { background: var(--t-good-fg); }
+.finding .fbody { min-width: 0; flex: 1; }
+.finding .ftitle { font-size: var(--fs-body); font-weight: 600; }
+.finding .fmeta { font-size: var(--fs-meta); color: var(--mut); margin-top: 2px; }
+.finding .fmeta .pill { margin-left: 4px; }
+
+/* "+ Add" as a quiet dashed row at the foot of a list - an invitation, not a
+   control fighting the content above it. */
+.addrow {
+  display: block; width: 100%; background: none; border: 1px dashed var(--line);
+  border-radius: var(--radius); color: var(--mut); font-family: inherit;
+  font-size: var(--fs-body); font-weight: 600; padding: 8px; margin-top: var(--sp-2); cursor: pointer;
+}
+.addrow:hover { color: var(--link); border-color: var(--sky); }
+.addrow:focus-visible { outline: 2px solid var(--sky); outline-offset: 1px; }
+
+.iv-q { padding: 8px 0; border-bottom: 1px solid var(--bg); }
+.iv-q:last-child { border-bottom: none; }
+.iv-q .q { font-size: var(--fs-body); font-weight: 600; margin-bottom: 4px; }
+.iv-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.cred { display: flex; gap: 4px; align-items: center; min-width: 0; }
+.cred input { font-family: var(--mono); }
+.cred-note { font-size: var(--fs-meta); color: var(--mut); margin-top: 4px; }
+.cred-note b { color: var(--t-good-fg); font-weight: 700; }

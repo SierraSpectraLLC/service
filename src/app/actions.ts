@@ -21,13 +21,16 @@ import {
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, stipends, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
   dunningEvents, creditOverrides, quotes, quoteLines, payroll, perks, bugReports,
-  restorationProjects, restorationConfirms,
+  restorationProjects, restorationConfirms, componentConditions, findings,
+  provenanceAnswers, handoffKits,
 } from "@/db/schema";
 import {
+  CONDITION_GRADES, FINDING_SEVERITIES, LICENSE_STATES, PROVENANCE_QUESTIONS,
   RESTORATION_SOURCES, RESTORATION_STAGE_LABEL, STAGE_CONFIRM_KEYS,
   gateReady, nextStage,
 } from "@/lib/restoration";
 import { evaluateRestorationGate } from "@/lib/restorationData";
+import { open as openSealed, seal } from "@/lib/secretBox";
 import { siteLabel } from "@/lib/sites";
 import {
   allNumbers, catalogEntry, catalogName, cleanAliases, currentNumber, MAX_PART_PHOTOS,
@@ -18468,6 +18471,259 @@ export async function confirmRestorationGateItem(
     tenantOrgId: p.tenantOrgId, field: key,
     action: `${on ? "confirmed" : "unchecked"} gate item "${key}" on the ${p.stage} stage`,
   });
+  revRestoration(projectId);
+  return {};
+}
+
+// ── Receive stage ───────────────────────────────────────────────────────────
+
+/** The asset, only if it is a component of this project's system. */
+async function projectComponent(p: { instrumentId: number }, assetId: number) {
+  const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
+  return a && a.instrumentId === p.instrumentId ? a : null;
+}
+
+/**
+ * Serial-first receive. Resolution order: (1) a serial already on this
+ * system says so instead of duplicating; (2) an exact serial match on a
+ * shelf spare in this workspace attaches THAT unit - the record travels with
+ * the serial; (3) otherwise a new component is created through the ordinary
+ * createAsset path, so intake procedures, catalog gases and the
+ * model-review queue all fire exactly as they do everywhere else.
+ *
+ * The "Network" answer is v1-honest: everything reads "new" until the
+ * cross-org serial history lookup exists (lib/serialLookup is the seam - it
+ * already finds matches outside the workspace; surfacing them here is a
+ * decision about disclosure, not plumbing).
+ */
+export async function receiveRestorationComponent(
+  projectId: number,
+  data: { serial: string; kind: string; model: string; manufacturer: string },
+): Promise<{ error?: string; assetId?: number; resolved?: "attached" | "created"; network?: "new" }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const serial = data.serial.trim();
+  if (!serial && !data.model.trim() && !data.kind.trim()) {
+    return { error: "Give the component a serial, or at least a type." };
+  }
+
+  if (serial) {
+    const siblings = await db.select().from(assets).where(eq(assets.instrumentId, p.instrumentId));
+    if (siblings.some((a) => a.serial.trim().toLowerCase() === serial.toLowerCase())) {
+      return { error: `Serial ${serial} is already received on this system.` };
+    }
+    // A shelf spare in this workspace with the same serial IS this unit.
+    const spares = await db.select().from(assets)
+      .where(and(isNull(assets.instrumentId), forTenant(assets.tenantOrgId, myTenantOrgId(u))));
+    const spare = spares.find((a) => a.serial.trim().toLowerCase() === serial.toLowerCase());
+    if (spare) {
+      const res = await attachAssets([spare.id], p.instrumentId);
+      if (res?.error) return { error: res.error };
+      await db.insert(componentConditions).values({ projectId, assetId: spare.id }).onConflictDoNothing();
+      await audit({
+        actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+        tenantOrgId: p.tenantOrgId,
+        action: `received SN ${serial} - matched the shelf spare already on record`,
+      });
+      revRestoration(projectId);
+      return { assetId: spare.id, resolved: "attached", network: "new" };
+    }
+  }
+
+  const created = await createAsset(p.instrumentId, {
+    kind: data.kind, model: data.model, serial, manufacturer: data.manufacturer,
+    owner: "", location: "", note: "",
+  });
+  if (created.error || !created.id) return { error: created.error ?? "That didn't save" };
+  await db.insert(componentConditions).values({ projectId, assetId: created.id }).onConflictDoNothing();
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId,
+    action: `received ${data.model.trim() || data.kind.trim() || "a component"}${serial ? ` SN ${serial}` : " (no serial)"} - new to Ridgeline`,
+  });
+  revRestoration(projectId);
+  return { assetId: created.id, resolved: "created", network: "new" };
+}
+
+/** One grade, one component, this project - an opinion formed at THIS
+ * receiving, so it lives on the project rather than the asset. */
+export async function setComponentCondition(
+  projectId: number, assetId: number, grade: string, notes = "",
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  if (grade !== "" && !(CONDITION_GRADES as readonly string[]).includes(grade)) return { error: "Grades run A to F." };
+  const a = await projectComponent(p, assetId);
+  if (!a) return { error: "Not found" };
+  await db.insert(componentConditions)
+    .values({ projectId, assetId, grade, notes: notes.trim(), gradedBy: u.email, gradedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [componentConditions.projectId, componentConditions.assetId],
+      set: { grade, notes: notes.trim(), gradedBy: u.email, gradedAt: new Date() },
+    });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: "condition",
+    action: grade
+      ? `graded ${a.model || a.kind}${a.serial ? ` SN ${a.serial}` : ""} condition ${grade}`
+      : `cleared the grade on ${a.model || a.kind}`,
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/**
+ * A finding: something wrong, noticed and written down. It immediately
+ * queues a restore task carrying the finding's id, so the observation and
+ * the work are one thread - nothing logged is ever silently dropped.
+ */
+export async function logRestorationFinding(
+  projectId: number,
+  data: { assetId?: number | null; severity: string; title: string; notes?: string },
+): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const title = data.title.trim();
+  if (!title) return { error: "Say what was found." };
+  if (!(FINDING_SEVERITIES as readonly string[]).includes(data.severity)) return { error: "Severity is bad or warn." };
+  const assetId = data.assetId ?? null;
+  if (assetId !== null && !(await projectComponent(p, assetId))) return { error: "Not found" };
+
+  const [f] = await db.insert(findings).values({
+    projectId, assetId, severity: data.severity, title,
+    notes: (data.notes ?? "").trim(), createdBy: u.email,
+  }).returning();
+  await db.insert(tasks).values({
+    tenantOrgId: p.tenantOrgId, instrumentId: p.instrumentId, assetId,
+    title, body: (data.notes ?? "").trim(), state: "Open", origin: "finding",
+    restorationProjectId: projectId, findingId: f.id,
+  });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId,
+    action: `logged a ${data.severity === "bad" ? "serious " : ""}finding: ${title} - restore task queued`,
+  });
+  revRestoration(projectId);
+  return { id: f.id };
+}
+
+/** One interview answer. 'unknown' is an answer; only a skipped question is
+ * a gap the gate refuses. */
+export async function answerProvenance(
+  projectId: number, questionKey: string, answer: string, detail = "",
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const q = PROVENANCE_QUESTIONS.find((x) => x.key === questionKey);
+  if (!q) return { error: "Not found" };
+  if (!(q.answers as readonly string[]).includes(answer)) return { error: "That isn't one of the answers." };
+  await db.insert(provenanceAnswers)
+    .values({ projectId, questionKey, answer, detail: detail.trim(), answeredBy: u.email, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [provenanceAnswers.projectId, provenanceAnswers.questionKey],
+      set: { answer, detail: detail.trim(), answeredBy: u.email, updatedAt: new Date() },
+    });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: questionKey, newValue: answer,
+    action: `answered provenance: ${q.question} - ${answer === "unknown" ? "nobody knows" : answer}${detail.trim() ? ` (${detail.trim()})` : ""}`,
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/**
+ * The handoff kit. The credential secret is sealed before it touches the row
+ * (AES-GCM via lib/secretBox) - a blank incoming secret means "leave what is
+ * vaulted alone", so re-saving the card never wipes the vault.
+ */
+export async function saveHandoffKit(
+  projectId: number,
+  data: { softwareNotes: string; licenseStatus: string; utilities: string; credUsername: string; credSecret?: string },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  if (!(LICENSE_STATES as readonly string[]).includes(data.licenseStatus)) return { error: "Pick a license status." };
+  const newSecret = (data.credSecret ?? "").trim();
+  if (newSecret && !vaultConfigured()) return { error: VAULT_UNCONFIGURED };
+
+  const base = {
+    softwareNotes: data.softwareNotes.trim(),
+    licenseStatus: data.licenseStatus,
+    utilities: data.utilities.trim(),
+    credUsername: data.credUsername.trim(),
+    updatedAt: new Date(),
+  };
+  const vaulting = newSecret
+    ? { credSecret: seal(newSecret), credUpdatedBy: u.email, credUpdatedAt: new Date() }
+    : {};
+  await db.insert(handoffKits).values({ projectId, ...base, ...vaulting })
+    .onConflictDoUpdate({ target: [handoffKits.projectId], set: { ...base, ...vaulting } });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId,
+    action: newSecret
+      ? "updated the handoff kit and vaulted the workstation credential"
+      : "updated the handoff kit",
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/**
+ * Reveal = decrypt, return once, and say so on the ledger. The secret never
+ * rides a page render - only this action's response - and every reveal is a
+ * named person at a named time.
+ */
+export async function revealHandoffCredential(projectId: number): Promise<{ error?: string; secret?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const [kit] = await db.select().from(handoffKits).where(eq(handoffKits.projectId, projectId));
+  const secret = openSealed(kit?.credSecret || null);
+  if (secret === null) return { error: "Nothing is vaulted on this project." };
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: "credential_revealed",
+    action: "revealed the vaulted workstation credential",
+  });
+  return { secret };
+}
+
+/**
+ * Arrival (and later, crated) photos: ordinary attachments, additionally
+ * stamped with the project so the gate can count them. They appear on the
+ * system's own photo panel too - one pipeline, one storage bill.
+ */
+export async function addRestorationPhotos(
+  projectId: number, files: { fileName: string; url: string; size: number }[],
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  if (!files.length) return {};
+  const t0 = await resolveTarget({ instrumentId: p.instrumentId, assetId: null });
+  if ("error" in t0) return t0;
+  const owner = await storeOwnerForTarget(t0);
+  const guard = await guardStorage(owner, await storeTenantFor(owner, u), files.reduce((n, f) => n + (f.size || 0), 0));
+  if (guard) return guard;
+  await db.insert(attachments).values(files.map((f) => ({
+    tenantOrgId: t0.tenantOrgId, instrumentId: p.instrumentId,
+    restorationProjectId: projectId,
+    fileName: f.fileName.slice(0, 200), kind: "Photo", url: f.url, size: f.size,
+    uploadedBy: u.name, description: "Restoration photo",
+  })));
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId,
+    action: `added ${files.length} restoration photo${files.length === 1 ? "" : "s"}`,
+  });
+  rev(p.instrumentId);
   revRestoration(projectId);
   return {};
 }

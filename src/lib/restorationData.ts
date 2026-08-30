@@ -6,7 +6,7 @@ import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
   acceptances, assets, attachments, checklistRunItems, checklistRuns, checkoutVerdicts,
-  componentConditions, crateContents, crates, instruments, orgs, outsideWork, parts,
+  componentConditions, crateContents, crates, findings, handoffKits, instruments, orgs, outsideWork, parts,
   provenanceAnswers, restorationConfirms, restorationProjects, shipments, tasks,
 } from "@/db/schema";
 import type { SessionUser } from "@/lib/authz";
@@ -181,4 +181,79 @@ export async function restorationQueue(user: SessionUser): Promise<RestorationQu
       pct: provenance.get(p.id)?.pct ?? 0,
     };
   });
+}
+
+export type ReceiveComponent = {
+  assetId: number;
+  kind: string;
+  model: string;
+  manufacturer: string;
+  serial: string;
+  grade: string;
+  notes: string;
+};
+
+export type ReceiveFinding = {
+  id: number;
+  severity: string;
+  title: string;
+  notes: string;
+  createdBy: string;
+  componentLabel: string;
+  /** The auto-queued restore task's state, "" if it has since been deleted. */
+  taskState: string;
+};
+
+export type ReceiveData = {
+  components: ReceiveComponent[];
+  findingList: ReceiveFinding[];
+  /** questionKey -> { answer, detail } */
+  answers: Record<string, { answer: string; detail: string }>;
+  kit: {
+    softwareNotes: string; licenseStatus: string; utilities: string;
+    credUsername: string; hasSecret: boolean;
+  } | null;
+  photoCount: number;
+};
+
+/** Everything the Receive surface renders. The vaulted secret never rides
+ * this - only its existence; reveal is its own audited action. */
+export async function restorationReceiveData(p: RestorationProjectRow): Promise<ReceiveData> {
+  const [componentRows, conditionRows, findingRows, findingTasks, answerRows, kitRows, photos] = await Promise.all([
+    db.select().from(assets).where(eq(assets.instrumentId, p.instrumentId)).orderBy(assets.sortOrder),
+    db.select().from(componentConditions).where(eq(componentConditions.projectId, p.id)),
+    db.select().from(findings).where(eq(findings.projectId, p.id)).orderBy(findings.createdAt),
+    db.select({ findingId: tasks.findingId, state: tasks.state }).from(tasks)
+      .where(eq(tasks.restorationProjectId, p.id)),
+    db.select().from(provenanceAnswers).where(eq(provenanceAnswers.projectId, p.id)),
+    db.select().from(handoffKits).where(eq(handoffKits.projectId, p.id)),
+    db.select({ id: attachments.id }).from(attachments)
+      .where(and(eq(attachments.restorationProjectId, p.id), eq(attachments.kind, "Photo"))),
+  ]);
+  const conditionOf = new Map(conditionRows.map((c) => [c.assetId, c]));
+  const componentLabel = (assetId: number | null) => {
+    if (assetId === null) return "System";
+    const a = componentRows.find((c) => c.id === assetId);
+    return a ? a.model || a.kind : "a removed component";
+  };
+  const kit = kitRows[0] ?? null;
+  return {
+    components: componentRows.map((a) => ({
+      assetId: a.id, kind: a.kind, model: a.model, manufacturer: a.manufacturer, serial: a.serial,
+      grade: conditionOf.get(a.id)?.grade ?? "",
+      notes: conditionOf.get(a.id)?.notes ?? "",
+    })),
+    findingList: findingRows.map((f) => ({
+      id: f.id, severity: f.severity, title: f.title, notes: f.notes,
+      createdBy: f.createdBy.split("@")[0],
+      componentLabel: componentLabel(f.assetId),
+      taskState: findingTasks.find((t) => t.findingId === f.id)?.state ?? "",
+    })),
+    answers: Object.fromEntries(answerRows.map((a) => [a.questionKey, { answer: a.answer, detail: a.detail }])),
+    kit: kit ? {
+      softwareNotes: kit.softwareNotes, licenseStatus: kit.licenseStatus, utilities: kit.utilities,
+      credUsername: kit.credUsername, hasSecret: kit.credSecret !== "",
+    } : null,
+    photoCount: photos.length,
+  };
 }

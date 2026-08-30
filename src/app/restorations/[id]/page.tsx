@@ -10,11 +10,12 @@ import {
   RESTORATION_SOURCE_LABEL, RESTORATION_STAGES, RESTORATION_STAGE_LABEL,
   daysInStage, nextStage, queueStageTone, stageIndex, type RestorationStage,
 } from "@/lib/restoration";
-import { evaluateRestorationGate, provenanceForProjects } from "@/lib/restorationData";
+import { evaluateRestorationGate, provenanceForProjects, restorationReceiveData } from "@/lib/restorationData";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { PageHead, Pill } from "@/components/ui";
 import ActivityFeed from "@/components/ActivityFeed";
 import RestorationGateCard from "@/components/RestorationGateCard";
+import RestorationReceive from "@/components/RestorationReceive";
 
 export const dynamic = "force-dynamic";
 
@@ -59,7 +60,7 @@ export default async function RestorationPage({ params, searchParams }: {
   const viewed = s && stageIndex(s) >= 0 && stageIndex(s) <= currentIdx ? (s as RestorationStage) : (project.stage as RestorationStage);
   const viewingCurrent = viewed === project.stage;
 
-  const [gate, provenance, buyer, ledger] = await Promise.all([
+  const [gate, provenance, buyer, ledger, receive] = await Promise.all([
     viewingCurrent && project.stage !== "complete" ? evaluateRestorationGate(project) : Promise.resolve(null),
     provenanceForProjects([project]).then((m) => m.get(project.id)!),
     project.buyerOrgId !== null
@@ -68,6 +69,7 @@ export default async function RestorationPage({ params, searchParams }: {
     db.select().from(auditLog)
       .where(and(eq(auditLog.entityType, "restoration"), eq(auditLog.entityId, String(project.id))))
       .orderBy(desc(auditLog.createdAt)).limit(100),
+    viewed === "receive" ? restorationReceiveData(project) : Promise.resolve(null),
   ]);
 
   const next = nextStage(project.stage);
@@ -118,19 +120,24 @@ export default async function RestorationPage({ params, searchParams }: {
 
       <div className="proj-grid">
         <main>
-          <section className="card">
-            <h2 className="card-title">
-              {RESTORATION_STAGE_LABEL[viewed]}
-              {!viewingCurrent && <span className="eyebrow">read-only - an earlier stage</span>}
-            </h2>
-            <div className="empty">
-              <b>{viewingCurrent ? "The working surface for this stage is on its way" : "This stage is on the record"}</b>
-              {STAGE_PREVIEW[viewed]}
-              {!viewingCurrent && <div className="empty-act">
-                <Link className="btn sm" href={`/restorations/${project.id}`}>Back to {RESTORATION_STAGE_LABEL[project.stage as RestorationStage]}</Link>
-              </div>}
-            </div>
-          </section>
+          {receive ? (
+            <RestorationReceive projectId={project.id} data={receive}
+              canEdit={viewingCurrent && project.stage === "receive"} />
+          ) : (
+            <section className="card">
+              <h2 className="card-title">
+                {RESTORATION_STAGE_LABEL[viewed]}
+                {!viewingCurrent && <span className="eyebrow">read-only - an earlier stage</span>}
+              </h2>
+              <div className="empty">
+                <b>{viewingCurrent ? "The working surface for this stage is on its way" : "This stage is on the record"}</b>
+                {STAGE_PREVIEW[viewed]}
+                {!viewingCurrent && <div className="empty-act">
+                  <Link className="btn sm" href={`/restorations/${project.id}`}>Back to {RESTORATION_STAGE_LABEL[project.stage as RestorationStage]}</Link>
+                </div>}
+              </div>
+            </section>
+          )}
 
           {gate && <RestorationGateCard projectId={project.id} items={gate} advanceLabel={advanceLabel} />}
 
