@@ -3893,6 +3893,43 @@ export const deviceNotices = pgTable("device_notices", {
 }, (t) => [index("device_notices_device_idx").on(t.deviceId)]);
 
 /**
+ * A machine locked out because it is reported stolen.
+ *
+ * A third kind, deliberately not a rung on either of the other two - see
+ * lib/deviceLockout for why a theft claim is neither commercial nor
+ * engineering. No invoice column, and none may be added: tests/deviceLockout
+ * pins the decision as invariant under credit standing exactly as the safety
+ * path is pinned.
+ *
+ * `reference` is required by the pure module and is the friction that keeps
+ * this from becoming a collections tool: a crime report exists outside this
+ * software, and a balance does not.
+ */
+export const deviceLockouts = pgTable("device_lockouts", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  deviceId: integer("device_id").notNull().references(() => remoteDevices.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }),
+  /** Police report, insurance claim, RMA - something filed somewhere else. */
+  reference: text("reference").notNull().default(""),
+  /** Why, in a sentence, for the person who reads this in six months. */
+  reason: text("reason").notNull().default(""),
+  /** Who the finder should call. Required - a locked machine with no number is a brick. */
+  contact: text("contact").notNull().default(""),
+  /** notify | logoff | shutdown */
+  force: text("force").notNull().default("logoff"),
+  decidedBy: text("decided_by").notNull().default(""),
+  /** Last time the agent was actually made to act on it. */
+  lastEnforcedAt: timestamp("last_enforced_at"),
+  enforceError: text("enforce_error").notNull().default(""),
+  releasedAt: timestamp("released_at"),
+  releasedBy: text("released_by").notNull().default(""),
+  /** Required to release: recovered, returned, reported in error. */
+  releaseReason: text("release_reason").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("device_lockouts_device_idx").on(t.deviceId)]);
+
+/**
  * An engineering hold on a machine. No money column, and none may be added -
  * tests/fleetNotice pins the safety decision as invariant under credit standing.
  *

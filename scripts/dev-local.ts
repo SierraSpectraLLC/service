@@ -844,6 +844,18 @@ const FIXTURE = `
       'engineer assessment', 'lock', 'Sierra Spectra 555-0100', 'bill@sierraspectra.test', '',
       now() - interval '2 days');
 
+  -- A machine that went missing in transit, so the lockout controls have a
+  -- live one to render. Deliberately the Coastal QC PC's neighbour rather than
+  -- a machine that also carries a notice: the two are different acts and the
+  -- fixture should not imply they travel together.
+  INSERT INTO device_lockouts (tenant_org_id, device_id, instrument_id, reference, reason, contact, force, decided_by, last_enforced_at, created_at) VALUES
+    ((SELECT id FROM orgs WHERE name = 'Sierra Spectra'),
+      (SELECT id FROM remote_devices WHERE node_id = 'node//devfixture000000000000002'),
+      NULL, 'Reno PD 26-114882',
+      'Taken from the loading dock overnight between the 27th and 28th.',
+      'Sierra Spectra 555-0100', 'logoff', '${OWNER}',
+      now() - interval '20 minutes', now() - interval '1 day');
+
   INSERT INTO device_notices (tenant_org_id, device_id, rung, body, approved_by, posted_by, created_at) VALUES
     ((SELECT id FROM orgs WHERE name = 'Sierra Spectra'),
       (SELECT id FROM remote_devices WHERE node_id = 'node//devfixture000000000000003'),

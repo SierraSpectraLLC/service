@@ -8,6 +8,7 @@ import { toast } from "@/components/ui/Toast";
 import { linkRemoteDevice, removeRemoteDevice, renameRemoteDevice, setRemoteConsent } from "@/app/actions";
 import { deviceLabel, deviceSubLabel, needsNickname } from "@/lib/deviceName";
 import DeviceNoticeControls, { type OpenHold, type OpenNotice } from "@/components/DeviceNoticeControls";
+import DeviceLockoutControls, { type OpenLockout } from "@/components/DeviceLockoutControls";
 
 export type RemoteDevice = {
   id: number;
@@ -37,6 +38,9 @@ export type RemoteDevice = {
   noticePushed: string;
   /** The engine's words when the last attempt failed, else "". */
   noticeError: string;
+  /** The open theft lockout, if the machine is under one. */
+  lockout: OpenLockout | null;
+  canLock: boolean;
 };
 
 /**
@@ -204,6 +208,13 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
               canRaiseHold={d.canRaiseHold}
               noticePushed={d.noticePushed}
               noticeError={d.noticeError}
+            />
+
+            <DeviceLockoutControls
+              deviceId={d.id}
+              label={deviceLabel(d.nickname, d.name)}
+              lockout={d.lockout}
+              canLock={d.canLock}
             />
           </div>
         ))}

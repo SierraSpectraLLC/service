@@ -21,10 +21,11 @@ import {
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, stipends, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
   dunningEvents, creditOverrides, quotes, quoteLines, payroll, perks, bugReports,
-  deviceNotices, safetyHolds,
+  deviceNotices, safetyHolds, deviceLockouts,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import { syncDeviceNotices } from "@/lib/fleetNoticeData";
+import { enforceDeviceLockout } from "@/lib/deviceLockoutData";
 import {
   allNumbers, catalogEntry, catalogName, cleanAliases, currentNumber, MAX_PART_PHOTOS,
   numberClash, PART_KINDS, PART_KIND_LABEL, type PartAlias,
@@ -18494,6 +18495,90 @@ export async function clearSafetyHold(deviceId: number, resolution: string): Pro
   // already happened and must not be failed by a sleeping laptop, so the result
   // is not returned - but it IS recorded on the device row, and the page reads
   // it back, which is the difference between best-effort and silent.
+  await syncDeviceNotices(deviceId).catch(() => ({}));
+  revalidatePath("/remote");
+  return {};
+}
+
+// ---------------- Theft lockout ----------------
+// The sharpest act in the product, and the one furthest from the rest of it.
+// Read lib/deviceLockout before touching this - in particular why it takes a
+// crime reference rather than an amount, and why nothing here may ever learn to
+// read an invoice. An unpaid bill is answered in lib/credit, by withholding our
+// own labour. A stolen machine is a different claim with a different proof.
+
+/**
+ * Lock out a machine reported stolen. Owner only, and the reference is not
+ * paperwork: it is the field that keeps this from becoming a collections tool,
+ * because a crime report exists outside this software and a balance does not.
+ */
+export async function lockDevice(
+  deviceId: number,
+  input: {
+    reference: string; reason: string; contact: string;
+    force?: "notify" | "logoff" | "shutdown";
+  },
+): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const { remote: moduleOn } = await getModules();
+  const row = await deviceWithOrg(deviceId, readTenant(u));
+  if (!row) return { error: "Not found" };
+  const { device } = row;
+  if (!mayEnroll(u, { moduleOn }, { tenantOrgId: device.tenantOrgId })) return { error: "Not found" };
+
+  const reference = input.reference.trim();
+  const contact = input.contact.trim();
+  if (!reference) return { error: "Give the report or claim reference. A lockout without one is not one." };
+  if (!contact) return { error: "Give a number for whoever finds it - a locked machine with no contact is a brick." };
+
+  const [open] = await db.select({ id: deviceLockouts.id }).from(deviceLockouts)
+    .where(and(eq(deviceLockouts.deviceId, deviceId), isNull(deviceLockouts.releasedAt)));
+  if (open) return { error: "This machine is already locked out. Release it first." };
+
+  const force = input.force ?? "logoff";
+  await db.insert(deviceLockouts).values({
+    tenantOrgId: device.tenantOrgId, deviceId, instrumentId: device.instrumentId,
+    reference, reason: input.reason.trim(), contact, force, decidedBy: u.email,
+  });
+  await audit({
+    actor: u.email, instrumentId: device.instrumentId, entityType: "device_lockout", entityId: deviceId,
+    action: `locked out ${device.nickname || device.name || "a machine"} as stolen`
+      + ` (${force}, reference ${reference})${input.reason.trim() ? `: ${input.reason.trim()}` : ""}`,
+    tenantOrgId: device.tenantOrgId,
+  });
+  // Apply immediately if the machine is reachable. Recorded on the row either
+  // way, because whether it landed is what somebody decides their next move on.
+  await enforceDeviceLockout(deviceId).catch(() => ({}));
+  revalidatePath("/remote");
+  return {};
+}
+
+/**
+ * Release a lockout. Owner only, and the reason is required: recovered,
+ * returned, or reported in error are three very different endings and the row
+ * should say which one this was.
+ *
+ * Releasing does NOT put the machine back the way it was on its own - it stops
+ * the enforcement pass, and the notice is cleared with it. A machine that was
+ * shut down still has to be switched on by somebody standing next to it.
+ */
+export async function releaseDevice(deviceId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const row = await deviceWithOrg(deviceId, readTenant(u));
+  if (!row) return { error: "Not found" };
+  const said = reason.trim();
+  if (!said) return { error: "Say why it is being released." };
+
+  await db.update(deviceLockouts)
+    .set({ releasedAt: new Date(), releasedBy: u.email, releaseReason: said })
+    .where(and(eq(deviceLockouts.deviceId, deviceId), isNull(deviceLockouts.releasedAt)));
+  await audit({
+    actor: u.email, instrumentId: row.device.instrumentId, entityType: "device_lockout", entityId: deviceId,
+    action: `released the theft lockout on ${row.device.nickname || row.device.name || "a machine"}: ${said}`,
+    tenantOrgId: row.device.tenantOrgId,
+  });
+  // Take the lockout message off the screen. The machine's notices and holds,
+  // if it carries any, are re-asserted by the same call.
   await syncDeviceNotices(deviceId).catch(() => ({}));
   revalidatePath("/remote");
   return {};

@@ -37,6 +37,7 @@ import { orgs, remoteDevices } from "@/db/schema";
 import { tenantOfOrg } from "@/lib/tenancy";
 import { brandingFrom, type AgentBranding } from "@/lib/agentName";
 import type { Notice } from "@/lib/fleetNotice";
+import type { LockoutPlan } from "@/lib/deviceLockout";
 
 /** How long a connect URL is good for. Bounds the START of a session, not its length. */
 export const CONNECT_TTL_SECONDS = 120;
@@ -478,6 +479,70 @@ export async function pushNoticesTo(
   if (!nodeId) return { error: "That machine has no node id yet." };
   try {
     for (const cmds of agentMessageCommands(notices, announce)) {
+      await engineCall(cfg, "runcommands", { nodeids: [nodeId], type: 4, runAsUser: 0, cmds });
+    }
+    return {};
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+// ── Locking a stolen machine out of itself ──────────────────────────────────
+//
+// lib/deviceLockout decides WHETHER; this is what the engine can actually do
+// about it, read out of the same 1.2.4 source as everything above.
+//
+// The obvious command is the wrong one. The agent console's `lock` runs
+// `RunDll32.exe user32.dll,LockWorkStation` on Windows and `loginctl
+// lock-session` on Linux - which any holder of the Windows password undoes in
+// two seconds, so against a thief it is theatre. It is not used here.
+//
+// `power 1` is the one that means something: ExecPowerState LOGOFF ends the
+// desktop session, so getting back in needs credentials. Repeated on every
+// enforcement pass, a machine whose taker does not know the password is a
+// machine that cannot be used. `power 2` is SHUTDOWN for when that is wanted.
+//
+// Both go through `runcommands` type 4, the same door as a notice, so no new
+// right is needed beyond the 8|16 that path already requires. (poweraction,
+// the other route, validates actiontype from 2 upward and so cannot express
+// LOGOFF at all, besides wanting RESETOFF rights of its own.)
+//
+// The honest limits are in lib/deviceLockout.LOCKOUT_REACH, which the UI
+// prints next to the button rather than leaving to a reader's optimism.
+
+/**
+ * The console commands that enforce one lockout, in the order they must run.
+ *
+ * The message goes FIRST and always. Whoever is sitting there may be a thief,
+ * but may equally be a shipper, a buyer of stolen goods who does not know it,
+ * or a customer whose machine we have got wrong - and in every one of those
+ * cases the number on the screen is what gets the instrument home. Ending the
+ * session before saying why would just produce a mystery.
+ */
+export function lockoutCommands(plan: LockoutPlan): string[] {
+  const said = consoleSafe(plan.text);
+  const cmds = [`clearagentmsg`, `agentmsg add "${said}" ${NOTICE_ICON}`, `toast "${said}"`];
+  // Order matters: shutdown would cut the logoff short and lose nothing, but
+  // sending both is how a shutdown that is refused still ends the session.
+  if (plan.endsSession) cmds.push("power 1");
+  if (plan.powersOff) cmds.push("power 2");
+  return cmds;
+}
+
+/**
+ * Enforce one lockout on one machine, now.
+ *
+ * Best-effort in the same sense as pushNoticesTo, and for a sharper reason: a
+ * machine that is offline cannot be locked, and no amount of retrying changes
+ * that. api/cron/notices re-runs this on every pass, which is what turns a
+ * single logoff into a machine that will not stay usable.
+ */
+export async function pushLockoutTo(nodeId: string, plan: LockoutPlan): Promise<{ error?: string }> {
+  const cfg = remoteConfig();
+  if (!cfg) return { error: NOT_CONFIGURED };
+  if (!nodeId) return { error: "That machine has no node id yet." };
+  try {
+    for (const cmds of lockoutCommands(plan)) {
       await engineCall(cfg, "runcommands", { nodeids: [nodeId], type: 4, runAsUser: 0, cmds });
     }
     return {};

@@ -131,6 +131,17 @@ const REVIEWED: Record<string, string> = {
     + "- are a record of whether the engine accepted a push, hold no tenant "
     + "data, and take no caller-supplied value. The scanner cannot see the "
     + "gating because it lives one frame up, in every caller.",
+  "enforceDeviceLockout":
+    "The twin of syncDeviceNotices, in lib/deviceLockoutData, and the same "
+    + "shape: not a server action, no network reaches it, and its deviceId "
+    + "comes from a caller that has already established whose machine it is. "
+    + "Those callers are lockDevice, which is requireOwner plus deviceWithOrg("
+    + "id, readTenant(u)) plus mayEnroll, and api/cron/notices, which reads "
+    + "the ids out of the lockout rows it just selected and sits behind "
+    + "cronAuthorized. The write sets last_enforced_at and enforce_error on "
+    + "the open lockout for that device and nothing else - a record of whether "
+    + "the engine accepted the command, holding no tenant data and no "
+    + "caller-supplied value.",
   "markHandoffOpened":
     "Same public token, and it sets one timestamp once - the WHERE carries the "
     + "token AND opened_at IS NULL. Nothing about a workspace is reachable "

@@ -45,6 +45,9 @@ const STAMPED = [
   // What a lab PC says on its own screen. Both take the device's stamp: a
   // notice or a hold belongs to the workspace whose machine carries it.
   "deviceNotices", "safetyHolds",
+  // A stolen machine locked out of itself. Takes the device's stamp, like
+  // the other two: a lockout belongs to the workspace whose machine it is.
+  "deviceLockouts",
 ];
 
 const walk = (dir: string): string[] =>

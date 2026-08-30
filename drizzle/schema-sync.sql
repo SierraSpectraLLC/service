@@ -3825,3 +3825,22 @@ CREATE INDEX IF NOT EXISTS "safety_holds_device_idx" ON "safety_holds" ("device_
 ALTER TABLE "remote_devices" ADD COLUMN IF NOT EXISTS "notice_state" text NOT NULL DEFAULT '';
 ALTER TABLE "remote_devices" ADD COLUMN IF NOT EXISTS "notice_pushed_at" timestamp;
 ALTER TABLE "remote_devices" ADD COLUMN IF NOT EXISTS "notice_error" text NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS "device_lockouts" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "device_id" integer NOT NULL,
+  "instrument_id" integer,
+  "reference" text NOT NULL DEFAULT '',
+  "reason" text NOT NULL DEFAULT '',
+  "contact" text NOT NULL DEFAULT '',
+  "force" text NOT NULL DEFAULT 'logoff',
+  "decided_by" text NOT NULL DEFAULT '',
+  "last_enforced_at" timestamp,
+  "enforce_error" text NOT NULL DEFAULT '',
+  "released_at" timestamp,
+  "released_by" text NOT NULL DEFAULT '',
+  "release_reason" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "device_lockouts_device_idx" ON "device_lockouts" ("device_id");
