@@ -232,6 +232,12 @@ export default async function RestorationPage({ params, searchParams }: {
             <div className="row al-baseline sp-2 t-body" style={{ justifyContent: "space-between" }}>
               <span className="mut">In this stage</span><span>{days === 0 ? "since today" : `${days} d`}</span>
             </div>
+            {inst.dueOn && (
+              <div className="row al-baseline sp-2 t-body" style={{ justifyContent: "space-between" }}>
+                <span className="mut">Promised</span>
+                <span className="mono t-small">{inst.dueOn}</span>
+              </div>
+            )}
             {buyer && (
               <div className="row al-baseline sp-2 t-body" style={{ justifyContent: "space-between" }}>
                 <span className="mut">Buyer</span><span>{buyer.name}</span>

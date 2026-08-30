@@ -19,6 +19,8 @@ import { toast } from "@/components/ui/Toast";
 type Inst = {
   id: number; externalId: string; client: string; category: string; priority: number;
   gxp: boolean;
+  /** The day this system is promised, blank = no promise. */
+  dueOn: string;
   lead: string; notes: string; archived: boolean; archivedBy: string;
   /** Why it is blocked, while it is. See lib/stages and StagePanel. */
   blockedReason: string;
@@ -70,7 +72,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
   /** Today's client-report line, when the EOD module is on and the viewer may see it. */
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", notes: "", location: "", name: "", gxp: false });
+  const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", notes: "", location: "", name: "", gxp: false, dueOn: "" });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -78,7 +80,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
     setDraft({
       externalId: instrument.externalId, client: instrument.client, category: instrument.category,
       priority: String(instrument.priority), notes: instrument.notes, location: instrument.location,
-      name: instrument.name, gxp: instrument.gxp,
+      name: instrument.name, gxp: instrument.gxp, dueOn: instrument.dueOn,
     });
     setError("");
     setEditing(true);
@@ -91,7 +93,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
         const res = await updateInstrument(instrument.id, {
           externalId: draft.externalId, client: draft.client, category: draft.category,
           priority: parseInt(draft.priority) || instrument.priority,
-          location: draft.location, name: draft.name, gxp: draft.gxp,
+          location: draft.location, name: draft.name, gxp: draft.gxp, dueOn: draft.dueOn,
         });
         if (res?.error) { setError(res.error); return; } // keep the form open with the bad value
       }
@@ -136,6 +138,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
             <span style={{ whiteSpace: "nowrap" }}>{instrument.externalId}</span>
             {instrument.client && <> · <span style={{ whiteSpace: "nowrap" }}>{instrument.client}</span></>}
             {" · "}<span style={{ whiteSpace: "nowrap" }}>Priority {instrument.priority}</span>
+            {instrument.dueOn && <> · <span style={{ whiteSpace: "nowrap" }}>Due {instrument.dueOn}</span></>}
           </div>
           {!editing && (
             <>
@@ -240,6 +243,14 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                   </div>
                 </div>
                 <div><label>Priority</label><input value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} /></div>
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <label>Due date</label>
+                <input type="date" value={draft.dueOn} style={{ maxWidth: 200 }} aria-label="Due date"
+                  onChange={(e) => setDraft({ ...draft, dueOn: e.target.value })} />
+                <div className="mut t-meta" style={{ marginTop: 2 }}>
+                  The day this system is promised. Shows on the calendar; clear it to withdraw the promise.
+                </div>
               </div>
               <div style={{ marginBottom: 8 }}>
                 <label>Name</label>

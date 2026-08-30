@@ -11,7 +11,7 @@ import { anticipated, type RecurringTerms } from "@/lib/recurring";
  * table to drift out of sync.
  */
 
-export type CalKind = "visit" | "pm" | "task" | "quote" | "invoice" | "renewal" | "retainer";
+export type CalKind = "visit" | "pm" | "task" | "due" | "quote" | "invoice" | "renewal" | "retainer";
 
 export type CalEvent = {
   date: string;             // YYYY-MM-DD
@@ -25,6 +25,7 @@ export type CalEvent = {
 export const KIND_LABEL: Record<CalKind, string> = {
   visit: "Booked visits",
   pm: "Maintenance due",
+  due: "Systems promised",
   task: "Tasks",
   quote: "Quotes expiring",
   invoice: "Invoices due",
@@ -79,6 +80,8 @@ export type CalendarInputs = {
   }[];
   /** Open, dated, non-PM tasks - a PM task's schedule already speaks for it. */
   tasks: { id: number; title: string; dueDate: string; instrumentId: number | null; assignee: string }[];
+  /** Systems carrying a promise date - issued by a person, never derived. */
+  systems: { id: number; externalId: string; dueOn: string }[];
   quotes: { id: number; number: string; title: string; status: string; expiresOn: string }[];
   invoices: { id: number; number: string; status: string; dueOn: string; orgName: string }[];
   agreements: ({ id: number; number: string; title: string; orgId: number; orgName: string } & RecurringTerms)[];
@@ -155,6 +158,17 @@ export function assembleEvents(inp: CalendarInputs, from: string, to: string, to
       href: t.instrumentId !== null ? `/instruments/${t.instrumentId}` : "/work",
       label: `${t.title}${t.assignee ? ` - ${t.assignee}` : ""}`,
       tone: lateTone(t.dueDate, "neutral"),
+    });
+  }
+
+  // A promised system is a date somebody gave their word on, so it starts at
+  // warn and goes bad the day after - unlike a task, it has no quiet state.
+  for (const s of inp.systems) {
+    if (!inRange(s.dueOn)) continue;
+    out.push({
+      date: s.dueOn, kind: "due", href: `/instruments/${s.id}`,
+      label: `${s.externalId} promised`,
+      tone: lateTone(s.dueOn, "warn"),
     });
   }
 

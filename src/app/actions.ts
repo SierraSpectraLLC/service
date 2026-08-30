@@ -603,7 +603,7 @@ export async function updateInstrumentNotes(instrumentId: number, notes: string)
 
 export async function updateInstrument(
   instrumentId: number,
-  data: { externalId?: string; client: string; category?: string; priority: number; location?: string; name?: string; gxp?: boolean },
+  data: { externalId?: string; client: string; category?: string; priority: number; location?: string; name?: string; gxp?: boolean; dueOn?: string },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
@@ -635,13 +635,20 @@ export async function updateInstrument(
   // like one - "marked regulated (GxP)" is a line an auditor will look for.
   const gxp = data.gxp ?? inst.gxp;
   if (gxp !== inst.gxp) changed.push(["gxp", inst.gxp ? "regulated" : "not regulated", gxp ? "regulated" : "not regulated"]);
+  // The promise date: a real calendar day or nothing - "next week" is a
+  // conversation, not a record.
+  const dueOn = (data.dueOn ?? inst.dueOn).trim();
+  if (dueOn && !isIsoDay(dueOn)) return { error: "The due date needs a calendar day" };
+  if (dueOn !== inst.dueOn) changed.push(["dueOn", inst.dueOn || "(none)", dueOn || "(none)"]);
   if (!changed.length) return {};
-  await db.update(instruments).set({ externalId, client, category, priority, location, name, gxp, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  await db.update(instruments).set({ externalId, client, category, priority, location, name, gxp, dueOn, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
   for (const [field, oldValue, newValue] of changed) {
     await audit({
       // Log under the new ID so the entry is findable, but the old value is in the row.
       actor: u.email, instrumentId, entityType: "instrument", entityId: externalId,
-      action: field === "externalId" ? `renamed ${oldValue} to ${newValue}` : `updated ${field}`,
+      action: field === "externalId" ? `renamed ${oldValue} to ${newValue}`
+        : field === "dueOn" ? (newValue === "(none)" ? "cleared the due date" : `set the due date: ${newValue}`)
+        : `updated ${field}`,
       field, oldValue, newValue,
     });
   }

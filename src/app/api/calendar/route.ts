@@ -63,7 +63,8 @@ export async function GET(req: Request) {
       db.select().from(invoices).where(forTenant(invoices.tenantOrgId, feedTenant)),
       db.select().from(agreements).where(forTenant(agreements.tenantOrgId, feedTenant)),
       db.select({ id: orgs.id, name: orgs.name }).from(orgs),
-      db.select({ id: instruments.id, externalId: instruments.externalId }).from(instruments)
+      db.select({ id: instruments.id, externalId: instruments.externalId, dueOn: instruments.dueOn, archived: instruments.archived })
+        .from(instruments)
         .where(forTenant(instruments.tenantOrgId, feedTenant)),
       db.select({ id: assets.id, kind: assets.kind, model: assets.model, instrumentId: assets.instrumentId })
         .from(assets).where(forTenant(assets.tenantOrgId, feedTenant)),
@@ -87,6 +88,8 @@ export async function GET(req: Request) {
     tasks: taskRows.filter((x) => x.pmScheduleId === null).map((x) => ({
       id: x.id, title: x.title, dueDate: x.dueDate, instrumentId: x.instrumentId, assignee: x.assignee,
     })),
+    systems: instRows.filter((i) => !i.archived && i.dueOn)
+      .map((i) => ({ id: i.id, externalId: i.externalId, dueOn: i.dueOn })),
     quotes: quoteRows.map((q) => ({
       id: q.id, number: q.number, title: q.title, status: q.status, expiresOn: q.expiresOn,
     })),

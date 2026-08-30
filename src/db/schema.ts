@@ -842,6 +842,15 @@ export const instruments = pgTable("instruments", {
    * overdue tint. Knowledge, not obligation. See lib/pmPosture.
    */
   pmPosture: text("pm_posture").notNull().default(""),
+  /**
+   * The day this system is promised - a deadline somebody issued, not one the
+   * app derived. The client's side can set it on their own systems (a lab
+   * director naming a validation date, a buyer's CEO naming a go-live) and so
+   * can staff; the calendar and the restoration queue read it, late ones
+   * loudest. Blank = no promise made. Shop-day string like every calendar
+   * date here.
+   */
+  dueOn: text("due_on").notNull().default(""),
   // WHOSE QUEUE the system is sitting in - a third axis, independent of both
   // ownership and access. A refurbished system parked with the client while
   // they run application tests is still ours to own and everyone's to see, but

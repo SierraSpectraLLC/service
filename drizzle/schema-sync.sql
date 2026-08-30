@@ -4148,3 +4148,7 @@ CREATE INDEX IF NOT EXISTS "device_leases_device_idx" ON "device_leases" ("devic
 ALTER TABLE "device_leases" ADD COLUMN IF NOT EXISTS "suspended_at" timestamp;
 ALTER TABLE "device_leases" ADD COLUMN IF NOT EXISTS "suspended_by" text NOT NULL DEFAULT '';
 ALTER TABLE "device_leases" ADD COLUMN IF NOT EXISTS "suspend_reason" text NOT NULL DEFAULT '';
+
+-- The day a system is promised - issued by a person (client side or staff),
+-- read by the calendar and the restoration queue. Blank = no promise.
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "due_on" text NOT NULL DEFAULT '';

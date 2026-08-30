@@ -6,6 +6,7 @@ import { instruments } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import { fmtWhen } from "@/lib/when";
+import { shopToday } from "@/lib/shopday";
 import {
   RESTORATION_SOURCES, RESTORATION_SOURCE_LABEL, RESTORATION_STAGES,
   RESTORATION_STAGE_LABEL, SOURCE_ID_PREFIX, daysInStage, nextStagedId,
@@ -32,6 +33,7 @@ export default async function RestorationsPage({ searchParams }: {
   try { user = await requireStaff(); } catch { redirect("/"); }
   const { stage, who, source } = await searchParams;
   const now = new Date();
+  const today = shopToday();
 
   const rows = await restorationQueue(user);
 
@@ -91,6 +93,11 @@ export default async function RestorationsPage({ searchParams }: {
           </Pill>
         ),
         prov: <span className="mono">{r.pct}%</span>,
+        due: r.dueOn
+          ? (r.dueOn < today && p.stage !== "complete"
+              ? <Pill tone="bad">{r.dueOn}</Pill>
+              : <span className="mono t-small">{r.dueOn}</span>)
+          : null,
         days: p.stage === "complete" ? null
           : <span className="mut">{days === 0 ? "today" : `${days} d`}</span>,
         who: <span className="mut">{p.assignee.trim() || "unassigned"}</span>,
@@ -146,6 +153,7 @@ export default async function RestorationsPage({ searchParams }: {
           { key: "label", label: "", width: "minmax(170px, 1.6fr)" },
           { key: "stage", label: "Stage", width: "132px" },
           { key: "prov", label: "Provenance", width: "96px", align: "right", hideMobile: true },
+          { key: "due", label: "Promised", width: "104px", hideMobile: true },
           { key: "days", label: "In stage", width: "84px", hideMobile: true },
           { key: "who", label: "Assignee", width: "110px", hideMobile: true },
           { key: "buyer", label: "Buyer", width: "minmax(90px, 1fr)", hideMobile: true },

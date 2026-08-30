@@ -148,6 +148,8 @@ export type RestorationQueueRow = {
   label: string;
   buyerName: string;
   pct: number;
+  /** The system's promised day, "" = no promise. */
+  dueOn: string;
 };
 
 /** The queue: every project in the viewer's workspace, most recently worked
@@ -161,7 +163,7 @@ export async function restorationQueue(user: SessionUser): Promise<RestorationQu
   const instIds = [...new Set(projects.map((p) => p.instrumentId))];
   const buyerIds = [...new Set(projects.flatMap((p) => (p.buyerOrgId !== null ? [p.buyerOrgId] : [])))];
   const [instRows, buyerRows, provenance] = await Promise.all([
-    db.select({ id: instruments.id, externalId: instruments.externalId, name: instruments.name, model: instruments.model })
+    db.select({ id: instruments.id, externalId: instruments.externalId, name: instruments.name, model: instruments.model, dueOn: instruments.dueOn })
       .from(instruments).where(inArray(instruments.id, instIds)),
     buyerIds.length
       ? db.select({ id: orgs.id, name: orgs.name }).from(orgs).where(inArray(orgs.id, buyerIds))
@@ -179,6 +181,7 @@ export async function restorationQueue(user: SessionUser): Promise<RestorationQu
       label: inst ? labels.get(inst.id) ?? inst.model : "",
       buyerName: p.buyerOrgId !== null ? buyerName.get(p.buyerOrgId) ?? "" : "",
       pct: provenance.get(p.id)?.pct ?? 0,
+      dueOn: inst?.dueOn ?? "",
     };
   });
 }

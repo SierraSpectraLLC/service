@@ -665,7 +665,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         panels={panelsFor(isStaff, [
           { key: "system", label: "System", node: (
             <SystemPanel
-              instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, gxp: inst.gxp, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy, name: inst.name, blockedReason: inst.blockedReason, blockedOrgId: inst.blockedOrgId,
+              instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, gxp: inst.gxp, dueOn: inst.dueOn, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy, name: inst.name, blockedReason: inst.blockedReason, blockedOrgId: inst.blockedOrgId,
                 location: inst.location, forSale: inst.forSale, saleNote: inst.saleNote, listingToken: inst.listingToken,
                 photoSrc: coverSrc, photoFraming: coverId !== null ? coverFraming : systemStock?.photoFraming ?? "",
                 photoIsStock: coverId === null && systemStock !== null }}

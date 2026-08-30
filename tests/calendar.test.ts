@@ -11,7 +11,7 @@ import {
  */
 
 const T = "2026-08-25";
-const base: CalendarInputs = { schedules: [], tasks: [], quotes: [], invoices: [], agreements: [] };
+const base: CalendarInputs = { schedules: [], tasks: [], systems: [], quotes: [], invoices: [], agreements: [] };
 const sched = (p: Partial<CalendarInputs["schedules"][number]>) => ({
   id: 1, title: "Quarterly source clean", paused: false, nextDue: "2026-08-20",
   bookedOn: "", instrumentId: 1, assetId: null, systemLabel: "LZ-001", ...p,
@@ -40,6 +40,21 @@ describe("what makes the calendar", () => {
     expect(ev).toHaveLength(1);
     expect(ev[0]).toMatchObject({ date: "2026-09-06", kind: "visit", tone: "info" });
     expect(ev[0].label).toContain("LZ-001");
+  });
+
+  it("a promised system shows on its day, and goes bad the day after", () => {
+    const systems = [
+      { id: 7, externalId: "LZ-002", dueOn: "2026-09-01" },
+      { id: 8, externalId: "T-003", dueOn: "2026-08-20" },   // behind us
+      { id: 9, externalId: "EP-001", dueOn: "" },            // no promise made
+    ];
+    const ev = assembleEvents({ ...base, systems }, "2026-08-01", "2026-09-30", T);
+    expect(ev).toHaveLength(2);
+    expect(ev.find((e) => e.label === "LZ-002 promised")).toMatchObject({
+      date: "2026-09-01", kind: "due", href: "/instruments/7", tone: "warn",
+    });
+    // A promise behind us is late, not history.
+    expect(ev.find((e) => e.label === "T-003 promised")).toMatchObject({ tone: "bad" });
   });
 
   it("an unbooked due cycle shows as maintenance, late ones loudest", () => {
