@@ -26,37 +26,30 @@ export default function NewRestorationButton({ systems, suggestions }: {
   const [mode, setMode] = useState<"new" | "existing">("new");
   const [source, setSource] = useState<string>("acquired");
   const [stagedId, setStagedId] = useState("");
-  const [idEdited, setIdEdited] = useState(false);
   const [name, setName] = useState("");
   const [systemId, setSystemId] = useState(0);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
   const reset = () => {
-    setMode("new"); setSource("acquired");
-    setStagedId(suggestions.acquired ?? ""); setIdEdited(false);
+    setMode("new"); setSource("acquired"); setStagedId("");
     setName(""); setSystemId(0); setError("");
   };
 
-  // Changing the source re-suggests the tag - unless the receiver already
-  // typed their own, which nothing may overwrite.
-  const pickSource = (s: string) => {
-    setSource(s);
-    if (!idEdited) setStagedId(suggestions[s] ?? "");
-  };
+  const problem = mode === "existing" && !systemId ? "pick the system on the books" : null;
 
-  const problem = mode === "new"
-    ? (!stagedId.trim() ? "give the system its staging ID" : null)
-    : (!systemId ? "pick the system on the books" : null);
+  // The ID is the receiver's to choose; the suggestion only steps in when
+  // they left the field blank.
+  const chosenId = stagedId.trim() || suggestions[source] || "";
 
   const file = () => {
     if (problem) return;
     setError("");
     startTransition(async () => {
       const res = await createRestorationProject(source,
-        mode === "new" ? { externalId: stagedId, name } : { instrumentId: systemId });
+        mode === "new" ? { externalId: chosenId, name } : { instrumentId: systemId });
       if (res?.error || !res?.id) { setError(res?.error ?? "That didn't save"); return; }
-      const tag = mode === "new" ? stagedId.trim()
+      const tag = mode === "new" ? chosenId
         : systems.find((s) => s.id === systemId)?.externalId ?? "the system";
       toast({ message: `Opened receiving on ${tag}` });
       setOpen(false);
@@ -74,7 +67,7 @@ export default function NewRestorationButton({ systems, suggestions }: {
         footer={
           <>
             <DialogStatus error={error} problem={problem}
-              ok={mode === "new" ? `Stages a new system as ${stagedId.trim() || "…"} and lands on Receive.` : "Lands on Receive."} />
+              ok={mode === "new" ? `Stages a new system as ${chosenId || "…"} and lands on Receive.` : "Lands on Receive."} />
             <button className="btn" onClick={() => setOpen(false)} disabled={pending}>Cancel</button>
             <button className="btn accent" onClick={file} disabled={pending || !!problem}>
               {pending ? "Opening..." : "Start receiving"}
@@ -84,7 +77,7 @@ export default function NewRestorationButton({ systems, suggestions }: {
         <label>Where it came from</label>
         <div className="seg" style={{ marginBottom: 8 }}>
           {RESTORATION_SOURCES.map((s) => (
-            <button key={s} type="button" aria-pressed={source === s} onClick={() => pickSource(s)}>
+            <button key={s} type="button" aria-pressed={source === s} onClick={() => setSource(s)}>
               {RESTORATION_SOURCE_LABEL[s]}
             </button>
           ))}
@@ -100,13 +93,15 @@ export default function NewRestorationButton({ systems, suggestions }: {
         </div>
         {mode === "new" ? (
           <>
-            <label>Staging ID</label>
+            <label>Asset ID</label>
             <input className="mono" value={stagedId} autoFocus
-              onChange={(e) => { setStagedId(e.target.value); setIdEdited(true); }}
-              style={{ maxWidth: 160, marginBottom: 8 }} aria-label="Staging ID" />
+              placeholder={suggestions[source] ?? ""}
+              onChange={(e) => setStagedId(e.target.value)}
+              style={{ maxWidth: 160, marginBottom: 8 }} aria-label="Asset ID" />
             <div className="mut t-meta" style={{ marginBottom: 8 }}>
-              The tag on the crate until the record earns a better one - suggested
-              from what exists, yours to overtype.
+              Yours to choose - any scheme, any tag. Leave it blank to take{" "}
+              <span className="mono">{suggestions[source]}</span>, the next free
+              number for this source.
             </div>
             <label>What is it? <span className="mut" style={{ fontWeight: 400 }}>optional</span></label>
             <input value={name} placeholder="Thermo ISQ 7000 GC-MS — refine as serials resolve"

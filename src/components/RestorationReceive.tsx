@@ -7,6 +7,7 @@ import {
   addRestorationPhotos, answerProvenance, logRestorationFinding,
   receiveRestorationComponent, revealHandoffCredential, saveHandoffKit, setComponentCondition,
 } from "@/app/actions";
+import CatalogSelect from "@/components/CatalogSelect";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
@@ -16,15 +17,24 @@ import {
 import type { ReceiveData } from "@/lib/restorationData";
 
 /**
- * The Receive stage's working surface: serial-first component intake,
- * condition grades, findings that queue restore tasks, arrival photos, the
- * provenance interview, and the handoff kit with its vaulted credential.
- * Read-only once the project has moved on - the record stays visible, the
- * controls go quiet.
+ * The Receive stage's working surface: component intake through the same
+ * add-asset mechanism as everywhere else (catalog type, model with the maker
+ * riding along, free-text serial), condition grades, findings that queue
+ * restore tasks, arrival photos, the provenance interview, and the handoff
+ * kit with its vaulted credential. Read-only once the project has moved on -
+ * the record stays visible, the controls go quiet.
  */
-export default function RestorationReceive({ projectId, data, canEdit }: {
+export type CatalogModels = Record<string, { name: string; manufacturer: string }[]>;
+
+export default function RestorationReceive({ projectId, data, kinds, models, defaultOwner, canEdit }: {
   projectId: number;
   data: ReceiveData;
+  /** The equipment catalog's module types - same source as the add-asset form. */
+  kinds: string[];
+  /** Each type's models, maker riding along for the auto-fill. */
+  models: CatalogModels;
+  /** Whose company is intaking - the owner field's default, theirs to change. */
+  defaultOwner: string;
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -40,7 +50,8 @@ export default function RestorationReceive({ projectId, data, canEdit }: {
 
   return (
     <>
-      <ComponentsCard projectId={projectId} data={data} canEdit={canEdit} act={act} pending={pending} />
+      <ComponentsCard projectId={projectId} data={data} kinds={kinds} models={models}
+        defaultOwner={defaultOwner} canEdit={canEdit} act={act} pending={pending} />
       <FindingsCard projectId={projectId} data={data} canEdit={canEdit} />
       <PhotosCard projectId={projectId} count={data.photoCount} canEdit={canEdit} />
       <InterviewCard projectId={projectId} data={data} canEdit={canEdit} act={act} pending={pending} />
@@ -51,25 +62,32 @@ export default function RestorationReceive({ projectId, data, canEdit }: {
 
 type Act = (fn: () => Promise<{ error?: string } | void>, done?: string) => void;
 
-function ComponentsCard({ projectId, data, canEdit, act, pending }: {
-  projectId: number; data: ReceiveData; canEdit: boolean; act: Act; pending: boolean;
+function ComponentsCard({ projectId, data, kinds, models, defaultOwner, canEdit, act, pending }: {
+  projectId: number; data: ReceiveData; kinds: string[]; models: CatalogModels;
+  defaultOwner: string; canEdit: boolean; act: Act; pending: boolean;
 }) {
   const router = useRouter();
-  const [serial, setSerial] = useState("");
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState({ serial: "", kind: "", model: "", manufacturer: "" });
+  const [draft, setDraft] = useState({ kind: "", model: "", manufacturer: "", serial: "", owner: defaultOwner });
   const [error, setError] = useState("");
   const [saving, startSaving] = useTransition();
   const [hint, setHint] = useState("");
 
-  const begin = (withSerial: string) => {
-    setDraft({ serial: withSerial.trim(), kind: "", model: "", manufacturer: "" });
+  const typeModels = models[draft.kind] ?? [];
+  const begin = () => {
+    setDraft({ kind: "", model: "", manufacturer: "", serial: "", owner: defaultOwner });
     setError("");
     setOpen(true);
   };
 
-  const problem = !draft.serial && !draft.model.trim() && !draft.kind.trim()
-    ? "give it a serial, or at least a type" : null;
+  // Picking a catalog model brings its maker along; a hand-typed manufacturer
+  // is never overwritten. Same rule as the parts intake.
+  const pickModel = (model: string) => {
+    const pick = typeModels.find((m) => m.name === model);
+    setDraft((d) => ({ ...d, model, manufacturer: d.manufacturer.trim() || pick?.manufacturer || "" }));
+  };
+
+  const problem = !draft.model.trim() && !draft.serial.trim() ? "give it a model or a serial number" : null;
 
   const file = () => {
     if (problem) return;
@@ -77,28 +95,17 @@ function ComponentsCard({ projectId, data, canEdit, act, pending }: {
       const res = await receiveRestorationComponent(projectId, draft);
       if (res?.error) { setError(res.error); return; }
       setHint(res.resolved === "attached"
-        ? `${draft.serial} matched a unit already on the shelf - its record travels with it.`
-        : `${draft.serial || draft.model || draft.kind} received - new to Ridgeline.`);
-      setOpen(false); setSerial("");
+        ? `${draft.serial.trim()} matched a unit already on the shelf - its record travels with it.`
+        : `${draft.model.trim() || draft.kind.trim() || draft.serial.trim()} received - new to Ridgeline.`);
+      setOpen(false);
       router.refresh();
     });
   };
 
   return (
     <section className="card">
-      <h2 className="card-title">Receive components <span className="eyebrow">serial-first</span></h2>
-      {canEdit && (
-        <>
-          <form className="scanbar" onSubmit={(e) => { e.preventDefault(); begin(serial); }}>
-            <input value={serial} onChange={(e) => setSerial(e.target.value)}
-              placeholder="Scan or type a serial number…" aria-label="Serial number" />
-            <button className="btn primary" type="submit">Add</button>
-          </form>
-          <div className="scan-hint">
-            Serials resolve against this workspace first{hint ? <> — <b>{hint}</b></> : "; the OEM catalog joins the lookup when it lands."}
-          </div>
-        </>
-      )}
+      <h2 className="card-title">Receive components <span className="eyebrow">what came off the truck</span></h2>
+      {canEdit && hint && <div className="scan-hint"><b>{hint}</b></div>}
       {data.components.length > 0 && (
         <div style={{ overflowX: "auto" }}>
           <table style={{ marginTop: 12, width: "100%", borderCollapse: "collapse" }} className="t-body">
@@ -116,7 +123,7 @@ function ComponentsCard({ projectId, data, canEdit, act, pending }: {
                     {c.model || c.kind}
                     {c.manufacturer && <span className="mut t-micro" style={{ display: "block" }}>{c.manufacturer}</span>}
                   </td>
-                  <td className="mono t-small" style={{ padding: 8, borderBottom: "1px solid var(--bg)" }}>{c.serial || "—"}</td>
+                  <td className="mono t-small" style={{ padding: 8, borderBottom: "1px solid var(--bg)" }}>{c.serial || "\u2014"}</td>
                   <td style={{ padding: 8, borderBottom: "1px solid var(--bg)" }}>
                     <div className="gchips" role="group" aria-label={`Condition of ${c.model || c.kind}`}>
                       {CONDITION_GRADES.map((g) => (
@@ -137,32 +144,54 @@ function ComponentsCard({ projectId, data, canEdit, act, pending }: {
         </div>
       )}
       {data.components.length === 0 && !canEdit && <div className="mut t-body">No components were received.</div>}
+      {data.components.length === 0 && canEdit && (
+        <div className="mut t-body">Nothing received yet - the record starts with the first box opened.</div>
+      )}
       {canEdit && (
-        <button className="addrow" onClick={() => begin("")}>+ Add without serial (consumables, filters, cables)</button>
+        <button className="addrow" onClick={begin}>+ Add component — type, model, serial</button>
       )}
       <Dialog open={open} onClose={() => setOpen(false)} title="Receive a component"
-        context={draft.serial ? `Serial ${draft.serial} - nothing on Ridgeline matches it yet.` : "No serial - a consumable, filter, or cable."}
+        context="Joins the system and gets a condition grade. A typed serial still resolves against the shelf - a matching spare attaches with its record."
         footer={
           <>
-            <DialogStatus error={error} problem={problem} ok="Joins the system and gets a condition grade." />
+            <DialogStatus error={error} problem={problem} ok="Intake procedures and catalog gases apply, same as any asset." />
             <button className="btn" onClick={() => setOpen(false)} disabled={saving}>Cancel</button>
             <button className="btn accent" onClick={file} disabled={saving || !!problem}>
               {saving ? "Receiving..." : "Receive it"}
             </button>
           </>
         }>
-        <label>Serial</label>
-        <input className="mono" value={draft.serial}
-          onChange={(e) => setDraft({ ...draft, serial: e.target.value })} style={{ marginBottom: 8 }} />
-        <label>Module type</label>
-        <input value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}
-          placeholder="Mass spec, GC, Headspace, Vacuum pump…" autoFocus style={{ marginBottom: 8 }} />
-        <label>Model</label>
-        <input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-          placeholder="ISQ 7000" style={{ marginBottom: 8 }} />
-        <label>Manufacturer</label>
-        <input value={draft.manufacturer} onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })}
-          placeholder="Thermo" />
+        <div className="pf3" style={{ marginBottom: 8 }}>
+          <div>
+            <label>Type</label>
+            <CatalogSelect value={draft.kind} options={kinds} ariaLabel="Component type"
+              onChange={(kind) => setDraft({ ...draft, kind, model: "" })}
+              hint="Define module types in Settings \u2192 Catalog" />
+          </div>
+          <div>
+            <label>Model</label>
+            <CatalogSelect value={draft.model} options={typeModels.map((m) => m.name)} ariaLabel="Model"
+              allowNew="+ New model..." onChange={pickModel}
+              hint={`No ${draft.kind || "?"} models defined yet - add them in Settings \u2192 Catalog`} />
+          </div>
+          <div>
+            <label>Serial #</label>
+            <input className="mono" value={draft.serial} placeholder="ISQ7N2009006"
+              onChange={(e) => setDraft({ ...draft, serial: e.target.value })} aria-label="Serial number" />
+          </div>
+        </div>
+        <div className="pf2">
+          <div>
+            <label>Manufacturer</label>
+            <input value={draft.manufacturer} placeholder="Thermo"
+              onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })} />
+          </div>
+          <div>
+            <label>Owner</label>
+            <input value={draft.owner} aria-label="Owner"
+              onChange={(e) => setDraft({ ...draft, owner: e.target.value })} />
+          </div>
+        </div>
       </Dialog>
     </section>
   );

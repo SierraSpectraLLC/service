@@ -18517,10 +18517,13 @@ async function projectComponent(p: { instrumentId: number }, assetId: number) {
 }
 
 /**
- * Serial-first receive. Resolution order: (1) a serial already on this
- * system says so instead of duplicating; (2) an exact serial match on a
- * shelf spare in this workspace attaches THAT unit - the record travels with
- * the serial; (3) otherwise a new component is created through the ordinary
+ * Receive a component - the same mechanism as adding an asset anywhere else
+ * (type from the catalog, model choice with the maker riding along, serial
+ * as free text), because a receiving is an intake, not a special ceremony.
+ * A serial still does its quiet work when one IS typed: (1) one already on
+ * this system says so instead of duplicating; (2) an exact match on a shelf
+ * spare in this workspace attaches THAT unit - the record travels with the
+ * serial. Otherwise the component is created through the ordinary
  * createAsset path, so intake procedures, catalog gases and the
  * model-review queue all fire exactly as they do everywhere else.
  *
@@ -18531,7 +18534,7 @@ async function projectComponent(p: { instrumentId: number }, assetId: number) {
  */
 export async function receiveRestorationComponent(
   projectId: number,
-  data: { serial: string; kind: string; model: string; manufacturer: string },
+  data: { serial: string; kind: string; model: string; manufacturer: string; owner?: string },
 ): Promise<{ error?: string; assetId?: number; resolved?: "attached" | "created"; network?: "new" }> {
   const u = await requireStaff();
   const p = await restorationFor(u, projectId);
@@ -18566,7 +18569,8 @@ export async function receiveRestorationComponent(
 
   const created = await createAsset(p.instrumentId, {
     kind: data.kind, model: data.model, serial, manufacturer: data.manufacturer,
-    owner: "", location: "", note: "",
+    // Defaulted client-side to the intaker's own company; theirs to change.
+    owner: (data.owner ?? "").trim(), location: "", note: "",
   });
   if (created.error || !created.id) return { error: created.error ?? "That didn't save" };
   await db.insert(componentConditions).values({ projectId, assetId: created.id }).onConflictDoNothing();
