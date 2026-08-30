@@ -8,8 +8,9 @@
 // open rather than shut.
 import { describe, expect, it } from "vitest";
 import {
-  addClientProblem, cleanPlan, FREE_CLIENTS, inviteCountProblem, invitePlanProblem,
-  isFree, mayAddClient, mayInviteOffPlatform, OPEN_INVITES, PLAN_LABEL,
+  addClientProblem, cleanPlan, freeAllowance, FREE_CLIENTS, FREE_CLIENTS_MAX,
+  grantProblem, inviteCountProblem, invitePlanProblem, isFree, mayAddClient,
+  mayInviteOffPlatform, OPEN_INVITES, planLabel, PLAN_LABEL,
 } from "@/lib/plan";
 
 describe("blank is full, and stays full", () => {
@@ -74,6 +75,73 @@ describe("one client, and it is the one they were handed", () => {
   it("is silent when there is nothing to say", () => {
     expect(addClientProblem("free", 0, "x@y.test")).toBeNull();
     expect(addClientProblem("", 9000, "x@y.test")).toBeNull();
+  });
+});
+
+describe("room given by hand, on top of the tier", () => {
+  it("leaves every workspace that was never granted anything exactly where it was", () => {
+    // The column arrives DEFAULT 0 on a table of free workspaces. If zero read
+    // as anything but the tier, the deploy adding it would have changed what
+    // every one of them is entitled to.
+    expect(freeAllowance(0)).toBe(FREE_CLIENTS);
+    expect(freeAllowance(null)).toBe(FREE_CLIENTS);
+    expect(freeAllowance(undefined)).toBe(FREE_CLIENTS);
+    expect(mayAddClient("free", 1)).toBe(false);
+  });
+
+  it("moves the wall for the one workspace that was given more", () => {
+    expect(mayAddClient("free", 1, 2)).toBe(true);   // the second client lands
+    expect(mayAddClient("free", 2, 2)).toBe(false);  // the third does not
+  });
+
+  it("only ever adds - a grant under the tier is not a way to give less", () => {
+    /*
+     * A lever that could put a workspace BELOW what every free workspace gets
+     * is one somebody eventually pulls by accident, and the shop it lands on
+     * is mid-job. Under the tier reads as the tier, in both directions.
+     */
+    expect(freeAllowance(-4)).toBe(FREE_CLIENTS);
+    expect(freeAllowance(1)).toBe(FREE_CLIENTS);
+    expect(mayAddClient("free", 0, -4)).toBe(true);
+  });
+
+  it("reads a number nobody meant as the tier rather than as a lockout", () => {
+    expect(freeAllowance(Number.NaN)).toBe(FREE_CLIENTS);
+    expect(freeAllowance("2" as unknown as number)).toBe(2);   // a form value
+    expect(freeAllowance(2.9)).toBe(2);                        // no half clients
+  });
+
+  it("stops well short of giving the product away", () => {
+    expect(freeAllowance(9999)).toBe(FREE_CLIENTS_MAX);
+    expect(grantProblem(FREE_CLIENTS_MAX)).toBeNull();
+    expect(grantProblem(FREE_CLIENTS_MAX + 1)).toContain("subscription");
+    expect(grantProblem(-1)).toContain("whole number");
+    expect(grantProblem(1.5)).toContain("whole number");
+    expect(grantProblem(Number.NaN)).toContain("whole number");
+  });
+
+  it("changes nothing for a workspace that is not on the free tier", () => {
+    // The grant is read on the free tier alone. A full workspace with a number
+    // sitting on it is still simply full.
+    expect(mayAddClient("", 900, 2)).toBe(true);
+    expect(planLabel("", 3)).toBe(PLAN_LABEL[""]);
+  });
+
+  it("says what a shop actually has, so nobody 'fixes' the row", () => {
+    expect(planLabel("free", 0)).toBe(PLAN_LABEL.free);
+    expect(planLabel("free", 2)).toBe("Free - 2 clients");
+  });
+
+  it("does not tell a shop it was handed one client when it was handed two", () => {
+    const one = addClientProblem("free", 1, "joe@ridgelinefield.com")!;
+    expect(one).toContain("came free with the client you were handed");
+    const two = addClientProblem("free", 2, "joe@ridgelinefield.com", 2)!;
+    expect(two).toContain("covers 2 clients");
+    expect(two).toContain("joe@ridgelinefield.com");
+    // Still no figure, for the same reason as the sentence above it.
+    expect(two).not.toMatch(/\$|\d+\s*\/\s*mo|month/i);
+    // And it is silent while there is still room.
+    expect(addClientProblem("free", 1, "x@y.test", 2)).toBeNull();
   });
 });
 

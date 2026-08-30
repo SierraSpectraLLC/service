@@ -236,6 +236,15 @@ export const orgs = pgTable("orgs", {
   plan: text("plan").notNull().default(""),
   /** When the plan was last set, for the console and for an argument later. */
   planSince: text("plan_since").notNull().default(""),   // YYYY-MM-DD
+  /**
+   * ROOM GRANTED BY HAND on the free tier, above what the tier gives. Zero -
+   * what every row has and what every new workspace opens with - means the
+   * tier's own limit applies; the platform owner raises it for one workspace
+   * when handing a shop two clients at once is what wins them, and the audit
+   * trail carries who did it and why. Read only while plan = 'free', and never
+   * downward: a number below the tier reads as the tier. See lib/plan.
+   */
+  freeClients: integer("free_clients").notNull().default(0),
   // Workspace appearance, set by the org's own editors: header color (hex)
   // and a logo shown beside the wordmark. Blank = the platform default look.
   themeColor: text("theme_color").notNull().default(""),

@@ -55,9 +55,65 @@ export const isFree = (raw: string | null | undefined): boolean => cleanPlan(raw
  */
 export const FREE_CLIENTS = 1;
 
+/**
+ * How far that can be stretched for ONE workspace, by hand, as a deal.
+ *
+ * The tier above is the rule; this is the exception somebody at the platform
+ * makes deliberately when a second client is what it takes to win a shop -
+ * handing them two at once is a better pitch than handing them one and a wall.
+ * It is a GRANT rather than a plan: it lives on the workspace, it is set by a
+ * human who is giving something away, and the audit trail carries the reason.
+ *
+ * Capped because past a handful this is not a sweetener, it is the product for
+ * free, and the honest move there is a subscription conversation rather than a
+ * bigger number in a console.
+ */
+export const FREE_CLIENTS_MAX = 5;
+
+/**
+ * What one free workspace may actually hold: the tier, or the grant if it was
+ * given a bigger one.
+ *
+ * Never LESS than the tier. A grant can only ever be generous - a stray zero,
+ * a negative, or a number nobody recognises falls back to what every free
+ * workspace gets, for the same reason blank reads as full: the expensive
+ * mistake is walling somebody out of work they are in the middle of.
+ */
+export function freeAllowance(granted: number | null | undefined): number {
+  const n = Math.trunc(Number(granted ?? 0));
+  if (!Number.isFinite(n) || n <= FREE_CLIENTS) return FREE_CLIENTS;
+  return Math.min(n, FREE_CLIENTS_MAX);
+}
+
+/**
+ * The same label, for a workspace that was granted more room than the tier.
+ * The console has to say what a shop actually has rather than what its tier
+ * says, or the next person to read that row will "fix" it.
+ */
+export function planLabel(plan: string | null | undefined, granted: number | null | undefined): string {
+  const p = cleanPlan(plan);
+  const room = freeAllowance(granted);
+  return p === "free" && room !== FREE_CLIENTS ? `Free - ${room} clients` : PLAN_LABEL[p];
+}
+
 /** May this workspace take on another client organization? */
-export function mayAddClient(plan: string | null | undefined, clientsNow: number): boolean {
-  return !isFree(plan) || clientsNow < FREE_CLIENTS;
+export function mayAddClient(
+  plan: string | null | undefined, clientsNow: number, granted: number | null | undefined = 0,
+): boolean {
+  return !isFree(plan) || clientsNow < freeAllowance(granted);
+}
+
+/**
+ * Is a proposed grant one this console may hand out? Pure, so the dialog and
+ * the action cannot disagree about where the ceiling is.
+ */
+export function grantProblem(n: number): string | null {
+  if (!Number.isInteger(n) || n < 0) return "A free client allowance is a whole number of clients.";
+  if (n > FREE_CLIENTS_MAX) {
+    return `${FREE_CLIENTS_MAX} clients is as far as the free tier stretches.`
+      + " More than that is a subscription, and a conversation rather than a console.";
+  }
+  return null;
 }
 
 /**
@@ -72,11 +128,19 @@ export function mayAddClient(plan: string | null | undefined, clientsNow: number
  */
 export function addClientProblem(
   plan: string | null | undefined, clientsNow: number, contact: string,
+  granted: number | null | undefined = 0,
 ): string | null {
-  if (mayAddClient(plan, clientsNow)) return null;
+  if (mayAddClient(plan, clientsNow, granted)) return null;
   const who = contact.trim() ? ` Ask ${contact.trim()}.` : "";
-  return "This workspace came free with the client you were handed, and it covers that one."
-    + ` A second client needs a subscription.${who}`;
+  const room = freeAllowance(granted);
+  // A workspace that was given extra room was given it by somebody, and being
+  // told it "came free with the client you were handed" when it came free with
+  // three of them would read as a mistake. Same sentence shape, true either way.
+  return room === FREE_CLIENTS
+    ? "This workspace came free with the client you were handed, and it covers that one."
+      + ` A second client needs a subscription.${who}`
+    : `This workspace came free, and it covers ${room} clients.`
+      + ` Another one needs a subscription.${who}`;
 }
 
 /**

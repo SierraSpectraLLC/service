@@ -2,8 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { createOperator, setWorkspacePlan } from "@/app/actions";
-import { cleanPlan, FREE_CLIENTS, PLAN_LABEL } from "@/lib/plan";
+import { createOperator, setFreeClients, setWorkspacePlan } from "@/app/actions";
+import {
+  cleanPlan, freeAllowance, FREE_CLIENTS, FREE_CLIENTS_MAX, planLabel, PLAN_LABEL,
+} from "@/lib/plan";
 import { DataTable, PageHead, Pill } from "@/components/ui";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
@@ -17,6 +19,8 @@ export type TenantRow = {
   /** '' = full, 'free' = the client-bounded hand-off tier. See lib/plan. */
   plan: string;
   planSince: string;
+  /** Room granted to this workspace by hand, above the tier. Usually 0. */
+  freeClients: number;
   since: string;
 };
 
@@ -53,7 +57,8 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
         ? "They can take on as many clients as they like, and hand clients to shops that are not"
           + " on Ridgeline yet. Do this once they have actually paid."
         : `They keep every record they have - nothing is deleted and nothing is hidden - but they`
-          + ` stop at ${FREE_CLIENTS} client and cannot invite a shop from outside.`,
+          + ` stop at ${freeAllowance(r.freeClients)} client${freeAllowance(r.freeClients) === 1 ? "" : "s"}`
+          + " and cannot invite a shop from outside.",
       action: to === "" ? "Move to full" : "Move to free",
       tone: to === "" ? "primary" : "bad",
     });
@@ -62,6 +67,35 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
       const res = await setWorkspacePlan(r.id, to, why);
       if (res?.error) { toast({ message: res.error, tone: "bad" }); return; }
       toast({ message: `${r.name} is on ${PLAN_LABEL[to].toLowerCase()}` });
+      router.refresh();
+    });
+  };
+
+  /*
+   * The sweetener. A shop being handed its first client is easier to win with
+   * a second one in the same breath, and this is where that is given - by a
+   * person, to one workspace, with the reason kept. The tier itself does not
+   * move: every other free workspace still stops at one. See lib/plan.
+   */
+  const stretch = async (r: TenantRow, to: number) => {
+    const room = freeAllowance(r.freeClients);
+    const why = await confirmReason({
+      title: to > room
+        ? `Give ${r.name} ${to} free clients?`
+        : `Put ${r.name} back to ${FREE_CLIENTS} free client?`,
+      body: to > room
+        ? `They can take on ${to} clients on the free tier instead of ${room} - handed to them or`
+          + " their own - and nothing else about the tier changes. Do this when it is what wins them."
+        : "They keep every record they have. They stop at the tier's own limit, so a workspace"
+          + " already over it simply cannot add another.",
+      action: to > room ? `Give ${to}` : "Back to the tier",
+      tone: to > room ? "primary" : "bad",
+    });
+    if (why === null) return;
+    startTransition(async () => {
+      const res = await setFreeClients(r.id, to, why);
+      if (res?.error) { toast({ message: res.error, tone: "bad" }); return; }
+      toast({ message: `${r.name}'s free tier covers ${to} client${to === 1 ? "" : "s"}` });
       router.refresh();
     });
   };
@@ -136,11 +170,25 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
             plan: r.id === rootOrgId ? <span className="mut t-small">-</span> : (
               <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                 <Pill tone={cleanPlan(r.plan) === "free" ? "warn" : "good"}>
-                  {PLAN_LABEL[cleanPlan(r.plan)]}
+                  {planLabel(r.plan, r.freeClients)}
                 </Pill>
                 <button className="btn link t-meta" disabled={pending} onClick={() => move(r)}>
                   {cleanPlan(r.plan) === "free" ? "to full" : "to free"}
                 </button>
+                {/* Only where it means something: the grant is read on the free
+                    tier alone, so a full workspace is not offered it. */}
+                {cleanPlan(r.plan) === "free" && freeAllowance(r.freeClients) < FREE_CLIENTS_MAX && (
+                  <button className="btn link t-meta" disabled={pending}
+                    onClick={() => stretch(r, freeAllowance(r.freeClients) + 1)}>
+                    +1 client
+                  </button>
+                )}
+                {cleanPlan(r.plan) === "free" && freeAllowance(r.freeClients) > FREE_CLIENTS && (
+                  <button className="btn link t-meta" disabled={pending}
+                    onClick={() => stretch(r, FREE_CLIENTS)}>
+                    back to {FREE_CLIENTS}
+                  </button>
+                )}
               </span>
             ),
             seats: <span style={{ fontSize: 13 }}>{r.staff}{r.owners > 0 && <span className="mut"> ({r.owners} owner{r.owners === 1 ? "" : "s"})</span>}</span>,

@@ -68,6 +68,9 @@ export default async function TenantsPage() {
     // lib/plan.
     plan: o.plan,
     planSince: o.planSince,
+    // Room granted to this one workspace by hand, above the tier. Zero on all
+    // but the ones somebody deliberately stretched - see lib/plan.
+    freeClients: o.freeClients,
     since: shopTime(o.createdAt),
   }));
 

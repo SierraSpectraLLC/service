@@ -5,6 +5,10 @@
 // hand-off is a second door into the same room and it cannot have the same lock
 // on it, so the workspace it opens is real and its CLIENT LIST is bounded.
 //
+// Plus the deliberate exception: one workspace can be given more room than the
+// tier, by hand, because handing a shop two clients at once is sometimes what
+// wins it. That grant has to move the wall for THAT shop and nothing else.
+//
 // Two properties, and the second is the one that actually costs money if it is
 // wrong. Every door a client can arrive through has to respect the bound, or it
 // is not a bound. And a free workspace must not be able to open another one -
@@ -79,7 +83,7 @@ beforeEach(async () => {
     DELETE FROM expense_categories;
     DELETE FROM house_members WHERE email <> 'joe@sierra.test';
     DELETE FROM orgs WHERE id > 100;
-    UPDATE orgs SET plan = '', plan_since = '' WHERE id IN (3, 7);
+    UPDATE orgs SET plan = '', plan_since = '', free_clients = 0 WHERE id IN (3, 7);
   `);
 });
 
@@ -311,5 +315,138 @@ describe("lifting the limit", () => {
     const { setWorkspacePlan } = await import("@/app/actions");
     expect((await setWorkspacePlan(3, "free", "misclick")).error)
       .toContain("running the instance");
+  });
+});
+
+describe("stretching the tier for one shop", () => {
+  it("is the platform owner's to give, and nobody else's", async () => {
+    const org = await handOff();
+    const { setFreeClients } = await import("@/app/actions");
+    who = DANA(org.id);
+    await expect(setFreeClients(org.id, 2, "we would like two")).rejects.toThrow();
+    who = JOE;
+    expect((await setFreeClients(org.id, 2, "sweetener on the Emery hand-off")).error)
+      .toBeUndefined();
+  });
+
+  it("lets the second client be typed in, and stops at the third", async () => {
+    const org = await handOff();
+    who = JOE;
+    const { setFreeClients } = await import("@/app/actions");
+    await setFreeClients(org.id, 2, "sweetener on the Emery hand-off");
+
+    who = DANA(org.id);
+    const { addOrg } = await import("@/app/actions");
+    expect((await addOrg("Bayview Diagnostics", "client")).error).toBeUndefined();
+    const third = await addOrg("Cove Labs", "client");
+    expect(third.error).toContain("covers 2 clients");
+    // Still names somebody rather than dead-ending, and still sells nothing.
+    expect(third.error).toContain("joe@ridgelinefield.com");
+    expect(third.id).toBeUndefined();
+  });
+
+  it("lets the second client arrive as a hand-off, which is the point of it", async () => {
+    /*
+     * The door this was bought for: two clients handed over in one
+     * conversation. If the grant moved addOrg's wall and not this one it would
+     * not do the thing it exists to do.
+     */
+    const org = await handOff();
+    who = JOE;
+    const { setFreeClients, shareClient, decideClientShare } = await import("@/app/actions");
+    await setFreeClients(org.id, 2, "handing them Bayview as well");
+    // Its own id and name: beforeEach clears orgs above 100 only, so a client
+    // an earlier test filed under Sierra is still sitting there.
+    await client.exec(`
+      INSERT INTO orgs (id, name, kind, parent_org_id) VALUES (21, 'Harbor Analytical', 'client', 3);
+      INSERT INTO instruments (external_id, client, model, owner_org_id, tenant_org_id)
+        VALUES ('HB-021', 'Harbor Analytical', '7890B', 21, 3);
+      INSERT INTO provider_links (tenant_org_id, provider_org_id, created_by)
+        VALUES (3, ${org.id}, 'joe@sierra.test');
+    `);
+    await shareClient(21, { toOrgIds: [org.id], note: "", terms: FEE } as never);
+    const [offer] = await testDb.select().from(schema.clientShares)
+      .where(eq(schema.clientShares.sourceOrgId, 21));
+
+    who = DANA(org.id);
+    const took = await decideClientShare(offer.id, true);
+    expect(took.error).toBeUndefined();
+    const theirs = await testDb.select().from(schema.orgs)
+      .where(eq(schema.orgs.parentOrgId, org.id));
+    expect(theirs.map((c) => c.name).sort()).toEqual(["Emery Pharma", "Harbor Analytical"]);
+  });
+
+  it("moves the wall for that shop alone", async () => {
+    // A grant is a deal with one company. The next shop through the same door
+    // gets what the tier gives, or it was not a grant, it was a release.
+    const first = await handOff();
+    who = JOE;
+    const { setFreeClients, addOrg } = await import("@/app/actions");
+    await setFreeClients(first.id, 2, "sweetener on the Emery hand-off");
+    const second = await handOff("rae@othershop.test", "Cascade Calibration");
+
+    who = DANA(second.id);
+    expect((await addOrg("Bayview Diagnostics", "client")).error)
+      .toContain("came free with the client you were handed");
+  });
+
+  it("does not open the faucet along with it", async () => {
+    /*
+     * Room for another client and permission to MINT another workspace are
+     * different things. The chain argument is about workspaces, and two clients
+     * does not answer it - see lib/plan.
+     */
+    const org = await handOff();
+    who = JOE;
+    const { setFreeClients } = await import("@/app/actions");
+    await setFreeClients(org.id, 2, "sweetener on the Emery hand-off");
+
+    who = DANA(org.id);
+    const { inviteHandoff } = await import("@/app/actions");
+    const [theirs] = await testDb.select().from(schema.orgs)
+      .where(eq(schema.orgs.parentOrgId, org.id));
+    expect((await inviteHandoff(theirs.id, {
+      email: "someone@third.test", note: "", terms: FEE,
+    } as never)).error).toContain("opens a workspace");
+  });
+
+  it("stops well short of giving the product away", async () => {
+    const org = await handOff();
+    who = JOE;
+    const { setFreeClients } = await import("@/app/actions");
+    const { FREE_CLIENTS_MAX } = await import("@/lib/plan");
+    expect((await setFreeClients(org.id, FREE_CLIENTS_MAX + 1, "they asked nicely")).error)
+      .toContain("subscription");
+    const [after] = await testDb.select().from(schema.orgs).where(eq(schema.orgs.id, org.id));
+    expect(after.freeClients).toBe(0);
+  });
+
+  it("can be taken back, and taking it back deletes nothing", async () => {
+    const org = await handOff();
+    who = JOE;
+    const { setFreeClients } = await import("@/app/actions");
+    await setFreeClients(org.id, 2, "sweetener on the Emery hand-off");
+    who = DANA(org.id);
+    const { addOrg } = await import("@/app/actions");
+    await addOrg("Bayview Diagnostics", "client");
+
+    who = JOE;
+    expect((await setFreeClients(org.id, 1, "deal did not close")).error).toBeUndefined();
+    const theirs = await testDb.select().from(schema.orgs)
+      .where(eq(schema.orgs.parentOrgId, org.id));
+    expect(theirs).toHaveLength(2);          // both clients still there
+    who = DANA(org.id);
+    expect((await addOrg("Cove Labs", "client")).error).toContain("subscription");
+  });
+
+  it("keeps why, because somebody will ask why this shop has two", async () => {
+    const org = await handOff();
+    who = JOE;
+    const { setFreeClients } = await import("@/app/actions");
+    expect((await setFreeClients(org.id, 2, "ok")).error).toContain("reason is required");
+    await setFreeClients(org.id, 2, "sweetener that closed the Emery hand-off");
+    const trail = await testDb.select().from(schema.auditLog);
+    expect(trail.some((a) => a.action.includes("sweetener that closed the Emery hand-off")
+      && a.action.includes("2 clients"))).toBe(true);
   });
 });
