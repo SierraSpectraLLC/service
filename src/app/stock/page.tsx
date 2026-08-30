@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { orgs, stockItems, stockrooms, stockroomShares } from "@/db/schema";
+import { houseMembers, orgs, stockItems, stockrooms, stockroomShares } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { forTenant, isHouse, readTenant, visibleOrgs } from "@/lib/tenancy";
 import { KIND_LABEL, needsReorder, stockAccess, stockTotals } from "@/lib/stock";
@@ -22,13 +22,21 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
   try { user = await requireUser(); } catch { redirect("/login"); }
   const { q = "", kind = "", short = "" } = await searchParams;
 
-  const [rooms, myShares, orgRows] = await Promise.all([
+  const [rooms, myShares, orgRows, roster] = await Promise.all([
     db.select().from(stockrooms)
       .where(and(eq(stockrooms.archived, false), forTenant(stockrooms.tenantOrgId, readTenant(user))))
       .orderBy(asc(stockrooms.name)),
     user.orgId === null ? Promise.resolve([]) : db.select({ stockroomId: stockroomShares.stockroomId, access: stockroomShares.access })
       .from(stockroomShares).where(eq(stockroomShares.orgId, user.orgId)),
     visibleOrgs(user),
+    /* Who a van can be handed to. The house's own roster only - a client's
+       editor keeping their own cage has nobody here to pick from, and the
+       picker falls back to a typed name for them. */
+    isHouse(user.role)
+      ? db.select({ email: houseMembers.email, name: houseMembers.name }).from(houseMembers)
+        .where(and(forTenant(houseMembers.orgId, readTenant(user)), ne(houseMembers.role, "none")))
+        .orderBy(asc(houseMembers.name), asc(houseMembers.email))
+      : Promise.resolve([]),
   ]);
 
   const visible = rooms
@@ -100,6 +108,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
                 orgOptions={orgRows}
                 isHouse={isHouse(user.role)}
                 myOrgName={user.orgName || "your organization"}
+                roster={roster}
               />
             )}
           </>

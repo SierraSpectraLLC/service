@@ -5,16 +5,22 @@ import { confirmReason, inputDialog } from "@/components/ui/ConfirmDialog";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { issueStock, receiveStock, recountStock, transferStock } from "@/app/actions";
-import { needsReorder, shortBy } from "@/lib/stock";
+import { needsReorder, shortBy, stockLabel } from "@/lib/stock";
 import { formatCents } from "@/lib/money";
 import { matchesQuery } from "@/lib/search";
 
 export type ShelfItem = {
   id: number; partNumber: string; name: string; qty: number; minQty: number; bin: string;
   note: string; unitCostCents: number | null;
+  /** part | tool. A tool leads with its name, because that is its identity. */
+  kind: string;
 };
 
 export type IssueTarget = { key: string; label: string; instrumentId: number | null; assetId: number | null };
+
+/** What to call a line in a heading: its number, or a tool's name. */
+const shelfName = (i: ShelfItem) =>
+  (i.kind === "tool" ? i.name || i.partNumber : i.partNumber) || "this line";
 
 /** Big enough to hit with a thumb - this panel gets used standing at a shelf. */
 const TAP = { minHeight: 34, fontSize: 13 } as const;
@@ -43,7 +49,7 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
     const needle = filter.trim().toLowerCase();
     if (!needle) return items;
     return items.filter((i) =>
-      matchesQuery(filter, [i.partNumber, i.name, i.bin]));
+      matchesQuery(filter, [i.partNumber, i.name, i.bin, i.kind === "tool" ? "tool" : ""]));
   }, [items, filter]);
 
   const start = (id: number, mode: "issue" | "receive" | "move") => {
@@ -71,7 +77,7 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
       if (res?.error) setError(res.error);
       else {
         const verb = open?.mode === "issue" ? "Issued" : open?.mode === "receive" ? "Received" : "Moved";
-        toast({ message: `${verb} ${n} ${item.partNumber}` });
+        toast({ message: `${verb} ${n} ${shelfName(item)}` });
         close();
       }
     });
@@ -94,8 +100,23 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
         return (
           <div key={i.id} style={{ borderTop: "1px solid var(--line)", padding: "8px 0" }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-              <span className="mono t-body" style={{ fontWeight: 700 }}>{i.partNumber}</span>
-              {i.name && <span className="t-body">{i.name}</span>}
+              {/* Whichever of the two IS this thing leads the line. A tool
+                  usually has no number, and a row led by an empty mono span
+                  reads as a shelf with a hole in it; a tool that DOES carry an
+                  OEM number still shows it, after the name, because that is
+                  what you order another one by. */}
+              {i.kind === "tool" ? (
+                <>
+                  <span className="t-body" style={{ fontWeight: 700 }}>{i.name || "Unnamed tool"}</span>
+                  <span className="pill neutral">tool</span>
+                  {i.partNumber && <span className="mono t-meta mut">{i.partNumber}</span>}
+                </>
+              ) : (
+                <>
+                  <span className="mono t-body" style={{ fontWeight: 700 }}>{i.partNumber}</span>
+                  {i.name && <span className="t-body">{i.name}</span>}
+                </>
+              )}
               {i.bin && <span className="pill neutral">bin {i.bin}</span>}
               <span className={`pill ${short ? "bad" : "good"}`}>
                 {i.qty} on hand
@@ -122,7 +143,7 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
                   <button className="btn link" style={{ fontSize: 12 }} disabled={pending}
                     onClick={async () => {
                       const counted = await inputDialog({
-                        title: `Recount ${i.partNumber}`, action: "Next",
+                        title: `Recount ${shelfName(i)}`, action: "Next",
                         label: "Counted how many on the shelf?", initial: String(i.qty),
                       });
                       if (counted === null) return;
@@ -156,8 +177,11 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
                 : null;
               return (
                 <Dialog open onClose={close} size="sm"
-                  title={`${verb} ${i.partNumber}`}
-                  context={[i.name, `${i.qty} on hand`, i.bin ? `bin ${i.bin}` : ""].filter(Boolean).join(" · ")}
+                  title={`${verb} ${shelfName(i)}`}
+                  context={[
+                    i.kind === "tool" ? (i.partNumber ? stockLabel(i) : "Tool") : i.name,
+                    `${i.qty} on hand`, i.bin ? `bin ${i.bin}` : "",
+                  ].filter(Boolean).join(" · ")}
                   footer={
                     <>
                       <DialogStatus error={error} problem={problem} />

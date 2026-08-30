@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { archiveStockroom, removeStockroomShare, setStockroomShare, updateStockroom } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
+import KeeperPicker from "@/components/KeeperPicker";
 import { toast } from "@/components/ui/Toast";
 
 export type RoomShare = { orgId: number; name: string; kind: string; access: string };
@@ -19,14 +20,22 @@ const LEVEL: Record<string, { label: string; bg: string; fg: string }> = {
  * client hands their service provider "can draw parts" on their own cage, or a
  * provider gives the client visibility of the spares held for them.
  */
-export default function StockroomAdmin({ room, shares, orgOptions, ownerName }: {
-  room: { id: number; name: string; kind: string; keeper: string; location: string; note: string };
+export default function StockroomAdmin({ room, shares, orgOptions, roster, ownerName }: {
+  room: {
+    id: number; name: string; kind: string; keeper: string; keeperEmail: string;
+    location: string; note: string;
+  };
   shares: RoomShare[];
   orgOptions: { id: number; name: string; kind: string }[];
+  /** This workspace's people, for handing a kit to one of them. */
+  roster: { email: string; name: string }[];
   ownerName: string;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ name: room.name, keeper: room.keeper, location: room.location, note: room.note });
+  const [draft, setDraft] = useState({
+    name: room.name, keeper: room.keeper, keeperEmail: room.keeperEmail,
+    location: room.location, note: room.note,
+  });
   const [adding, setAdding] = useState(false);
   const [pickedOrg, setPickedOrg] = useState(0);
   const [level, setLevel] = useState("view");
@@ -74,7 +83,9 @@ export default function StockroomAdmin({ room, shares, orgOptions, ownerName }: 
           <div className="pf2" style={{ marginBottom: 8 }}>
             <div><label>Name *</label><input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></div>
             {room.kind === "mobile" && (
-              <div><label>Kept by</label><input value={draft.keeper} onChange={(e) => setDraft({ ...draft, keeper: e.target.value })} placeholder="Whose van" /></div>
+              <KeeperPicker roster={roster} disabled={pending}
+                value={{ keeper: draft.keeper, keeperEmail: draft.keeperEmail }}
+                onChange={(k) => setDraft({ ...draft, ...k })} />
             )}
             <div><label>Location</label><input value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="Bay 2 / client site" /></div>
           </div>

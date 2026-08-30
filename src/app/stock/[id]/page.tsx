@@ -4,8 +4,8 @@ import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   appSettings,
-  assets, instruments, orgs, partCatalog, partNumbers, partPrices, stockItems, stockMoves,
-  stockrooms, stockroomShares,
+  assets, houseMembers, instruments, orgs, partCatalog, partNumbers, partPrices, stockItems,
+  stockMoves, stockrooms, stockroomShares,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { forTenant, isHouse, scopeFor, visibleAssetIds, visibleOrgs } from "@/lib/tenancy";
@@ -68,6 +68,14 @@ export default async function StockroomPage({ params, searchParams }: {
   ]);
   const [buySettings] = await db.select({ crossDockDays: appSettings.crossDockDays })
     .from(appSettings).where(eq(appSettings.id, 1));
+  /* Who a kit can be handed to: this workspace's own roster, which is the same
+     set createStockroom checks an address against. Only the house picks one -
+     a client's editor keeping their own cage has no roster here to pick from. */
+  const roster = isHouse(user.role)
+    ? await db.select({ email: houseMembers.email, name: houseMembers.name }).from(houseMembers)
+      .where(and(forTenant(houseMembers.orgId, room.tenantOrgId ?? null), ne(houseMembers.role, "none")))
+      .orderBy(asc(houseMembers.name), asc(houseMembers.email))
+    : [];
   const crossDockDays = buySettings?.crossDockDays ?? 1;
   // The parts catalog: what each number IS. A shelf line whose number the book
   // knows borrows its name, and the add-grid offers the book's numbers.
@@ -192,7 +200,7 @@ export default async function StockroomPage({ params, searchParams }: {
 
         <StockShelf
           items={items.map((i) => ({
-            id: i.id, partNumber: i.partNumber,
+            id: i.id, partNumber: i.partNumber, kind: i.kind,
             // The book's name backfills a nameless line, so the shelf and the
             // catalog agree about what a number is.
             name: i.name || bookName.get(i.partNumber.trim().toLowerCase()) || "",
@@ -219,9 +227,14 @@ export default async function StockroomPage({ params, searchParams }: {
 
       {acc.manage && (
         <StockroomAdmin
-          room={{ id: room.id, name: room.name, kind: room.kind, keeper: room.keeper, location: room.location, note: room.note }}
+          room={{
+            id: room.id, name: room.name, kind: room.kind,
+            keeper: room.keeper, keeperEmail: room.keeperEmail,
+            location: room.location, note: room.note,
+          }}
           shares={shareRows}
           orgOptions={orgRows.filter((o) => o.id !== room.orgId)}
+          roster={roster}
           ownerName={ownerName}
         />
       )}

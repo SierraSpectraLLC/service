@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { and, asc, desc, eq, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
   expenseCategories, expenseReports, expenses, houseMembers, payroll, perks, stipends,
+  stockItems, stockrooms,
 } from "@/db/schema";
 import { myTenantOrgId, requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
@@ -14,6 +15,7 @@ import { inForceOn, payrollForMonth, type PayRow } from "@/lib/payroll";
 import { perksMonthlyTotal, type PerkRow } from "@/lib/perks";
 import { formatCents } from "@/lib/money";
 import { shopToday } from "@/lib/shopday";
+import { stockTotals } from "@/lib/stock";
 import { PageHead, Panel } from "@/components/ui";
 import PeopleDesk, { type RosterRow } from "@/app/people/PeopleDesk";
 import StipendsCard, { type StipendRow } from "@/components/StipendsCard";
@@ -53,7 +55,7 @@ export default async function PeoplePage() {
   const today = shopToday();
   const isOwner = user.role === "owner";
 
-  const [members, reportRows, expenseRows, seesPay, stipendRows, categoryRows] = await Promise.all([
+  const [members, reportRows, expenseRows, seesPay, stipendRows, categoryRows, kitRooms] = await Promise.all([
     db.select().from(houseMembers)
       .where(and(forTenant(houseMembers.orgId, t), ne(houseMembers.role, "none")))
       .orderBy(asc(houseMembers.name), asc(houseMembers.email)),
@@ -68,7 +70,20 @@ export default async function PeoplePage() {
       .orderBy(asc(stipends.person), asc(stipends.label)),
     db.select().from(expenseCategories).where(forTenant(expenseCategories.tenantOrgId, t))
       .orderBy(asc(expenseCategories.sortOrder), asc(expenseCategories.id)),
+    /* The vans and field kits, so a person's file can answer "what of ours is
+       in their van" - the question somebody asks when a tech is out for a
+       fortnight, or leaving. Keyed on the roster ADDRESS rather than the
+       keeper's name, because a name is not an identity and two people here
+       can share one. */
+    db.select().from(stockrooms)
+      .where(and(forTenant(stockrooms.tenantOrgId, t), eq(stockrooms.archived, false)))
+      .orderBy(asc(stockrooms.name)),
   ]);
+  const kitIds = kitRooms.filter((r) => r.keeperEmail).map((r) => r.id);
+  const kitLines = kitIds.length
+    ? await db.select({ stockroomId: stockItems.stockroomId, qty: stockItems.qty, minQty: stockItems.minQty })
+      .from(stockItems).where(inArray(stockItems.stockroomId, kitIds))
+    : [];
 
   /*
    * What the company pays per month, for the one line at the bottom. Fetched
@@ -137,6 +152,12 @@ export default async function PeoplePage() {
          expense_reports.person is a directory name. Worth saying on the row,
          because the alternative is a picker that quietly omits them. */
       nameable: m.name.trim() !== "",
+      kits: kitRooms
+        .filter((r) => r.keeperEmail.toLowerCase() === m.email.toLowerCase())
+        .map((r) => ({
+          id: r.id, name: r.name,
+          ...stockTotals(kitLines.filter((l) => l.stockroomId === r.id)),
+        })),
       unclaimedCents: reportTotalCents(pool),
       unclaimedCount: pool.length,
       draftCount: theirs.filter((r) => editableReport(r.status)).length,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   needsReorder, shortBy, reorderLines, stockTotals, canIssue, stockAccess, findLine,
+  checkStockItem, findStockLine, stockKey, stockLabel,
 } from "@/lib/stock";
 
 const line = (qty: number, minQty: number) => ({ qty, minQty });
@@ -96,5 +97,92 @@ describe("findLine", () => {
     expect(findLine(lines, " g6303-80060")?.partNumber).toBe("G6303-80060");
     expect(findLine(lines, "")).toBeUndefined();
     expect(findLine(lines, "nope")).toBeUndefined();
+  });
+});
+
+/*
+ * Tools on the shelf.
+ *
+ * A part is bought by its number and a tool mostly is not - a 4 mm hex key is
+ * a 4 mm hex key - so the identity of a shelf line had to stop being "the part
+ * number" and start being "the number, or the name when there isn't one". Some
+ * tools DO carry an OEM number and want it, which is why the number is
+ * optional here rather than absent.
+ *
+ * The failure these fence off is a shelf counted under two identities: two
+ * lines for one wrench that never add up, and a van that can hold exactly one
+ * numberless tool because every one of them collides on the empty string.
+ */
+describe("what identifies a shelf line", () => {
+  it("takes the number when there is one", () => {
+    expect(stockKey({ partNumber: "228-35145-91", name: "Plunger seal kit" })).toBe("228-35145-91");
+  });
+
+  it("falls back to the name when there is not", () => {
+    expect(stockKey({ partNumber: "", name: "4 mm hex key" })).toBe("4 mm hex key");
+    expect(stockKey({ partNumber: "  ", name: "Torque wrench" })).toBe("torque wrench");
+  });
+
+  it("is case-blind, the way the database's index is", () => {
+    // The whole point of this function is to be the SAME rule the unique index
+    // enforces. If it were looser, it would call two rows one line while the
+    // index happily stored both.
+    expect(stockKey({ partNumber: "", name: "Torque Wrench" }))
+      .toBe(stockKey({ partNumber: "", name: "torque wrench" }));
+    expect(stockKey({ partNumber: "AB-1", name: "" })).toBe(stockKey({ partNumber: "ab-1", name: "x" }));
+  });
+
+  it("keeps a numbered tool on the line it already had", () => {
+    // A tool that later earns an OEM number must not fork into a second line
+    // counted separately from the three already in the drawer.
+    expect(stockKey({ partNumber: "G1946-80006", name: "CDS alignment tool" }))
+      .toBe(stockKey({ partNumber: "g1946-80006", name: "Alignment tool, CDS" }));
+  });
+
+  it("has nothing to say about a line with neither", () => {
+    expect(stockKey({ partNumber: "", name: "" })).toBe("");
+    expect(findStockLine([{ partNumber: "a", name: "b" }], { partNumber: "", name: "" })).toBeUndefined();
+  });
+
+  it("finds a tool on a shelf by its name", () => {
+    const shelf = [
+      { partNumber: "228-35145-91", name: "Plunger seal kit" },
+      { partNumber: "", name: "4 mm hex key" },
+    ];
+    expect(findStockLine(shelf, { partNumber: "", name: "4 MM HEX KEY" })?.name).toBe("4 mm hex key");
+    expect(findStockLine(shelf, { partNumber: "228-35145-91", name: "" })?.name).toBe("Plunger seal kit");
+  });
+});
+
+describe("what to call a line in a sentence", () => {
+  it("says the number for a part", () => {
+    expect(stockLabel({ partNumber: "5181-3323", name: "Inlet septa" })).toBe("PN 5181-3323");
+  });
+
+  it("says the name for a tool, rather than a bare PN with nothing after it", () => {
+    // The ledger line this feeds used to read "received 3 × PN " for a tool.
+    expect(stockLabel({ partNumber: "", name: "4 mm hex key" })).toBe("4 mm hex key");
+    expect(stockLabel({ partNumber: "", name: "" })).toBe("an unnamed line");
+  });
+});
+
+describe("what may go on a shelf", () => {
+  it("refuses a part with no number - it could never be ordered or priced", () => {
+    expect(checkStockItem({ kind: "part", partNumber: "", name: "Some seal" })).toBeTruthy();
+    expect(checkStockItem({ partNumber: "", name: "Some seal" })).toBeTruthy(); // absent kind = part
+  });
+
+  it("takes a tool on its name alone", () => {
+    expect(checkStockItem({ kind: "tool", partNumber: "", name: "4 mm hex key" })).toBeNull();
+  });
+
+  it("takes a tool that does carry an OEM number", () => {
+    // The hybrid the shop asked for: knowing we have three 4 mm keys, AND
+    // knowing the number of the alignment tool so another can be ordered.
+    expect(checkStockItem({ kind: "tool", partNumber: "G1946-80006", name: "CDS alignment tool" })).toBeNull();
+  });
+
+  it("refuses a tool with no name, which is a count of nothing", () => {
+    expect(checkStockItem({ kind: "tool", partNumber: "", name: "  " })).toBeTruthy();
   });
 });

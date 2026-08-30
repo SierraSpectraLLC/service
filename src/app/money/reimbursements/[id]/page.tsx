@@ -135,6 +135,11 @@ export default async function ExpenseReportPage({ params }: { params: Promise<{ 
           incurredOn: r.incurredOn, workOrderId: r.workOrderId,
           workOrderNumber: r.workOrderId !== null ? (woNumber.get(r.workOrderId) ?? "") : "",
           receiptUrl: r.receiptUrl, receiptName: r.receiptName,
+          /* The trip behind the row, so opening it again reopens the same
+             trip rather than resetting it to the job's default lab and a day
+             out - which would re-price somebody's two nights away the moment
+             they came back to fix a typo. */
+          siteId: r.siteId, nights: r.allowanceNights,
           allowanceState: r.allowanceState, allowanceNote: r.allowanceNote,
           allowanceByName: r.allowanceBy.trim()
             ? (roster.find((m) => m.email.trim().toLowerCase() === r.allowanceBy.trim().toLowerCase())?.name
