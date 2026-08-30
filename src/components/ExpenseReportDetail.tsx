@@ -4,9 +4,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
-  approveExpenseAllowance, attachPoolExpenses, deleteExpenseReport, logMyExpense, nameExpenseReport,
-  payExpenseReport, removeReportExpense, returnExpenseReport, setReportWorkOrder, submitDraftReport,
-  withdrawExpenseReport,
+  approveExpenseAllowance, attachPoolExpenses, deleteExpenseReport, editReportExpense, logMyExpense,
+  nameExpenseReport, payExpenseReport, removeReportExpense, returnExpenseReport, setReportWorkOrder,
+  submitDraftReport, withdrawExpenseReport,
 } from "@/app/actions";
 import {
   REPORT_LABEL, REPORT_TONE, checkReportTitle, editableReport, reportSpan, reportTotalCents,
@@ -21,9 +21,20 @@ import { Panel, Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import ReceiptScanner from "@/components/ReceiptScanner";
 
+/** A PDF receipt has no thumbnail to show; an image does. Name first - a blob
+ *  url is a hash, and the name is what the person actually uploaded. */
+const isPdfReceipt = (name: string, url: string) => /\.pdf($|\?)/i.test(name || url);
+
 export type ReportExpense = {
   id: number; kind: string; description: string; amountCents: number; incurredOn: string;
   workOrderId: number | null; workOrderNumber: string; receiptUrl: string; receiptName: string;
+  /**
+   * The trip the rulebook priced this against: which lab, and how many nights
+   * away. Carried so that reopening the row reopens the same trip, rather than
+   * resetting it to the job's default lab and a day out.
+   */
+  siteId: number | null;
+  nights: number;
   /** What the travel rulebook made of it: "" | flagged | approved. */
   allowanceState: string;
   allowanceNote: string;
@@ -89,9 +100,28 @@ export default function ExpenseReportDetail({
 }) {
   const router = useRouter();
   const editable = mayWork && editableReport(report.status);
-  const [adding, setAdding] = useState(false);
+  /*
+   * The expense dialog, in whichever of its two moods: "new" while one is
+   * being added, the row itself while one already on the report is open, null
+   * when it is shut.
+   *
+   * ONE dialog rather than two, because adding a row and fixing one are the
+   * same eight fields, the same rulebook and the same receipt. Fixing one was
+   * missing entirely - the rows have carried the app's "this is a record"
+   * hover highlight since they were written, and clicking one did nothing - so
+   * a receipt photographed after the fact, or an amount typed from memory that
+   * the paper later disagreed with, meant removing the row and starting over,
+   * which threw away the parts that were right along with the part that wasn't.
+   */
+  const [editing, setEditing] = useState<ReportExpense | "new" | null>(null);
+  /** The row being fixed, or null while one is being added. */
+  const opened = editing === "new" ? null : editing;
   const [draft, setDraft] = useState({ kind: "", description: "", amount: "", incurredOn: "", workOrderId: "" });
   const [receipt, setReceipt] = useState<File | null>(null);
+  /* The receipt already in the blob store, as it stands after any removing.
+     Separate from `receipt` because that one is a file still waiting to be
+     uploaded, and the two are told apart at save. */
+  const [attached, setAttached] = useState({ url: "", name: "" });
   /* A photo waiting to be scanned. Set the moment the camera returns one and
      cleared when the scanner hands back a result - which may be the original,
      if that is what they chose. */
@@ -200,12 +230,40 @@ export default function ExpenseReportDetail({
          is changed here, not worked around. */
       workOrderId: report.workOrderId === null ? "" : String(report.workOrderId),
     });
-    setReceipt(null); setAddErr(""); setAdding(true);
+    setReceipt(null); setAttached({ url: "", name: "" }); setAddErr(""); setEditing("new");
+  };
+
+  /*
+   * Open a row already on the report - to read it, or to fix it.
+   *
+   * Everything comes off the row, the trip included: the nights and the lab
+   * this per diem was priced against, so coming back to correct a description
+   * does not quietly re-price two nights away as a day trip.
+   *
+   * lastFill is cleared rather than primed, which is the whole of the rule:
+   * what is in these boxes is the CLAIMANT's, filed and stored, so the
+   * autofill must treat it as typed-over and leave it alone. It only starts
+   * offering again once they move the nights.
+   */
+  const openRow = (r: ReportExpense) => {
+    setTripDraft({ siteId: r.siteId ?? defaultSiteId, nights: String(r.nights) });
+    lastFill.current = { amount: "", description: "" };
+    setDraft({
+      kind: r.kind, description: r.description, amount: (r.amountCents / 100).toFixed(2),
+      incurredOn: r.incurredOn,
+      workOrderId: r.workOrderId === null ? "" : String(r.workOrderId),
+    });
+    setReceipt(null);
+    setAttached({ url: r.receiptUrl, name: r.receiptName });
+    setAddErr(""); setEditing(r);
   };
 
   const saveExpense = () =>
     startTransition(async () => {
-      let receiptUrl = "", receiptName = "";
+      /* Whatever the receipt should be after this: the file just picked wins,
+         then whatever was already on the row, then nothing - which on an edit
+         means somebody removed it and meant to. */
+      let receiptUrl = attached.url, receiptName = attached.name;
       if (receipt) {
         try {
           setBusy(`Uploading ${receipt.name}...`);
@@ -218,19 +276,24 @@ export default function ExpenseReportDetail({
         }
         setBusy("");
       }
-      const res = await logMyExpense({
+      const fields = {
         kind: draft.kind, description: draft.description, amount: draft.amount,
         incurredOn: draft.incurredOn,
         workOrderId: draft.workOrderId ? parseInt(draft.workOrderId, 10) : null,
-        receiptUrl, receiptName, reportId: report.id,
-        // Only meaningful for a per diem; the server ignores them otherwise,
-        // and re-derives the verdict either way.
-        nights: perDiem ? parseInt(tripDraft.nights, 10) || 0 : 0,
-        siteId: perDiem ? tripDraft.siteId : null,
-      });
+        receiptUrl, receiptName,
+        /* Only meaningful for a per diem; the server re-derives the verdict
+           either way. Left UNSAID rather than zeroed otherwise, because the
+           lab a row names is not only a per diem's business - a lunch was
+           bought at one too - and an edit must not unset it. */
+        nights: perDiem ? parseInt(tripDraft.nights, 10) || 0 : undefined,
+        siteId: perDiem ? tripDraft.siteId : undefined,
+      };
+      const res = opened
+        ? await editReportExpense(opened.id, fields)
+        : await logMyExpense({ ...fields, reportId: report.id });
       if (res?.error) { setAddErr(res.error); return; }
-      toast({ message: "Added to the report" });
-      setAdding(false);
+      toast({ message: opened ? "Saved" : "Added to the report" });
+      setEditing(null);
       router.refresh();
     });
 
@@ -339,20 +402,44 @@ export default function ExpenseReportDetail({
           </div>
         )}
         {rows.map((r) => (
-          <div key={r.id} className="row-hover"
-            style={{ padding: "6px 4px", borderTop: "1px solid var(--line)" }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div key={r.id} style={{ padding: "6px 4px", borderTop: "1px solid var(--line)" }}>
+          {/* The row OPENS. It has looked openable since it was written - the
+              hover highlight is this app's tell for "there is a record behind
+              this" - and clicking it did nothing, which is the bug: a receipt
+              taken after the fact had nowhere to go, and a wrong amount could
+              only be removed and retyped.
+
+              A div rather than a button because the receipt thumbnail inside
+              it is a link, and a link inside a button is invalid markup that
+              swallows its own clicks; the controls with their own job stop the
+              event. Enter and Space open it too - this is the primary gesture
+              on the page, and the keyboard gets it. */}
+          <div role="button" tabIndex={0} className="row-hover"
+            aria-label={`${editable ? "Edit" : "View"} ${r.description || r.kind}, ${formatCents(r.amountCents)}`}
+            onClick={() => openRow(r)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              openRow(r);
+            }}
+            style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", cursor: "pointer" }}>
             {/* The receipt leads the row: a claim with paper reads differently
-                from one without, and the reviewer looks for exactly that. */}
+                from one without, and the reviewer looks for exactly that. The
+                thumbnail still opens the paper itself rather than the row -
+                one click to check a total against the till slip. */}
             {r.receiptUrl ? (
-              <a href={r.receiptUrl} target="_blank" rel="noreferrer" title={r.receiptName || "Receipt"}>
-                {/\.pdf($|\?)/i.test(r.receiptName || r.receiptUrl)
+              <a href={r.receiptUrl} target="_blank" rel="noreferrer" title={r.receiptName || "Receipt"}
+                onClick={(e) => e.stopPropagation()}>
+                {isPdfReceipt(r.receiptName, r.receiptUrl)
                   ? <span className="pill info">PDF</span>
                   : <img src={r.receiptUrl} alt={r.receiptName || "Receipt"}
                       style={{ width: 34, height: 34, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />}
               </a>
             ) : (
-              <span className="pill faint" title="No receipt attached">no receipt</span>
+              <span className="pill faint"
+                title={editable ? "No receipt attached - open the row to add one" : "No receipt attached"}>
+                no receipt
+              </span>
             )}
             <span className="mut t-meta mono">{r.incurredOn}</span>
             <span className="pill neutral">{r.kind}</span>
@@ -363,7 +450,11 @@ export default function ExpenseReportDetail({
             {r.allowanceState === "approved" && <Pill tone="good">approved</Pill>}
             {editable && (
               <button className="btn link" disabled={pending} aria-label={`Remove ${r.description}`}
-                onClick={() => act(() => removeReportExpense(r.id), `Removed - it is back in ${theirs} unclaimed pool`)}>
+                onClick={(e) => {
+                  // Taking the row off is not opening it.
+                  e.stopPropagation();
+                  act(() => removeReportExpense(r.id), `Removed - it is back in ${theirs} unclaimed pool`);
+                }}>
                 remove
               </button>
             )}
@@ -479,69 +570,120 @@ export default function ExpenseReportDetail({
         </div>
       </Panel>
 
-      {adding && (
-        <Dialog open onClose={() => setAdding(false)} size="sm" title="New expense"
-          context={busy || "One receipt, one row"}
-          footer={
+      {editing && (
+        <Dialog open onClose={() => setEditing(null)} size="sm"
+          title={opened ? "Expense" : "New expense"}
+          /* What it acts on: the row as it stands, so a claimant fixing an
+             amount can still see the one they came to fix. */
+          context={busy || (opened
+            ? `${formatCents(opened.amountCents)} · ${opened.incurredOn}`
+            : "One receipt, one row")}
+          footer={editable ? (
             <>
               <DialogStatus error={addErr}
                 problem={!draft.description.trim() ? "say what it was"
                   : !draft.amount.trim() ? "enter the amount"
                   : !draft.incurredOn ? "pick the date" : null}
-                ok={receipt ? `Receipt: ${receipt.name}` : undefined} />
-              <button className="btn" onClick={() => setAdding(false)} disabled={pending}>Cancel</button>
+                ok={receipt ? `Receipt: ${receipt.name}`
+                  : attached.url ? `Receipt: ${attached.name || "attached"}` : undefined} />
+              <button className="btn" onClick={() => setEditing(null)} disabled={pending}>Cancel</button>
               <button className="btn accent" onClick={saveExpense}
                 disabled={pending || !draft.description.trim() || !draft.amount.trim() || !draft.incurredOn}>
-                {pending ? busy || "Saving..." : "Add it"}
+                {pending ? busy || "Saving..." : opened ? "Save the changes" : "Add it"}
               </button>
             </>
-          }>
+          ) : (
+            /* A sent claim opens to be READ. Every field below is disabled
+               rather than hidden, because "what does this row say" is the
+               question somebody chasing a payout came with - and the sentence
+               says why they cannot change it, which is a step (withdraw it)
+               and not a wall. */
+            <>
+              <DialogStatus ok={`This report is ${(REPORT_LABEL[report.status] ?? report.status).toLowerCase()}`
+                + (mayWork && report.status === "submitted"
+                  ? " - withdraw it to change its rows." : " - its rows are fixed.")} />
+              <button className="btn" onClick={() => setEditing(null)}>Close</button>
+            </>
+          )}>
           {/* The receipt first: on a phone this is the whole gesture - point,
               shoot, then type what the picture says. capture="environment"
-              opens the camera itself rather than a picker. */}
+              opens the camera itself rather than a picker.
+
+              On a row opened for fixing this is often the ONLY reason it was
+              opened: the claim went in without paper because the paper was in
+              a jacket, and this is where it finally lands. */}
           <div className="dialog-section">The receipt</div>
           <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
-            {/* capture="environment" opens the CAMERA rather than a picker,
-                and what comes back goes through the scanner: found, cropped,
-                flattened and whitened, so the thing stored is a document and
-                not a photograph of paper on a car seat. */}
-            <label className="btn sm primary" style={{ marginBottom: 0 }}>
-              Scan receipt
-              <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
-                onChange={(e) => {
-                  const f = e.target.files?.[0] ?? null;
-                  // Reset, or picking the same photo twice fires nothing.
-                  e.target.value = "";
-                  if (f) setScanning(f);
-                }} />
-            </label>
-            {/* Attaching goes round the scanner on purpose: a PDF has no
-                corners to find, and an emailed invoice is already flat. An
-                image picked from the roll still gets offered the scan. */}
-            <label className="btn sm" style={{ marginBottom: 0 }}>
-              Attach a file
-              <input type="file" accept="image/*,.pdf" style={{ display: "none" }}
-                onChange={(e) => {
-                  const f = e.target.files?.[0] ?? null;
-                  e.target.value = "";
-                  if (!f) return;
-                  if (f.type.startsWith("image/")) setScanning(f); else setReceipt(f);
-                }} />
-            </label>
-            {receipt && (
+            {editable && (
+              <>
+                {/* capture="environment" opens the CAMERA rather than a picker,
+                    and what comes back goes through the scanner: found, cropped,
+                    flattened and whitened, so the thing stored is a document and
+                    not a photograph of paper on a car seat. */}
+                <label className="btn sm primary" style={{ marginBottom: 0 }}>
+                  {attached.url || receipt ? "Replace it" : "Scan receipt"}
+                  <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] ?? null;
+                      // Reset, or picking the same photo twice fires nothing.
+                      e.target.value = "";
+                      if (f) setScanning(f);
+                    }} />
+                </label>
+                {/* Attaching goes round the scanner on purpose: a PDF has no
+                    corners to find, and an emailed invoice is already flat. An
+                    image picked from the roll still gets offered the scan. */}
+                <label className="btn sm" style={{ marginBottom: 0 }}>
+                  Attach a file
+                  <input type="file" accept="image/*,.pdf" style={{ display: "none" }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] ?? null;
+                      e.target.value = "";
+                      if (!f) return;
+                      if (f.type.startsWith("image/")) setScanning(f); else setReceipt(f);
+                    }} />
+                </label>
+              </>
+            )}
+            {/* Where the receipt stands, in one of its three states: a file
+                just picked and not yet uploaded, the paper already in the blob
+                store, or nothing. Said out loud in all three, because "no
+                receipt" is a fact about the claim and not an empty slot. */}
+            {receipt ? (
               <>
                 <span className="mut t-small">{receipt.name}</span>
                 <button className="btn link" type="button" onClick={() => setReceipt(null)}>
                   remove
                 </button>
               </>
+            ) : attached.url ? (
+              <>
+                <a href={attached.url} target="_blank" rel="noreferrer" title={attached.name || "Receipt"}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  {isPdfReceipt(attached.name, attached.url)
+                    ? <span className="pill info">PDF</span>
+                    : <img src={attached.url} alt={attached.name || "Receipt"}
+                        style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />}
+                  <span className="t-small">{attached.name || "Open it"}</span>
+                </a>
+                {editable && (
+                  <button className="btn link" type="button" disabled={pending}
+                    onClick={() => setAttached({ url: "", name: "" })}>
+                    remove
+                  </button>
+                )}
+              </>
+            ) : (
+              <span className="mut t-small">
+                {editable ? "None yet - scan it now, or save without one." : "None was attached."}
+              </span>
             )}
           </div>
           <div className="dialog-section">What it was</div>
           <div className="pf2" style={{ marginBottom: 8 }}>
             <div>
               <label>Category</label>
-              <select value={draft.kind} aria-label="Category"
+              <select value={draft.kind} aria-label="Category" disabled={!editable || pending}
                 onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
                 {categories.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
@@ -549,6 +691,7 @@ export default function ExpenseReportDetail({
             <div>
               <label>Amount ($)</label>
               <input value={draft.amount} aria-label="Amount" inputMode="decimal" placeholder="43.00"
+                disabled={!editable || pending}
                 onChange={(e) => setDraft({ ...draft, amount: e.target.value })} />
             </div>
           </div>
@@ -567,7 +710,7 @@ export default function ExpenseReportDetail({
                   <>
                     <span className="mut t-small">Lab</span>
                     <select className="t-small" value={tripDraft.siteId ?? ""} aria-label="Which lab"
-                      style={{ width: "auto", padding: "3px 6px" }}
+                      disabled={!editable || pending} style={{ width: "auto", padding: "3px 6px" }}
                       onChange={(e) => setTripDraft({
                         ...tripDraft, siteId: parseInt(e.target.value, 10) || null,
                       })}>
@@ -583,7 +726,7 @@ export default function ExpenseReportDetail({
                 </span>
                 <span className="mut t-small">·</span>
                 <input className="t-small" inputMode="numeric" value={tripDraft.nights} aria-label="Nights away"
-                  style={{ width: 44, padding: "3px 6px" }}
+                  disabled={!editable || pending} style={{ width: 44, padding: "3px 6px" }}
                   onChange={(e) => setTripDraft({ ...tripDraft, nights: e.target.value.replace(/[^0-9]/g, "") })} />
                 <span className="mut t-small">nights away</span>
               </div>
@@ -624,18 +767,30 @@ export default function ExpenseReportDetail({
               )}
             </div>
           )}
+          {/* Said BEFORE they type over the amount, not after it has been
+              taken back. Somebody signed for this trip at this price; the
+              signature covers that claim and not a different one, which is
+              the same rule the server applies when it re-asks the rulebook. */}
+          {editable && opened?.allowanceState === "approved" && (
+            <div className="t-small" style={{ color: "var(--t-warn-fg)", marginBottom: 8 }}>
+              {opened.allowanceByName ? `${opened.allowanceByName} approved this row.` : "This row was approved."}
+              {" "}Changing the amount, category, nights or lab sends it back for approval.
+            </div>
+          )}
           <label>Description</label>
           <input value={draft.description} aria-label="Description" placeholder="Parking, downtown site"
+            disabled={!editable || pending}
             onChange={(e) => setDraft({ ...draft, description: e.target.value })} style={{ marginBottom: 8 }} />
           <div className="pf2">
             <div>
               <label>Date</label>
               <input type="date" value={draft.incurredOn} max={today} aria-label="Date incurred"
+                disabled={!editable || pending}
                 onChange={(e) => setDraft({ ...draft, incurredOn: e.target.value })} />
             </div>
             <div>
               <label>Work order</label>
-              <select value={draft.workOrderId} aria-label="Work order"
+              <select value={draft.workOrderId} aria-label="Work order" disabled={!editable || pending}
                 onChange={(e) => setDraft({ ...draft, workOrderId: e.target.value })}>
                 <option value="">No job - overhead</option>
                 {workOrders.map((w) => <option key={w.id} value={String(w.id)}>{w.label}</option>)}

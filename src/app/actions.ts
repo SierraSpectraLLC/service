@@ -8831,6 +8831,140 @@ export async function approveExpenseAllowance(expenseId: number): Promise<{ erro
   return {};
 }
 
+/**
+ * Fix a row that is already on an open report.
+ *
+ * The gesture this exists for is the one the desk was missing entirely: a row
+ * could be added and it could be taken off, and between those two there was
+ * nothing. The receipt photographed badly, the amount was typed from memory in
+ * a car park and the paper says $88.67, the category was a guess - and the
+ * only way through was remove-and-retype, which throws away the receipt that
+ * WAS right along with the number that wasn't.
+ *
+ * Same gate as removeReportExpense: a report this reader may work, still open.
+ * A submitted claim's rows are fixed - somebody downstream is already reading
+ * it - so that is a withdraw first, deliberately.
+ *
+ * The rulebook is asked again, because every fact its verdict rests on is
+ * editable here. An APPROVAL survives only an edit the rulebook does not
+ * notice: a typo fixed in the description leaves the signature standing, and a
+ * changed amount, category, night or lab spends it - somebody signed for a
+ * specific trip at a specific price, and this is no longer that claim.
+ */
+export async function editReportExpense(
+  expenseId: number,
+  data: {
+    kind: string; description: string; amount: string; incurredOn: string;
+    workOrderId: number | null;
+    /**
+     * The receipt, as it should stand after this. Undefined leaves whatever is
+     * attached alone; "" detaches it; a url replaces it. Three answers because
+     * "no receipt" is a thing somebody means, and an omitted field is not it.
+     */
+    receiptUrl?: string; receiptName?: string;
+    /** Nights away and which lab, for a per diem. Same fields logMyExpense takes. */
+    nights?: number;
+    siteId?: number | null;
+  },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(expenses).where(eq(expenses.id, expenseId));
+  if (!row || !houseOf(u, row.tenantOrgId)) return { error: "Not found" };
+  if (row.reportId === null) return { error: "That row is not on a report" };
+  const report = await workableReport(u, row.reportId);
+  if (!report) return { error: "Not your report" };
+  if (!editableReport(report.status)) return { error: `That report is ${report.status} - its rows are fixed` };
+
+  // The same refusals logMyExpense makes, in the same words. A row cannot be
+  // edited into a shape it could never have been created in.
+  const cents = parseMoney(data.amount);
+  if (cents === null || cents <= 0) return { error: "Enter an amount like 43.00" };
+  const date = data.incurredOn.trim();
+  if (!isIsoDay(date)) return { error: "Pick the date it was incurred" };
+  if (date > shopToday()) return { error: "That date is in the future" };
+  const description = data.description.trim();
+  if (!description) return { error: "Say what it was - a bare amount is unreadable in a month" };
+  const t = readTenant(u);
+  let workOrderId: number | null = null;
+  if (data.workOrderId !== null) {
+    const [wo] = await db.select().from(workOrders)
+      .where(and(eq(workOrders.id, data.workOrderId), forTenant(workOrders.tenantOrgId, t)));
+    if (!wo) return { error: "That work order is not one of ours" };
+    workOrderId = wo.id;
+  }
+  const kind = await cleanKind(data.kind, t);
+
+  const ruling = await ruleAllowance({
+    kind, amountCents: cents, nights: Math.max(0, Math.round(data.nights ?? row.allowanceNights)),
+    siteId: data.siteId === undefined ? row.siteId : data.siteId, report,
+  });
+  /*
+   * Whether this is still the claim somebody signed for.
+   *
+   * The verdict first, as a ruling rather than as a state - an approved row is
+   * a flagged one somebody signed, and its note is still the sentence they
+   * signed. Then the PRICE, which the verdict does not always carry: a row
+   * flagged for being inside the stipend radius gets that same sentence at $30
+   * and at $52, so comparing notes alone would let "approve it, then edit it
+   * up" through, which is the one thing the reviewer exists to stop.
+   *
+   * What is left over - the description, the date - is a fix, not a different
+   * claim, and spending a signature on one would teach everybody to stop
+   * fixing typos.
+   */
+  const wasFlagged = row.allowanceState === "approved" ? "flagged" : row.allowanceState;
+  const ruledSame = ruling.state === wasFlagged && ruling.note === row.allowanceNote
+    && ruling.siteId === row.siteId && ruling.nights === row.allowanceNights
+    && cents === row.amountCents && kind === row.kind;
+
+  const set: Record<string, unknown> = {
+    kind, description, amountCents: cents, incurredOn: date, workOrderId,
+    siteId: ruling.siteId, allowanceNights: ruling.nights,
+  };
+  if (!ruledSame) {
+    set.allowanceState = ruling.state;
+    set.allowanceNote = ruling.note;
+    set.allowanceBy = "";
+    set.allowanceAt = null;
+  }
+  /* Billable follows the JOB and only the job. An overhead row has nobody to
+     rebill, and a row put back on a job gets the create-time default - but a
+     row whose job did not move keeps whatever it was set to, because "ours to
+     absorb" on a fixed-price job is a decision somebody made. */
+  if ((row.workOrderId === null) !== (workOrderId === null)) set.billable = workOrderId !== null;
+  if (data.receiptUrl !== undefined) {
+    set.receiptUrl = data.receiptUrl.trim().slice(0, 500);
+    set.receiptName = (data.receiptName ?? "").trim().slice(0, 200);
+  }
+
+  await db.update(expenses).set(set).where(eq(expenses.id, expenseId));
+
+  /* What actually moved, in the words somebody reading the trail in six weeks
+     needs - "changed an expense" answers nothing they came to ask. */
+  const said: string[] = [];
+  if (row.amountCents !== cents) said.push(`${formatCents(row.amountCents)} -> ${formatCents(cents)}`);
+  if (row.kind !== kind) said.push(`${row.kind} -> ${kind}`);
+  if (row.description !== description) said.push(`"${row.description}" -> "${description}"`);
+  if (row.incurredOn !== date) said.push(`dated ${row.incurredOn || "nothing"} -> ${date}`);
+  if (row.workOrderId !== workOrderId) said.push(workOrderId === null ? "off the job - overhead" : "onto another job");
+  if (set.receiptUrl !== undefined && set.receiptUrl !== row.receiptUrl) {
+    said.push(set.receiptUrl ? `receipt attached (${set.receiptName || "unnamed"})` : "receipt removed");
+  }
+  if (!ruledSame && row.allowanceState === "approved") said.push("approval spent - the rulebook is asked again");
+  if (!ruledSame && ruling.state === "flagged") said.push(`FLAGGED: ${ruling.note}`);
+  await audit({
+    actor: u.email, entityType: "expense", entityId: expenseId, tenantOrgId: row.tenantOrgId,
+    action: `edited ${report.person}'s expense: ${said.join(", ") || "no visible change"}`,
+  });
+
+  revalidatePath("/money/reimbursements");
+  revalidatePath(`/money/reimbursements/${report.id}`);
+  revalidatePath("/money/expenses");
+  if (workOrderId !== null) revalidatePath(`/work/${workOrderId}`);
+  if (row.workOrderId !== null && row.workOrderId !== workOrderId) revalidatePath(`/work/${row.workOrderId}`);
+  return {};
+}
+
 /** Take a row off one of my open reports - back to the pool, not deleted. */
 export async function removeReportExpense(expenseId: number): Promise<{ error?: string }> {
   const u = await requireStaff();
