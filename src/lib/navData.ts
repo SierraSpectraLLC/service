@@ -18,7 +18,7 @@ import { seesBooksFor } from "@/lib/financeData";
 import { getModules, type Modules } from "@/lib/flags";
 import { mayAdminPeople, seesPayrollFor } from "@/lib/hr";
 import { buildNav, type NavContext, type NavSection, type NavTree, type SectionKey } from "@/lib/nav";
-import { resellerView } from "@/lib/viewMode";
+import { viewModeFor, type ViewMode } from "@/lib/viewMode";
 
 /**
  * What the shell needs beyond the nav itself: the two facts about a client's
@@ -28,6 +28,13 @@ import { resellerView } from "@/lib/viewMode";
 export type NavFacts = NavContext & {
   /** Their organization resells, whatever this person has chosen for themselves. */
   orgResells: boolean;
+  /**
+   * The view this person actually reads - their own choice, the starting view
+   * their operator set, or their company's default, resolved once here so the
+   * landing, the nav and the switch in the account menu all say the same
+   * thing. "lab" for staff, whose board is not a preference. See lib/viewMode.
+   */
+  view: ViewMode;
 };
 
 /** An empty context, for a signed-out request. buildNav returns nothing from it. */
@@ -36,7 +43,7 @@ export const NO_NAV: NavFacts = {
   modules: { eod: false, remote: false, sheetSync: false },
   hasStock: false, orgRemoteOn: false, seesBooks: false, seesPayroll: false,
   seesOwnMoney: false, adminsPeople: false, openDiffs: 0, settingsHref: null,
-  orgResells: false,
+  orgResells: false, view: "lab",
 };
 
 /**
@@ -135,16 +142,19 @@ export async function navFactsFor(
 
   const orgResells = ownOrg?.resale === true;
 
+  /* WHICH VIEW THIS PERSON WORKS IN is theirs to say: the org's flag is the
+     default and a COO in charge of the equipment can sit on the other side
+     of it. Three answers, closest first: what this person chose (off their
+     own user row rather than the session - widening the session for a screen
+     preference would put it in every token in the app), where the operator
+     started them, and what their company is. */
+  const view: ViewMode = isStaff ? "lab"
+    : viewModeFor(viewMode, allowRow?.startView ?? "", orgResells);
+
   return {
     signedIn: true,
     isStaff,
-    /* WHICH HALF THIS PERSON WORKS IN is theirs to say: the org's flag is the
-       default and a COO in charge of the equipment can sit on the other side
-       of it. Three answers, closest first: what this person chose (off their
-       own user row rather than the session - widening the session for a screen
-       preference would put it in every token in the app), where the operator
-       started them, and what their company is. */
-    resells: !isStaff && resellerView(viewMode, allowRow?.startView ?? "", orgResells),
+    resells: view === "reseller",
     isClientOrg: !isStaff && ownOrg?.kind === "client",
     hasOrg: user.orgId != null,
     modules: { eod: modules.eod, remote: modules.remote, sheetSync: modules.sheetSync },
@@ -162,6 +172,7 @@ export async function navFactsFor(
     openDiffs: diffRows.length,
     settingsHref: settingsHrefFor(user),
     orgResells,
+    view,
   };
 }
 

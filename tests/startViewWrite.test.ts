@@ -1,6 +1,6 @@
 // Forcing a starting view, and refusing one the company does not have.
 //
-// The picker is only drawn for a reselling organization, but a picker is
+// The picker only offers the views the organization has, but a picker is
 // decoration: the rule has to hold at the write. Two things can outlive the
 // screen that set them - a request made against a stale page, and a stored
 // answer whose organization has since stopped reselling - and only one of them
@@ -116,6 +116,17 @@ describe("a standard client cannot be started on a reseller screen", () => {
     const { setStartView } = await import("@/app/actions");
     expect(await setStartView(1, "lab")).toEqual({});
     expect(await startOf(1)).toBe("lab");
+  });
+
+  it("lets ANYBODY be started on the board", async () => {
+    // The board is universal - the operator's own table over the same scoped
+    // rows - so a lab's people can be started there too.
+    who = OWNER;
+    const { setStartView } = await import("@/app/actions");
+    expect(await setStartView(1, "board")).toEqual({});
+    expect(await startOf(1)).toBe("board");
+    expect(await setStartView(2, "board")).toEqual({});
+    expect(await startOf(2)).toBe("board");
   });
 
   it("lets a start view be CLEARED even where it could not be set", async () => {

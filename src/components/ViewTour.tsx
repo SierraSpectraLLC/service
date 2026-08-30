@@ -22,11 +22,11 @@ import { VIEW_BLURB, VIEW_LABEL, type ViewMode } from "@/lib/viewMode";
  * Dismissed by reading it. There is no second step and no "next": three
  * sentences about a menu do not earn a carousel.
  */
-export default function ViewTour({ mode, other, assigned }: {
+export default function ViewTour({ mode, others, assigned }: {
   /** The view they are in right now. */
   mode: ViewMode;
-  /** The one they could switch to. */
-  other: ViewMode;
+  /** The ones they could switch to. */
+  others: ViewMode[];
   /** True when their operator chose this starting point, not their company. */
   assigned: boolean;
 }) {
@@ -51,7 +51,13 @@ export default function ViewTour({ mode, other, assigned }: {
           , and you can change it whenever you like.
         </div>
         <div className="t-body" style={{ marginTop: 6 }}>
-          The other one is <b>{VIEW_LABEL[other]}</b> - {VIEW_BLURB[other].toLowerCase()}.
+          {others.length === 1 ? "The other one is" : "The others are"}{" "}
+          {others.map((o, i) => (
+            <span key={o}>
+              {i > 0 && (i === others.length - 1 ? " and " : ", ")}
+              <b>{VIEW_LABEL[o]}</b> - {VIEW_BLURB[o].toLowerCase()}
+            </span>
+          ))}.
           {" "}Switch between them under your initials, top right, in{" "}
           <b>Your view</b>. It changes what these pages lead with, never what
           you can see.
