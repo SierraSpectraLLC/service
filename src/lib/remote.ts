@@ -36,6 +36,7 @@ import { db } from "@/db";
 import { orgs, remoteDevices } from "@/db/schema";
 import { tenantOfOrg } from "@/lib/tenancy";
 import { brandingFrom, type AgentBranding } from "@/lib/agentName";
+import type { Notice } from "@/lib/fleetNotice";
 
 /** How long a connect URL is good for. Bounds the START of a session, not its length. */
 export const CONNECT_TTL_SECONDS = 120;
@@ -349,6 +350,111 @@ export async function applyDeviceConsent(nodeId: string, mode: "consent" | "unat
   if (!cfg) return { error: NOT_CONFIGURED };
   try {
     await engineCall(cfg, "changedevice", { nodeid: nodeId, consent: CONSENT_FLAGS[mode] });
+    return {};
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+// ── Notices on the machine's own screen ─────────────────────────────────────
+//
+// lib/fleetNotice decides WHAT a machine should say; this is the half that
+// knows how to say it to MeshCentral 1.2.4. Read against agents/meshcore.js and
+// meshuser.js of that version, the same way the cookie format above was.
+//
+// The engine gives us three ways to put words on a lab PC and only one of them
+// is right for this:
+//
+//   * `toast` is a first-class control-API action, and transient - the agent
+//     hands it to the OS notifier and forgets it. A repossession notice that
+//     vanishes in ten seconds is not a notice.
+//   * `messagebox`/`alertbox` are modal, and NOT reachable from the control API
+//     at all - meshuser.js has no case for either. That is load-bearing rather
+//     than inconvenient: lib/fleetNotice promises a rendering the agent cannot
+//     make modal, and on this engine that promise is structural.
+//   * `agentmsg add|remove|list` is a standing list the agent holds and shows
+//     through its tray. That is the one that matches a notice, so it is the one
+//     used here.
+//
+// `agentmsg` is an agent CONSOLE command, reached with `runcommands` type 4,
+// which needs Remote Control (8) and Agent Console (16) on the node - the agent
+// re-checks both itself before it will act. The list lives in memory on the
+// agent (meshcore's sendAgentMessage closure), so it does NOT survive an agent
+// restart, which is why api/cron/notices re-asserts rather than posting once.
+
+/** The tray icon beside an agent message. 1 is the engine's warning triangle. */
+const NOTICE_ICON = 1;
+
+/** No message is worth breaking the command line over. */
+const NOTICE_MAX_CHARS = 600;
+
+/**
+ * What survives the engine's own argument splitter.
+ *
+ * meshcore's splitArgs is `/[^\s"]+|"([^"]*)"/gi` - a quoted argument runs to
+ * the next double quote and there is NO escape for one. So a notice containing
+ * a quote would end its own argument early and the remainder would be parsed as
+ * further arguments to `agentmsg`. Quotes become apostrophes and every run of
+ * whitespace becomes one space, which also keeps a pasted multi-line notice on
+ * the single line the console expects.
+ */
+export function consoleSafe(text: string): string {
+  const flat = text.replace(/["\u201c\u201d]/g, "'").replace(/\s+/g, " ").trim();
+  return flat.length > NOTICE_MAX_CHARS ? `${flat.slice(0, NOTICE_MAX_CHARS - 1).trimEnd()}\u2026` : flat;
+}
+
+/**
+ * The exact console commands that leave a machine showing `notices` and nothing
+ * else. Pure, so the quoting above is arguable in a test rather than only on a
+ * customer's PC.
+ *
+ * Always clears first. The agent's list is additive - `agentmsg add` appends,
+ * and there is no "replace" - so re-asserting without clearing would stack a
+ * fourth copy of the same notice on a machine that had been up for four hours.
+ * Clearing first also means an empty `notices` is a complete instruction:
+ * "say nothing", which is what a cleared notice has to be able to say.
+ *
+ * The contact rides in the message text because an agent message is one string;
+ * lib/fleetNotice keeps them apart so that a renderer WITH two fields can use
+ * two, and this is the renderer that has one.
+ */
+export function agentMessageCommands(notices: Notice[]): string[] {
+  const cmds = ["clearagentmsg"];
+  for (const n of notices) {
+    const line = n.contact ? `${n.text} (${n.contact})` : n.text;
+    const safe = consoleSafe(line);
+    if (safe) cmds.push(`agentmsg add "${safe}" ${NOTICE_ICON}`);
+  }
+  return cmds;
+}
+
+/**
+ * Leave one machine showing exactly `notices`.
+ *
+ * Best-effort by contract: the database row is the record of what a machine
+ * SHOULD say, and this is one attempt at making it say so. An offline agent,
+ * an unreachable host and a revoked right all land here as an error the caller
+ * is free to ignore, because api/cron/notices comes back around.
+ *
+ * One call per command - meshcore takes a single command per message
+ * (splitArgs, then args[0]), so a newline-joined batch would be read as one
+ * command with the rest as its arguments.
+ *
+ * `mayLockAtIdle` is deliberately not acted on. The engine's only idle signal
+ * is `idletime`, which is Windows-only and measures seconds since keyboard or
+ * mouse input - it cannot tell an unattended overnight acquisition from an
+ * abandoned desk, and would fire the lock hardest during exactly the run
+ * lib/fleetNotice is most anxious to protect. So the rung stays permission that
+ * is never taken up, which is the degradation that module already allows for.
+ */
+export async function pushNoticesTo(nodeId: string, notices: Notice[]): Promise<{ error?: string }> {
+  const cfg = remoteConfig();
+  if (!cfg) return { error: NOT_CONFIGURED };
+  if (!nodeId) return { error: "That machine has no node id yet." };
+  try {
+    for (const cmds of agentMessageCommands(notices)) {
+      await engineCall(cfg, "runcommands", { nodeids: [nodeId], type: 4, runAsUser: 0, cmds });
+    }
     return {};
   } catch (e) {
     return { error: (e as Error).message };
@@ -669,7 +775,11 @@ async function engineCall(
       let msg: EngineReply;
       try { msg = JSON.parse(typeof ev.data === "string" ? ev.data : String(ev.data)); } catch { return; }
       if (!isReplyTo(msg, action, responseid)) return;
-      if (typeof msg.result === "string" && msg.result !== "ok") {
+      // Case-folded because the engine is not consistent with itself: 22 of its
+      // actions answer 'ok' and five - runcommands among them - answer 'OK'.
+      // Compared exactly, a successful runcommands rejected with "OK" as the
+      // error text, which is a confusing way to report that nothing went wrong.
+      if (typeof msg.result === "string" && msg.result.toLowerCase() !== "ok") {
         const why = msg.result;
         finish(() => reject(new Error(why)));
         return;

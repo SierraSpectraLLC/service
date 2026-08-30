@@ -47,6 +47,9 @@ const STAMPED = [
   // never the workspace); checklist templates with a NULL stamp are seeded
   // built-ins belonging to every workspace, the stage_defs rule.
   "restorationProjects", "checkoutVerdicts", "checklistTemplates",
+  // What a lab PC says on its own screen. Both take the device's stamp: a
+  // notice or a hold belongs to the workspace whose machine carries it.
+  "deviceNotices", "safetyHolds",
 ];
 
 const walk = (dir: string): string[] =>

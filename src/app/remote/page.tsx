@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, orgs, remoteDevices } from "@/db/schema";
+import { deviceNotices, instruments, orgs, remoteDevices, safetyHolds } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
 import { shopTime } from "@/lib/shopday";
@@ -71,6 +71,22 @@ export default async function RemotePage() {
     .orderBy(asc(sql`coalesce(nullif(${remoteDevices.nickname}, ''), ${remoteDevices.name})`), asc(remoteDevices.id))
     .catch(() => []);
 
+  // What each machine is currently saying about itself. Two queries for the
+  // whole page rather than two per row, and only the OPEN ones - a cleared
+  // notice is history, and history belongs in the audit trail rather than on
+  // a device list.
+  const deviceIds = deviceRows.map((d) => d.id);
+  const [noticeRows, holdRows] = deviceIds.length === 0 ? [[], []] : await Promise.all([
+    db.select().from(deviceNotices)
+      .where(and(inArray(deviceNotices.deviceId, deviceIds), isNull(deviceNotices.clearedAt)))
+      .catch(() => []),
+    db.select().from(safetyHolds)
+      .where(and(inArray(safetyHolds.deviceId, deviceIds), isNull(safetyHolds.clearedAt)))
+      .catch(() => []),
+  ]);
+  const noticeByDevice = new Map(noticeRows.map((n) => [n.deviceId, n]));
+  const holdByDevice = new Map(holdRows.map((h) => [h.deviceId, h]));
+
   // The systems each device could be linked to, and the custody facts that decide
   // whether a session needs somebody at the far end.
   const visible = await visibleSystemIds(user);
@@ -92,6 +108,8 @@ export default async function RemotePage() {
       { orgId: d.orgId, tenantOrgId: d.tenantOrgId }, { remoteAccessEnabled: org?.remoteAccessEnabled ?? false },
     );
     const consent = consentModeFor(d, system ? { ownerOrgId: system.ownerOrgId, stages: system.stages } : null);
+    const notice = noticeByDevice.get(d.id) ?? null;
+    const hold = holdByDevice.get(d.id) ?? null;
     return {
       id: d.id,
       name: d.name,
@@ -110,6 +128,22 @@ export default async function RemotePage() {
       canConnect: ability.connect,
       refusal: ability.refusal,
       canManage: ability.unlink,
+      notice: notice ? {
+        body: notice.body, approvedBy: notice.approvedBy,
+        rung: notice.rung as "notice" | "prominent" | "at_login",
+        posted: shopTime(notice.createdAt),
+      } : null,
+      hold: hold ? {
+        reason: hold.reason, decidedBy: hold.decidedBy,
+        effect: hold.effect as "advise" | "hold" | "lock",
+        contact: hold.contact, faultSource: hold.faultSource,
+        dispatchedTo: hold.dispatchedTo, raised: shopTime(hold.createdAt),
+      } : null,
+      // A notice is the owner's to post and a hold is any engineer's to raise -
+      // the same split the two server actions enforce, said here so the button
+      // is absent rather than refused.
+      canPostNotice: ability.unlink && user.role === "owner",
+      canRaiseHold: ability.unlink && isHouseUser,
     };
   }).filter((d) => d.canConnect || d.canManage || d.refusal !== "" || isHouseUser);
 

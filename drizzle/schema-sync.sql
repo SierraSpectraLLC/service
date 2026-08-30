@@ -4069,3 +4069,35 @@ FROM "checklist_templates" t,
   ) AS v("text","sort_order")
 WHERE t."tenant_org_id" IS NULL AND t."stage" = 'commission_onsite' AND t."name" = 'On-site commissioning'
   AND NOT EXISTS (SELECT 1 FROM "checklist_template_items" i WHERE i."template_id" = t."id");
+CREATE TABLE IF NOT EXISTS "device_notices" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "device_id" integer NOT NULL,
+  "invoice_id" integer,
+  "rung" text NOT NULL DEFAULT 'notice',
+  "body" text NOT NULL DEFAULT '',
+  "approved_by" text NOT NULL DEFAULT '',
+  "posted_by" text NOT NULL DEFAULT '',
+  "cleared_at" timestamp,
+  "cleared_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "device_notices_device_idx" ON "device_notices" ("device_id");
+
+CREATE TABLE IF NOT EXISTS "safety_holds" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "device_id" integer NOT NULL,
+  "instrument_id" integer,
+  "reason" text NOT NULL DEFAULT '',
+  "fault_source" text NOT NULL DEFAULT 'engineer assessment',
+  "effect" text NOT NULL DEFAULT 'advise',
+  "contact" text NOT NULL DEFAULT '',
+  "decided_by" text NOT NULL DEFAULT '',
+  "dispatched_to" text NOT NULL DEFAULT '',
+  "resolution" text NOT NULL DEFAULT '',
+  "cleared_at" timestamp,
+  "cleared_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "safety_holds_device_idx" ON "safety_holds" ("device_id");

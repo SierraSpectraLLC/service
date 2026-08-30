@@ -35,6 +35,10 @@
     {
       "path": "/api/cron/stipends",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/notices",
+      "schedule": "0 * * * *"
     }
   ]
 }
