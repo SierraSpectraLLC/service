@@ -42,6 +42,11 @@ const STAMPED = [
   // read it. Missed when the table landed on main - both the DDL and this line
   // were, which is what the completeness check below exists to catch.
   "stipends",
+  // The restoration pipeline. Projects take the writer's workspace; a
+  // checkout verdict takes its project's tenant (it may outlive the project,
+  // never the workspace); checklist templates with a NULL stamp are seeded
+  // built-ins belonging to every workspace, the stage_defs rule.
+  "restorationProjects", "checkoutVerdicts", "checklistTemplates",
 ];
 
 const walk = (dir: string): string[] =>

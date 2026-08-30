@@ -21,7 +21,14 @@ import {
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, stipends, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
   dunningEvents, creditOverrides, quotes, quoteLines, payroll, perks, bugReports,
+  restorationProjects, restorationConfirms, componentConditions, provenanceAnswers,
+  findings, outsideWork, handoffKits, checklistRuns, checklistRunItems,
+  shipments, crates, crateContents, checkoutVerdicts, acceptances,
 } from "@/db/schema";
+import {
+  RESTORATION_SOURCES, RESTORATION_STAGE_LABEL, STAGE_CONFIRM_KEYS,
+  gateReady, interviewComplete, nextStage, stageGate, type GateSnapshot,
+} from "@/lib/restoration";
 import { siteLabel } from "@/lib/sites";
 import {
   allNumbers, catalogEntry, catalogName, cleanAliases, currentNumber, MAX_PART_PHOTOS,
@@ -18350,5 +18357,189 @@ export async function withdrawLead(leadId: number): Promise<{ error?: string }> 
     action: "withdrew a lead before anybody took it",
   });
   revalidatePath("/network");
+  return {};
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Restoration module - the reseller pipeline. Stage moves ONLY through
+// advanceRestorationStage below: it re-evaluates the gate server-side and
+// writes the ledger event. See lib/restoration for the vocabulary and the
+// pure gate; docs/mocks/ridgeline-restoration-flow.html for the surface.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function revRestoration(id: number) {
+  revalidatePath("/restorations");
+  revalidatePath(`/restorations/${id}`);
+}
+
+/** The project, only if it is the caller's to work. "Not found" on purpose
+ * for another tenant's project - same rule as the tenancy assertions. */
+async function restorationFor(u: Awaited<ReturnType<typeof requireStaff>>, projectId: number) {
+  const [p] = await db.select().from(restorationProjects).where(eq(restorationProjects.id, projectId));
+  if (!p || p.tenantOrgId === null || p.tenantOrgId !== myTenantOrgId(u)) return null;
+  return p;
+}
+
+/**
+ * Everything the current stage's gate asks about, gathered fresh. The client
+ * never hands us gate state - it re-computes here at the moment of advancing,
+ * the way a money balance is summed rather than stored.
+ */
+async function restorationGateSnapshot(p: typeof restorationProjects.$inferSelect): Promise<GateSnapshot> {
+  const components = await db.select({ id: assets.id, serial: assets.serial })
+    .from(assets).where(eq(assets.instrumentId, p.instrumentId));
+  const serialed = components.filter((c) => c.serial.trim() !== "");
+  const graded = await db.select({ id: componentConditions.id })
+    .from(componentConditions)
+    .where(and(eq(componentConditions.projectId, p.id), ne(componentConditions.grade, "")));
+  const photos = await db.select({ id: attachments.id }).from(attachments)
+    .where(and(eq(attachments.restorationProjectId, p.id), eq(attachments.kind, "Photo")));
+  const answers = await db.select().from(provenanceAnswers).where(eq(provenanceAnswers.projectId, p.id));
+  const openTasks = await db.select({ id: tasks.id }).from(tasks)
+    .where(and(eq(tasks.restorationProjectId, p.id), ne(tasks.state, "Done")));
+  const blankParts = await db.select({ id: parts.id }).from(parts)
+    .where(and(eq(parts.restorationProjectId, p.id), eq(parts.partNumber, "")));
+  const undocumented = await db.select({ id: outsideWork.id }).from(outsideWork)
+    .where(and(eq(outsideWork.projectId, p.id), isNull(outsideWork.reportAttachmentId)));
+  const verdicts = await db.select().from(checkoutVerdicts)
+    .where(eq(checkoutVerdicts.projectId, p.id)).orderBy(desc(checkoutVerdicts.recordedAt));
+  const latest = (phase: string) => verdicts.find((v) => v.phase === phase);
+  // Unticked non-heading items on this project's checklist runs, by stage.
+  const runItems = await db.select({
+    stage: checklistRuns.stage, heading: checklistRunItems.heading, checkedAt: checklistRunItems.checkedAt,
+  }).from(checklistRunItems)
+    .innerJoin(checklistRuns, eq(checklistRunItems.runId, checklistRuns.id))
+    .where(eq(checklistRuns.projectId, p.id));
+  const openItems = (stage: string) =>
+    runItems.filter((i) => i.stage === stage && !i.heading && i.checkedAt === null).length;
+  // The crate map: every SERIALIZED component in exactly one crate.
+  const crated = await db.select({ assetId: crateContents.assetId }).from(crateContents)
+    .innerJoin(crates, eq(crateContents.crateId, crates.id))
+    .innerJoin(shipments, eq(crates.shipmentId, shipments.id))
+    .where(eq(shipments.projectId, p.id));
+  const timesCrated = new Map<number, number>();
+  for (const c of crated) timesCrated.set(c.assetId, (timesCrated.get(c.assetId) ?? 0) + 1);
+  const mapped = serialed.filter((c) => timesCrated.get(c.id) === 1).length;
+  const [shipment] = await db.select().from(shipments).where(eq(shipments.projectId, p.id));
+  const [acceptance] = await db.select().from(acceptances).where(eq(acceptances.projectId, p.id));
+
+  return {
+    components: { total: components.length, serialed: serialed.length, graded: graded.length },
+    arrivalPhotos: photos.length,
+    interviewComplete: interviewComplete(new Map(answers.map((a) => [a.questionKey, a.answer]))),
+    openTasks: openTasks.length,
+    partsLogged: blankParts.length === 0,
+    outsideDocumented: undocumented.length === 0,
+    verifyVerdictPass: latest("verify")?.verdict === "pass",
+    benchOpenItems: openItems("verify_setup"),
+    wipeDone: p.wipeCertAttachmentId !== null,
+    prepOpenItems: openItems("ship_prep"),
+    crateMap: { total: serialed.length, mapped },
+    trackingOnFile: !!shipment && shipment.trackingNumber.trim() !== "" && shipment.declaredValueCents > 0,
+    buyerSet: p.buyerOrgId !== null,
+    onsitePass: latest("commission")?.verdict === "pass",
+    acceptanceSigned: !!acceptance?.signedAt,
+  };
+}
+
+/** The current stage's gate, freshly evaluated - for the advance action and
+ * for the project page's "Ready to advance?" card. */
+async function evaluateRestorationGate(p: typeof restorationProjects.$inferSelect) {
+  const confirmed = await db.select({ key: restorationConfirms.key }).from(restorationConfirms)
+    .where(and(eq(restorationConfirms.projectId, p.id), eq(restorationConfirms.stage, p.stage)));
+  const snap = await restorationGateSnapshot(p);
+  return stageGate(p.stage, snap, new Set(confirmed.map((c) => c.key)));
+}
+
+/**
+ * Open a restoration on a system. The system is an ordinary instruments row,
+ * created beforehand like any other intake; one restoration in flight per
+ * system at a time.
+ */
+export async function createRestorationProject(
+  instrumentId: number, source: string,
+): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  await assertSystemEditable(u, instrumentId);
+  if (!(RESTORATION_SOURCES as readonly string[]).includes(source)) return { error: "Pick where the system came from." };
+  const [active] = await db.select({ id: restorationProjects.id }).from(restorationProjects)
+    .where(and(eq(restorationProjects.instrumentId, instrumentId), ne(restorationProjects.stage, "complete")));
+  if (active) return { error: `${inst.externalId} is already in restoration.` };
+  const [p] = await db.insert(restorationProjects).values({
+    tenantOrgId: myTenantOrgId(u),
+    instrumentId,
+    source,
+    createdBy: u.email,
+  }).returning({ id: restorationProjects.id });
+  await audit({
+    actor: u.email, instrumentId, entityType: "restoration", entityId: p.id,
+    tenantOrgId: myTenantOrgId(u),
+    action: `opened restoration receiving for ${inst.externalId}`,
+  });
+  revRestoration(p.id);
+  return { id: p.id };
+}
+
+/**
+ * The ONE way a project changes stage. Evaluates the gate server-side -
+ * whatever the client showed is advisory - and writes the ledger event.
+ */
+export async function advanceRestorationStage(projectId: number): Promise<{ error?: string; stage?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const next = nextStage(p.stage);
+  if (!next) return { error: "This restoration is already complete." };
+  const gate = await evaluateRestorationGate(p);
+  if (!gateReady(gate)) {
+    const open = gate.filter((i) => !i.ok).map((i) => i.label);
+    return { error: `The gate is not passed: ${open.join("; ")}` };
+  }
+  const now = new Date();
+  await db.update(restorationProjects).set({
+    stage: next, stageSince: now, updatedAt: now,
+    ...(next === "complete" ? { completedAt: now } : {}),
+  }).where(eq(restorationProjects.id, projectId));
+  const [inst] = await db.select({ externalId: instruments.externalId }).from(instruments)
+    .where(eq(instruments.id, p.instrumentId));
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: "stage", oldValue: p.stage, newValue: next,
+    action: `advanced ${inst?.externalId ?? `restoration #${projectId}`} to ${RESTORATION_STAGE_LABEL[next]}`,
+  });
+  revRestoration(projectId);
+  return { stage: next };
+}
+
+/**
+ * A human gate checkbox - the 'confirm' half of a gate, persisted with who
+ * and when. The computed 'system' half is never writable.
+ */
+export async function confirmRestorationGateItem(
+  projectId: number, key: string, on: boolean,
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  if (!(STAGE_CONFIRM_KEYS[p.stage] ?? []).includes(key)) return { error: "Not found" };
+  if (on) {
+    await db.insert(restorationConfirms)
+      .values({ projectId, stage: p.stage, key, confirmedBy: u.email })
+      .onConflictDoNothing();
+  } else {
+    await db.delete(restorationConfirms).where(and(
+      eq(restorationConfirms.projectId, projectId),
+      eq(restorationConfirms.stage, p.stage),
+      eq(restorationConfirms.key, key),
+    ));
+  }
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: key,
+    action: `${on ? "confirmed" : "unchecked"} gate item "${key}" on the ${p.stage} stage`,
+  });
+  revRestoration(projectId);
   return {};
 }
