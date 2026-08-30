@@ -18390,21 +18390,45 @@ async function restorationFor(u: Awaited<ReturnType<typeof requireStaff>>, proje
 }
 
 /**
- * Open a restoration on a system. The system is an ordinary instruments row,
- * created beforehand like any other intake; one restoration in flight per
- * system at a time.
+ * Open a restoration. The normal case CREATES the system: intake is where a
+ * system first exists, so the truck arriving is the beginning of the record,
+ * not something that waits on one. The new instruments row goes through the
+ * ordinary createInstrument path (shares, checkout seeds, gases, audit) under
+ * the staging tag the receiver chose - ACQ-001 and friends are suggestions,
+ * the field is theirs. Pointing at an existing system instead stays possible
+ * for the machine that already lives on the books (a client trade-in we
+ * service, a bench unit being flipped). One restoration in flight per system.
  */
 export async function createRestorationProject(
-  instrumentId: number, source: string,
+  source: string,
+  target: { instrumentId?: number; externalId?: string; name?: string },
 ): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst) return { error: "Not found" };
-  await assertSystemEditable(u, instrumentId);
   if (!(RESTORATION_SOURCES as readonly string[]).includes(source)) return { error: "Pick where the system came from." };
-  const [active] = await db.select({ id: restorationProjects.id }).from(restorationProjects)
-    .where(and(eq(restorationProjects.instrumentId, instrumentId), ne(restorationProjects.stage, "complete")));
-  if (active) return { error: `${inst.externalId} is already in restoration.` };
+
+  let instrumentId = target.instrumentId ?? 0;
+  let externalId: string;
+  if (instrumentId) {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+    if (!inst) return { error: "Not found" };
+    await assertSystemEditable(u, instrumentId);
+    const [active] = await db.select({ id: restorationProjects.id }).from(restorationProjects)
+      .where(and(eq(restorationProjects.instrumentId, instrumentId), ne(restorationProjects.stage, "complete")));
+    if (active) return { error: `${inst.externalId} is already in restoration.` };
+    externalId = inst.externalId;
+  } else {
+    externalId = (target.externalId ?? "").trim();
+    if (!externalId) return { error: "Give the system its staging ID (ACQ-001, or your own scheme)." };
+    // Checked here rather than left to the unique constraint, which would
+    // reach the browser as a crash instead of a sentence.
+    const clash = await db.select({ id: instruments.id }).from(instruments)
+      .where(sql`lower(${instruments.externalId}) = ${externalId.toLowerCase()}`);
+    if (clash.length) return { error: `${externalId} is already on the books - pick another tag.` };
+    instrumentId = await createInstrument({ externalId, client: "", category: "", priority: 99 });
+    const name = (target.name ?? "").trim();
+    if (name) await db.update(instruments).set({ name }).where(eq(instruments.id, instrumentId));
+  }
+
   const [p] = await db.insert(restorationProjects).values({
     tenantOrgId: myTenantOrgId(u),
     instrumentId,
@@ -18414,7 +18438,9 @@ export async function createRestorationProject(
   await audit({
     actor: u.email, instrumentId, entityType: "restoration", entityId: p.id,
     tenantOrgId: myTenantOrgId(u),
-    action: `opened restoration receiving for ${inst.externalId}`,
+    action: target.instrumentId
+      ? `opened restoration receiving for ${externalId}`
+      : `staged ${externalId} and opened restoration receiving`,
   });
   revRestoration(p.id);
   return { id: p.id };
@@ -18491,10 +18517,13 @@ async function projectComponent(p: { instrumentId: number }, assetId: number) {
 }
 
 /**
- * Serial-first receive. Resolution order: (1) a serial already on this
- * system says so instead of duplicating; (2) an exact serial match on a
- * shelf spare in this workspace attaches THAT unit - the record travels with
- * the serial; (3) otherwise a new component is created through the ordinary
+ * Receive a component - the same mechanism as adding an asset anywhere else
+ * (type from the catalog, model choice with the maker riding along, serial
+ * as free text), because a receiving is an intake, not a special ceremony.
+ * A serial still does its quiet work when one IS typed: (1) one already on
+ * this system says so instead of duplicating; (2) an exact match on a shelf
+ * spare in this workspace attaches THAT unit - the record travels with the
+ * serial. Otherwise the component is created through the ordinary
  * createAsset path, so intake procedures, catalog gases and the
  * model-review queue all fire exactly as they do everywhere else.
  *
@@ -18505,11 +18534,21 @@ async function projectComponent(p: { instrumentId: number }, assetId: number) {
  */
 export async function receiveRestorationComponent(
   projectId: number,
-  data: { serial: string; kind: string; model: string; manufacturer: string },
+  data: { serial: string; kind: string; model: string; manufacturer: string; owner?: string },
 ): Promise<{ error?: string; assetId?: number; resolved?: "attached" | "created"; network?: "new" }> {
   const u = await requireStaff();
   const p = await restorationFor(u, projectId);
   if (!p) return { error: "Not found" };
+  return receiveOneComponent(u, p, data);
+}
+
+/** The receive itself, shared by the single action and the batch. */
+async function receiveOneComponent(
+  u: Awaited<ReturnType<typeof requireStaff>>,
+  p: NonNullable<Awaited<ReturnType<typeof restorationFor>>>,
+  data: { serial: string; kind: string; model: string; manufacturer: string; owner?: string },
+): Promise<{ error?: string; assetId?: number; resolved?: "attached" | "created"; network?: "new" }> {
+  const projectId = p.id;
   const serial = data.serial.trim();
   if (!serial && !data.model.trim() && !data.kind.trim()) {
     return { error: "Give the component a serial, or at least a type." };
@@ -18540,7 +18579,8 @@ export async function receiveRestorationComponent(
 
   const created = await createAsset(p.instrumentId, {
     kind: data.kind, model: data.model, serial, manufacturer: data.manufacturer,
-    owner: "", location: "", note: "",
+    // Defaulted client-side to the intaker's own company; theirs to change.
+    owner: (data.owner ?? "").trim(), location: "", note: "",
   });
   if (created.error || !created.id) return { error: created.error ?? "That didn't save" };
   await db.insert(componentConditions).values({ projectId, assetId: created.id }).onConflictDoNothing();
@@ -18551,6 +18591,68 @@ export async function receiveRestorationComponent(
   });
   revRestoration(projectId);
   return { assetId: created.id, resolved: "created", network: "new" };
+}
+
+/**
+ * Receive several components in one go - the open multi-row intake. Each row
+ * goes through exactly what a single receive does; rows that fail are
+ * reported by index rather than aborting the batch (the createAssets rule:
+ * losing three good rows to one typo sends people back to paper).
+ */
+export async function receiveRestorationComponents(
+  projectId: number,
+  rows: { serial: string; kind: string; model: string; manufacturer: string; owner?: string }[],
+): Promise<{ error?: string; received?: number; failures?: { index: number; error: string }[] }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  if (!rows.length) return { error: "Nothing to receive." };
+  if (rows.length > 50) return { error: "Receive 50 rows at a time." };
+  const failures: { index: number; error: string }[] = [];
+  let received = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const res = await receiveOneComponent(u, p, rows[i]);
+    if (res.error) failures.push({ index: i, error: res.error });
+    else received++;
+  }
+  return { received, ...(failures.length ? { failures } : {}) };
+}
+
+/**
+ * Take a received row back off the project. Two different mistakes, two
+ * different fates: a component CREATED by this receiving (its record is
+ * younger than the project) was a mis-entry and its record is deleted; a
+ * shelf spare that attached by serial match existed before the truck did,
+ * so it detaches back to the shelf with its history intact.
+ */
+export async function removeReceivedComponent(
+  projectId: number, assetId: number,
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const a = await projectComponent(p, assetId);
+  if (!a) return { error: "Not found" };
+  await db.delete(componentConditions)
+    .where(and(eq(componentConditions.projectId, projectId), eq(componentConditions.assetId, assetId)));
+  const bornHere = a.createdAt >= p.createdAt;
+  if (bornHere) {
+    await db.delete(assets).where(eq(assets.id, assetId)); // events cascade
+    await audit({
+      actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+      tenantOrgId: p.tenantOrgId,
+      action: `removed ${assetLabel(a)} from receiving - entered in error`,
+    });
+  } else {
+    await detachAsset(assetId);
+    await audit({
+      actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+      tenantOrgId: p.tenantOrgId,
+      action: `returned ${assetLabel(a)} to the shelf - not part of this receiving`,
+    });
+  }
+  revRestoration(projectId);
+  return {};
 }
 
 /** One grade, one component, this project - an opinion formed at THIS

@@ -5,8 +5,10 @@ import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
   addRestorationPhotos, answerProvenance, logRestorationFinding,
-  receiveRestorationComponent, revealHandoffCredential, saveHandoffKit, setComponentCondition,
+  receiveRestorationComponents, removeReceivedComponent,
+  revealHandoffCredential, saveHandoffKit, setComponentCondition,
 } from "@/app/actions";
+import CatalogSelect from "@/components/CatalogSelect";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
@@ -16,15 +18,24 @@ import {
 import type { ReceiveData } from "@/lib/restorationData";
 
 /**
- * The Receive stage's working surface: serial-first component intake,
- * condition grades, findings that queue restore tasks, arrival photos, the
- * provenance interview, and the handoff kit with its vaulted credential.
- * Read-only once the project has moved on - the record stays visible, the
- * controls go quiet.
+ * The Receive stage's working surface: component intake through the same
+ * add-asset mechanism as everywhere else (catalog type, model with the maker
+ * riding along, free-text serial), condition grades, findings that queue
+ * restore tasks, arrival photos, the provenance interview, and the handoff
+ * kit with its vaulted credential. Read-only once the project has moved on -
+ * the record stays visible, the controls go quiet.
  */
-export default function RestorationReceive({ projectId, data, canEdit }: {
+export type CatalogModels = Record<string, { name: string; manufacturer: string }[]>;
+
+export default function RestorationReceive({ projectId, data, kinds, models, defaultOwner, canEdit }: {
   projectId: number;
   data: ReceiveData;
+  /** The equipment catalog's module types - same source as the add-asset form. */
+  kinds: string[];
+  /** Each type's models, maker riding along for the auto-fill. */
+  models: CatalogModels;
+  /** Whose company is intaking - the owner field's default, theirs to change. */
+  defaultOwner: string;
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -40,7 +51,8 @@ export default function RestorationReceive({ projectId, data, canEdit }: {
 
   return (
     <>
-      <ComponentsCard projectId={projectId} data={data} canEdit={canEdit} act={act} pending={pending} />
+      <ComponentsCard projectId={projectId} data={data} kinds={kinds} models={models}
+        defaultOwner={defaultOwner} canEdit={canEdit} act={act} pending={pending} />
       <FindingsCard projectId={projectId} data={data} canEdit={canEdit} />
       <PhotosCard projectId={projectId} count={data.photoCount} canEdit={canEdit} />
       <InterviewCard projectId={projectId} data={data} canEdit={canEdit} act={act} pending={pending} />
@@ -51,119 +63,142 @@ export default function RestorationReceive({ projectId, data, canEdit }: {
 
 type Act = (fn: () => Promise<{ error?: string } | void>, done?: string) => void;
 
-function ComponentsCard({ projectId, data, canEdit, act, pending }: {
-  projectId: number; data: ReceiveData; canEdit: boolean; act: Act; pending: boolean;
+type DraftRow = { key: number; kind: string; model: string; manufacturer: string; serial: string; error: string };
+
+function ComponentsCard({ projectId, data, kinds, models, defaultOwner, canEdit, act, pending }: {
+  projectId: number; data: ReceiveData; kinds: string[]; models: CatalogModels;
+  defaultOwner: string; canEdit: boolean; act: Act; pending: boolean;
 }) {
   const router = useRouter();
-  const [serial, setSerial] = useState("");
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState({ serial: "", kind: "", model: "", manufacturer: "" });
-  const [error, setError] = useState("");
+  const blank = (key: number): DraftRow => ({ key, kind: "", model: "", manufacturer: "", serial: "", error: "" });
+  const [drafts, setDrafts] = useState<DraftRow[]>([]);
+  const [nextKey, setNextKey] = useState(1);
+  const [owner, setOwner] = useState(defaultOwner);
   const [saving, startSaving] = useTransition();
-  const [hint, setHint] = useState("");
 
-  const begin = (withSerial: string) => {
-    setDraft({ serial: withSerial.trim(), kind: "", model: "", manufacturer: "" });
-    setError("");
-    setOpen(true);
+  const addRow = () => { setDrafts((d) => [...d, blank(nextKey)]); setNextKey((k) => k + 1); };
+  const cutRow = (key: number) => setDrafts((d) => d.filter((r) => r.key !== key));
+  const patch = (key: number, part: Partial<DraftRow>) =>
+    setDrafts((d) => d.map((r) => (r.key === key ? { ...r, ...part, error: "" } : r)));
+
+  // Picking a catalog model brings its maker along; a hand-typed manufacturer
+  // is never overwritten. Same rule as the parts intake.
+  const pickModel = (key: number, model: string) => {
+    setDrafts((d) => d.map((r) => {
+      if (r.key !== key) return r;
+      const pick = (models[r.kind] ?? []).find((m) => m.name === model);
+      return { ...r, model, manufacturer: r.manufacturer.trim() || pick?.manufacturer || "", error: "" };
+    }));
   };
 
-  const problem = !draft.serial && !draft.model.trim() && !draft.kind.trim()
-    ? "give it a serial, or at least a type" : null;
+  const filled = drafts.filter((r) => r.model.trim() || r.serial.trim());
 
-  const file = () => {
-    if (problem) return;
+  const receiveAll = () => {
+    if (!filled.length) return;
     startSaving(async () => {
-      const res = await receiveRestorationComponent(projectId, draft);
-      if (res?.error) { setError(res.error); return; }
-      setHint(res.resolved === "attached"
-        ? `${draft.serial} matched a unit already on the shelf - its record travels with it.`
-        : `${draft.serial || draft.model || draft.kind} received - new to Ridgeline.`);
-      setOpen(false); setSerial("");
+      const res = await receiveRestorationComponents(projectId,
+        filled.map((r) => ({ serial: r.serial, kind: r.kind, model: r.model, manufacturer: r.manufacturer, owner })));
+      if (res?.error) { toast({ message: res.error, tone: "bad" }); return; }
+      const failedIdx = new Map((res.failures ?? []).map((f) => [filled[f.index].key, f.error]));
+      // Rows that landed leave the sheet; rows that failed stay, wearing why.
+      setDrafts((d) => d.filter((r) => failedIdx.has(r.key) || !(r.model.trim() || r.serial.trim()))
+        .map((r) => ({ ...r, error: failedIdx.get(r.key) ?? r.error })));
+      if (res.received) toast({ message: `Received ${res.received} component${res.received === 1 ? "" : "s"}` });
       router.refresh();
     });
   };
 
   return (
     <section className="card">
-      <h2 className="card-title">Receive components <span className="eyebrow">serial-first</span></h2>
-      {canEdit && (
-        <>
-          <form className="scanbar" onSubmit={(e) => { e.preventDefault(); begin(serial); }}>
-            <input value={serial} onChange={(e) => setSerial(e.target.value)}
-              placeholder="Scan or type a serial number…" aria-label="Serial number" />
-            <button className="btn primary" type="submit">Add</button>
-          </form>
-          <div className="scan-hint">
-            Serials resolve against this workspace first{hint ? <> — <b>{hint}</b></> : "; the OEM catalog joins the lookup when it lands."}
-          </div>
-        </>
-      )}
-      {data.components.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ marginTop: 12, width: "100%", borderCollapse: "collapse" }} className="t-body">
-            <thead>
-              <tr>
-                {["Component", "Serial", "Condition", "Network"].map((h) => (
-                  <th key={h} className="t-meta mut" style={{ textAlign: "left", padding: 4, borderBottom: "1px solid var(--line)" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.components.map((c) => (
-                <tr key={c.assetId}>
-                  <td style={{ padding: 8, borderBottom: "1px solid var(--bg)" }}>
-                    {c.model || c.kind}
-                    {c.manufacturer && <span className="mut t-micro" style={{ display: "block" }}>{c.manufacturer}</span>}
-                  </td>
-                  <td className="mono t-small" style={{ padding: 8, borderBottom: "1px solid var(--bg)" }}>{c.serial || "—"}</td>
-                  <td style={{ padding: 8, borderBottom: "1px solid var(--bg)" }}>
-                    <div className="gchips" role="group" aria-label={`Condition of ${c.model || c.kind}`}>
-                      {CONDITION_GRADES.map((g) => (
-                        <button key={g} aria-pressed={c.grade === g} disabled={!canEdit || pending}
-                          onClick={() => act(
-                            () => setComponentCondition(projectId, c.assetId, c.grade === g ? "" : g),
-                          )}>{g}</button>
-                      ))}
-                    </div>
-                  </td>
-                  <td style={{ padding: 8, borderBottom: "1px solid var(--bg)" }}>
-                    <Pill tone="faint">New to Ridgeline</Pill>
-                  </td>
-                </tr>
+      <h2 className="card-title">Receive components <span className="eyebrow">what came off the truck</span></h2>
+
+      {data.components.map((c) => (
+        <div className="recv-item" key={c.assetId}>
+          <div className="rbody">
+            <div className="rname">
+              {c.model || c.kind}
+              {c.manufacturer && <span className="mut"> · {c.manufacturer}</span>}
+            </div>
+            <div className="rmeta">
+              <span className="mono">{c.serial || "no serial"}</span>
+              <Pill tone="faint">New to Ridgeline</Pill>
+            </div>
+            <div className="gchips" role="group" aria-label={`Condition of ${c.model || c.kind}`}>
+              {CONDITION_GRADES.map((g) => (
+                <button key={g} aria-pressed={c.grade === g} disabled={!canEdit || pending}
+                  onClick={() => act(() => setComponentCondition(projectId, c.assetId, c.grade === g ? "" : g))}>
+                  {g}
+                </button>
               ))}
-            </tbody>
-          </table>
+            </div>
+          </div>
+          {canEdit && (
+            <button className="btn sm" aria-label={`Remove ${c.model || c.kind}`} disabled={pending}
+              onClick={() => act(() => removeReceivedComponent(projectId, c.assetId))}>✕</button>
+          )}
+        </div>
+      ))}
+      {data.components.length === 0 && (
+        <div className="mut t-body" style={{ marginBottom: 8 }}>
+          {canEdit ? "Nothing received yet - the record starts with the first box opened." : "No components were received."}
         </div>
       )}
-      {data.components.length === 0 && !canEdit && <div className="mut t-body">No components were received.</div>}
+
       {canEdit && (
-        <button className="addrow" onClick={() => begin("")}>+ Add without serial (consumables, filters, cables)</button>
+        <>
+          {drafts.map((r) => (
+            <div className="recv-row" key={r.key}>
+              <button className="btn sm rcut" aria-label="Cut this row" onClick={() => cutRow(r.key)}>✕</button>
+              <div className="pf2" style={{ marginBottom: 8 }}>
+                <div>
+                  <label>Type</label>
+                  <CatalogSelect value={r.kind} options={kinds} ariaLabel="Component type"
+                    onChange={(kind) => patch(r.key, { kind, model: "" })}
+                    hint="Define module types in Settings \u2192 Catalog" />
+                </div>
+                <div>
+                  <label>Model</label>
+                  <CatalogSelect value={r.model} options={(models[r.kind] ?? []).map((m) => m.name)}
+                    ariaLabel="Model" allowNew="+ New model..."
+                    onChange={(model) => pickModel(r.key, model)}
+                    hint={`No ${r.kind || "?"} models defined yet`} />
+                </div>
+              </div>
+              <div className="pf2">
+                <div>
+                  <label>Serial #</label>
+                  <input className="mono" value={r.serial} placeholder="ISQ7N2009006" aria-label="Serial number"
+                    onChange={(e) => patch(r.key, { serial: e.target.value })} />
+                </div>
+                <div>
+                  <label>Manufacturer</label>
+                  <input value={r.manufacturer} placeholder="Thermo"
+                    onChange={(e) => patch(r.key, { manufacturer: e.target.value })} />
+                </div>
+              </div>
+              {r.error && <div className="recv-row-err">{r.error}</div>}
+            </div>
+          ))}
+
+          <button className="addrow" onClick={addRow}>+ Add a row</button>
+
+          {drafts.length > 0 && (
+            <div className="row al-center sp-2" style={{ marginTop: 12, flexWrap: "wrap" }}>
+              <button className="btn accent" disabled={saving || !filled.length} onClick={receiveAll}>
+                {saving ? "Receiving\u2026" : `Receive ${filled.length || "the"} component${filled.length === 1 ? "" : "s"}`}
+              </button>
+              <label className="row al-center sp-1" style={{ margin: 0, fontWeight: 400 }}>
+                <span className="mut t-small">Owner</span>
+                <input value={owner} aria-label="Owner" style={{ maxWidth: 160 }}
+                  onChange={(e) => setOwner(e.target.value)} />
+              </label>
+              <span className="mut t-small">
+                A row needs a model or a serial; a typed serial still matches shelf spares.
+              </span>
+            </div>
+          )}
+        </>
       )}
-      <Dialog open={open} onClose={() => setOpen(false)} title="Receive a component"
-        context={draft.serial ? `Serial ${draft.serial} - nothing on Ridgeline matches it yet.` : "No serial - a consumable, filter, or cable."}
-        footer={
-          <>
-            <DialogStatus error={error} problem={problem} ok="Joins the system and gets a condition grade." />
-            <button className="btn" onClick={() => setOpen(false)} disabled={saving}>Cancel</button>
-            <button className="btn accent" onClick={file} disabled={saving || !!problem}>
-              {saving ? "Receiving..." : "Receive it"}
-            </button>
-          </>
-        }>
-        <label>Serial</label>
-        <input className="mono" value={draft.serial}
-          onChange={(e) => setDraft({ ...draft, serial: e.target.value })} style={{ marginBottom: 8 }} />
-        <label>Module type</label>
-        <input value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}
-          placeholder="Mass spec, GC, Headspace, Vacuum pump…" autoFocus style={{ marginBottom: 8 }} />
-        <label>Model</label>
-        <input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-          placeholder="ISQ 7000" style={{ marginBottom: 8 }} />
-        <label>Manufacturer</label>
-        <input value={draft.manufacturer} onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })}
-          placeholder="Thermo" />
-      </Dialog>
     </section>
   );
 }

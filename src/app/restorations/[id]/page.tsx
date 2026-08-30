@@ -2,9 +2,10 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { acceptances, auditLog, instruments, orgs, restorationProjects, shipments } from "@/db/schema";
+import { acceptances, auditLog, instruments, orgs, restorationProjects, shipments, vocabTerms } from "@/db/schema";
 import { requireStaff, requireUser, type SessionUser } from "@/lib/authz";
-import { forTenant, readTenant } from "@/lib/tenancy";
+import { brandForTenant } from "@/lib/brand";
+import { forTenant, readTenant, viewTenant } from "@/lib/tenancy";
 import { fmtWhen } from "@/lib/when";
 import {
   RESTORATION_SOURCE_LABEL, RESTORATION_STAGES, RESTORATION_STAGE_LABEL,
@@ -74,7 +75,21 @@ export default async function RestorationPage({ params, searchParams }: {
     db.select().from(auditLog)
       .where(and(eq(auditLog.entityType, "restoration"), eq(auditLog.entityId, String(project.id))))
       .orderBy(desc(auditLog.createdAt)).limit(100),
-    viewed === "receive" ? restorationReceiveData(project)
+    viewed === "receive"
+      ? Promise.all([
+          restorationReceiveData(project),
+          // The same catalog the add-asset form runs on: types, and each
+          // type's models with the maker riding along for the auto-fill.
+          db.select({ kind: vocabTerms.kind, assetType: vocabTerms.assetType, name: vocabTerms.name, manufacturer: vocabTerms.manufacturer })
+            .from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, readTenant(staff))),
+        ]).then(([receive, vocab]) => ({
+          receive,
+          kinds: vocab.filter((v) => v.kind === "asset_type").map((v) => v.name),
+          models: vocab.reduce<Record<string, { name: string; manufacturer: string }[]>>((acc, v) => {
+            if (v.kind === "model" && v.assetType) (acc[v.assetType] ??= []).push({ name: v.name, manufacturer: v.manufacturer });
+            return acc;
+          }, {}),
+        }))
       : viewed === "restore" ? restorationRestoreData(project)
       : viewed === "verify" ? restorationVerifyData(project)
       : viewed === "ship" ? restorationShipData(project, staff)
@@ -88,6 +103,9 @@ export default async function RestorationPage({ params, searchParams }: {
     : next ? `Advance to ${next.charAt(0).toUpperCase()}${next.slice(1)}` : "";
   const now = new Date();
   const days = daysInStage(project.stageSince, now);
+  // Who is intaking: their own company (a service org's staff), else the
+  // workspace's brand - the platform owner working the house bench.
+  const defaultOwner = staff.orgName?.trim() || (await brandForTenant(await viewTenant(staff))).operatorName;
   const pipeline = RESTORATION_STAGES.slice(0, 5) as readonly RestorationStage[];
 
   return (
@@ -132,10 +150,19 @@ export default async function RestorationPage({ params, searchParams }: {
               <Link href={`/restorations/${project.id}`}>back to {RESTORATION_STAGE_LABEL[project.stage as RestorationStage]}</Link>
             </div>
           )}
-          {viewed === "receive" && stageData && (
-            <RestorationReceive projectId={project.id} data={stageData as Awaited<ReturnType<typeof restorationReceiveData>>}
-              canEdit={canEdit && project.stage === "receive"} />
-          )}
+          {viewed === "receive" && stageData && (() => {
+            const rd = stageData as {
+              receive: Awaited<ReturnType<typeof restorationReceiveData>>;
+              kinds: string[];
+              models: Record<string, { name: string; manufacturer: string }[]>;
+            };
+            return (
+              <RestorationReceive projectId={project.id} data={rd.receive}
+                kinds={rd.kinds} models={rd.models}
+                defaultOwner={defaultOwner}
+                canEdit={canEdit && project.stage === "receive"} />
+            );
+          })()}
           {viewed === "restore" && stageData && (
             <RestorationRestore projectId={project.id} data={stageData as Awaited<ReturnType<typeof restorationRestoreData>>}
               canEdit={canEdit && project.stage === "restore"} />

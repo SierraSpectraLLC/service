@@ -61,6 +61,35 @@ export const RESTORATION_SOURCE_LABEL: Record<RestorationSource, string> = {
   client_transfer: "Client transfer",
 };
 
+/**
+ * The staging tag a system RECEIVES under, by where it came from - ACQ-001
+ * for an auction lot, and so on. Intake is where a system first exists, so
+ * the tag has to come from the intake rather than be a prerequisite for it;
+ * it is a suggestion the receiver may overtype, never a rule the form
+ * enforces (externalId stays free text, unique).
+ */
+export const SOURCE_ID_PREFIX: Record<RestorationSource, string> = {
+  acquired: "ACQ",
+  trade_in: "TRD",
+  client_transfer: "XFR",
+};
+
+/**
+ * The next free tag for a prefix: scan what exists, take the highest numeric
+ * suffix, add one - the same read-max convention work-order numbers use.
+ * Three digits because a reseller's year is hundreds, not tens of thousands;
+ * an overflow simply grows wider.
+ */
+export function nextStagedId(existing: readonly string[], prefix: string): string {
+  const re = new RegExp(`^${prefix}-(\\d+)$`, "i");
+  let max = 0;
+  for (const id of existing) {
+    const m = re.exec(id.trim());
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `${prefix}-${String(max + 1).padStart(3, "0")}`;
+}
+
 // '' = not yet graded. F is "parts machine", not an insult.
 export const CONDITION_GRADES = ["A", "B", "C", "D", "F"] as const;
 
