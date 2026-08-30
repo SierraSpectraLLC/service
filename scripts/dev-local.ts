@@ -596,6 +596,35 @@ const FIXTURE = `
     (3, 3, 'Annual desolvation line swap', '', 365, to_char(now() + interval '200 days', 'YYYY-MM-DD'), ''),
     (3, 6, 'Rough pump oil change', 'joe', 180, to_char(now() + interval '20 days', 'YYYY-MM-DD'), '');
 
+  -- A STACKED annual, on the units rather than the system: the pump's jobs on
+  -- the pump, the MS's on the MS, plus two system-level checks. This is what
+  -- exercises the module-grouped maintenance panel and the PM run - without
+  -- it the redesign degenerates locally to the flat list and cannot be seen.
+  INSERT INTO pm_schedules (tenant_org_id, instrument_id, asset_id, title, every_days, next_due, last_done, parts)
+  SELECT 3, NULL, a.id, v.title, 365,
+         to_char(now() - interval '2 days', 'YYYY-MM-DD'),
+         to_char(now() - interval '367 days', 'YYYY-MM-DD'), v.parts
+  FROM assets a,
+       (VALUES
+         ('Drain & replace oil',            '[{"name":"AVF 68 Gold lubricant fluid","number":"63760-64085"}]'),
+         ('Inspect & replace oil mist filter','[{"name":"Oil exhaust mist filter","number":"63762-68201"}]')
+       ) AS v(title, parts)
+  WHERE a.serial = 'DEBA2201';
+  INSERT INTO pm_schedules (tenant_org_id, instrument_id, asset_id, title, every_days, next_due, last_done, parts)
+  SELECT 3, NULL, a.id, v.title, 365,
+         to_char(now() - interval '2 days', 'YYYY-MM-DD'),
+         to_char(now() - interval '367 days', 'YYYY-MM-DD'), v.parts
+  FROM assets a,
+       (VALUES
+         ('Remove spray shield & inspect',   '[{"name":"AJS spray shield, small","number":"G1958-20008"}]'),
+         ('Inspect & clean octopole ion guide',''),
+         ('Replace gas filters',             '[{"name":"N2 filter, main gas supply","number":"RMSN-4","qty":2}]')
+       ) AS v(title, parts)
+  WHERE a.serial = 'US2405111';
+  INSERT INTO pm_schedules (tenant_org_id, instrument_id, title, every_days, next_due, last_done) VALUES
+    (3, 1, 'Post-PM: verify vacuum at operating pressure', 365,
+       to_char(now() - interval '2 days', 'YYYY-MM-DD'), to_char(now() - interval '367 days', 'YYYY-MM-DD'));
+
   -- A CLUSTER, because it is the ordinary case and nothing else in this
   -- fixture showed it: one machine's schedules were written on the same day at
   -- the same cadence, so they fall due together. The calendar collapses these

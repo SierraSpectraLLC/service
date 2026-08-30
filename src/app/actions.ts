@@ -2362,6 +2362,152 @@ export async function undoRunPmNow(scheduleId: number): Promise<{ error?: string
   return {};
 }
 
+/**
+ * One tap: this maintenance was done, now.
+ *
+ * The gesture a PM RUN is built from. The old path took three rooms per job -
+ * "Do it now" here, find the task in Tasks, mark it Done there - which on a
+ * stacked system's annual visit is twenty-nine round trips for work the
+ * engineer just did with a wrench. This is the whole loop in one write: the
+ * record task (Done, dated, attributed - exactly what completing the job live
+ * leaves), the schedule advanced from today, the appointment cleared.
+ *
+ * Two paths, one rule. A schedule with an OPEN generated task completes that
+ * task through setTaskState, so the result gate, the checklist accounting and
+ * the advance all run once, in the one place they are defined. With no open
+ * task the record is filed directly - after the same result gate: a leak-rate
+ * test closed by tap with no number is a checkbox claiming to be a
+ * measurement, and the refusal names the way that work is meant to go.
+ */
+export async function completePmNow(
+  scheduleId: number, note?: string,
+): Promise<{ error?: string; taskId?: number; viaOpenTask?: boolean }> {
+  const u = await requireEditor();
+  const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, scheduleId));
+  if (!s) return { error: "Not found" };
+  await assertWorkEditable(u, s);
+  if (s.paused) return { error: "This schedule is paused - resume it first" };
+
+  const [open] = await db.select({ id: tasks.id }).from(tasks)
+    .where(and(eq(tasks.pmScheduleId, scheduleId), ne(tasks.state, "Done")))
+    .limit(1);
+  if (open) {
+    const res = await setTaskState(open.id, "Done");
+    if (res?.error) return res;
+    return { taskId: open.id, viaOpenTask: true };
+  }
+
+  const spec = await testSpecFor({ procedureId: s.procedureId });
+  if (spec) {
+    const blocked = completionBlocked({ kind: spec.kind, resultType: spec.resultType }, null);
+    if (blocked) {
+      return { error: `'${s.title}' records a result. Start it as a task and record the reading there.` };
+    }
+  }
+
+  const today = shopToday();
+  const onSystem = s.instrumentId ?? (s.assetId === null
+    ? null
+    : (await db.select({ instrumentId: assets.instrumentId }).from(assets)
+        .where(eq(assets.id, s.assetId)))[0]?.instrumentId ?? null);
+
+  const doneBy = u.name || u.email;
+  const [t] = await db.insert(tasks).values({
+    tenantOrgId: s.tenantOrgId,
+    instrumentId: onSystem, assetId: s.assetId,
+    title: s.title,
+    body: [(note ?? "").trim(), `Completed on the spot by ${doneBy}.`].filter(Boolean).join("\n"),
+    state: "Done", origin: "pm", pmScheduleId: s.id, procedureId: s.procedureId,
+    assignee: doneBy,
+    /* The day the cycle FELL due, same as a generated task would carry - the
+       record says what was owed, completedAt says when it was met. It is also
+       what lets an undo put the calendar back where it was. */
+    dueDate: s.nextDue,
+    completedAt: new Date(),
+  }).returning();
+  /* No checklist stamped, deliberately. Boxes exist for working a task; a
+     record filed at the moment of completion asserting fourteen unticked
+     steps would read as a job closed unfinished. Their absence is also what
+     tells undoPmComplete this record came from a tap and not from worked
+     task - see the guard there. */
+
+  const nextDue = advancePm(today, s.everyDays);
+  await db.update(pmSchedules)
+    .set({ lastDone: today, nextDue, bookedOn: "", bookedNote: "" })
+    .where(eq(pmSchedules.id, s.id));
+  await audit({
+    actor: u.email, instrumentId: onSystem, assetId: s.assetId, entityType: "pm", entityId: s.id,
+    action: `completed '${s.title}' on the spot - next due ${nextDue} (${cadenceLabel(s.everyDays)})`
+      + (s.nextDue !== today ? ` (was due ${s.nextDue})` : ""),
+    field: "nextDue", oldValue: s.nextDue, newValue: nextDue,
+  });
+  revWork(s);
+  return { taskId: t.id };
+}
+
+/**
+ * Take back a tap.
+ *
+ * Run mode makes a tap mean "done", and thumbs slip. Undo removes the record
+ * completePmNow just filed and puts the calendar back - but only while the
+ * record is untouched and today's: a task with results, notes, or ticked
+ * boxes is work somebody did, not a slip, and yesterday's completion is
+ * history. The checklist guard doubles as the path check - a tap-filed record
+ * has no checklist rows, a generated task usually does, and a worked task
+ * must never be deleted by an undo.
+ *
+ * The prior calendar comes from the CALLER - the row it just rendered - and
+ * that is not a privilege escalation: updatePmSchedule already lets the same
+ * editor set nextDue and lastDone to anything. The one field recovered
+ * server-side is nextDue's floor: the deleted record's own dueDate says what
+ * was owed, and a prior that disagrees with it is refused.
+ */
+export async function undoPmComplete(
+  scheduleId: number, taskId: number,
+  prior: { nextDue: string; lastDone: string; bookedOn?: string; bookedNote?: string },
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, scheduleId));
+  if (!s) return { error: "Not found" };
+  await assertWorkEditable(u, s);
+  const today = shopToday();
+  if (s.lastDone !== today) return { error: "Nothing completed today to undo" };
+  if (!isIsoDay(prior.nextDue) || (prior.lastDone !== "" && !isIsoDay(prior.lastDone))) {
+    return { error: "Not found" };
+  }
+
+  const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
+  if (!t || t.pmScheduleId !== scheduleId || t.state !== "Done") return { error: "Not found" };
+  /* Recent by the clock rather than "today" by the calendar: completedAt is a
+     UTC instant and `today` is a shop day, and comparing the two calls an
+     evening tap yesterday's. lastDone === today already pins the day; this
+     only keeps undo off a stale record. */
+  if (!t.completedAt || Date.now() - t.completedAt.getTime() > 24 * 3600 * 1000) {
+    return { error: "That completion is not today's - fix the dates with edit instead" };
+  }
+  if (t.dueDate !== prior.nextDue) return { error: "Not found" };
+  const [r] = await db.select().from(taskResults).where(eq(taskResults.taskId, taskId));
+  if (r) return { error: "A result was recorded against it - that is work now, not a slip" };
+  const items = await db.select({ id: checklistItems.id }).from(checklistItems)
+    .where(eq(checklistItems.taskId, taskId));
+  if (items.length) {
+    return { error: "That one went through a worked task - reopen it in Tasks instead" };
+  }
+
+  await db.delete(tasks).where(eq(tasks.id, taskId));
+  await db.update(pmSchedules).set({
+    lastDone: prior.lastDone, nextDue: prior.nextDue,
+    bookedOn: (prior.bookedOn ?? "").trim(), bookedNote: (prior.bookedNote ?? "").trim(),
+  }).where(eq(pmSchedules.id, scheduleId));
+  await audit({
+    actor: u.email, instrumentId: s.instrumentId, assetId: s.assetId, entityType: "pm", entityId: scheduleId,
+    action: `undid today's completion of '${s.title}' - back to due ${prior.nextDue}`,
+    field: "nextDue", oldValue: s.nextDue, newValue: prior.nextDue,
+  });
+  revWork(s);
+  return {};
+}
+
 export async function setPmPaused(id: number, paused: boolean): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, id));
