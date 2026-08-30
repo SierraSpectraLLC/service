@@ -3893,6 +3893,47 @@ export const deviceNotices = pgTable("device_notices", {
 }, (t) => [index("device_notices_device_idx").on(t.deviceId)]);
 
 /**
+ * The lease a shipped system enforces on itself while offline.
+ *
+ * A fourth kind, and the only one that acts without us - see lib/leaseGuard for
+ * why it is neither a notice, a hold, nor the online theft lockout. No invoice
+ * column, and none may be added: tests/leaseGuard pins the directive as
+ * invariant under credit standing, exactly as the other three paths are. The
+ * lease is renewed or released by a recorded decision, never by the ledger.
+ *
+ * `force` defaults to 'notify' - a lease arms warning-only until somebody
+ * deliberately chooses to let it lock, which is the safe default for a machine
+ * whose title has passed to the customer.
+ */
+export const deviceLeases = pgTable("device_leases", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  deviceId: integer("device_id").notNull().references(() => remoteDevices.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }),
+  /** Armed at ship, disarmed only by release. */
+  armed: boolean("armed").notNull().default(false),
+  /** notify | lock - see lib/leaseGuard.LeaseForce. Defaults to warning-only. */
+  force: text("force").notNull().default("notify"),
+  /** Length of each renewed lease, in days. Customizable; 7 by default. */
+  leaseDays: integer("lease_days").notNull().default(7),
+  /** Warning-only days after expiry before a lock lease locks. */
+  graceDays: integer("grace_days").notNull().default(3),
+  /** When the current signed lease runs out. Advanced on every renewal. */
+  expiresAt: timestamp("expires_at"),
+  /** Monotonic, embedded in each signed lease; the guard refuses a lower one. */
+  counter: integer("counter").notNull().default(0),
+  /** Last time the guard fetched a fresh lease. The dead-man signal we watch. */
+  lastRenewedAt: timestamp("last_renewed_at"),
+  armedBy: text("armed_by").notNull().default(""),
+  /** Set once at sign-off. A released lease is terminal - no un-release exists. */
+  releasedAt: timestamp("released_at"),
+  releasedBy: text("released_by").notNull().default(""),
+  /** Required to release: the payment and sign-off this confirms. */
+  releaseReason: text("release_reason").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("device_leases_device_idx").on(t.deviceId)]);
+
+/**
  * A machine locked out because it is reported stolen.
  *
  * A third kind, deliberately not a rung on either of the other two - see

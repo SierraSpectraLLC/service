@@ -48,6 +48,9 @@ const STAMPED = [
   // A stolen machine locked out of itself. Takes the device's stamp, like
   // the other two: a lockout belongs to the workspace whose machine it is.
   "deviceLockouts",
+  // The lease a shipped system enforces on itself offline. Device stamp,
+  // like its siblings: the lease belongs to the machine's workspace.
+  "deviceLeases",
 ];
 
 const walk = (dir: string): string[] =>

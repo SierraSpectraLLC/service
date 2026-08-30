@@ -3844,3 +3844,23 @@ CREATE TABLE IF NOT EXISTS "device_lockouts" (
   "created_at" timestamp NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS "device_lockouts_device_idx" ON "device_lockouts" ("device_id");
+
+CREATE TABLE IF NOT EXISTS "device_leases" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "device_id" integer NOT NULL,
+  "instrument_id" integer,
+  "armed" boolean NOT NULL DEFAULT false,
+  "force" text NOT NULL DEFAULT 'notify',
+  "lease_days" integer NOT NULL DEFAULT 7,
+  "grace_days" integer NOT NULL DEFAULT 3,
+  "expires_at" timestamp,
+  "counter" integer NOT NULL DEFAULT 0,
+  "last_renewed_at" timestamp,
+  "armed_by" text NOT NULL DEFAULT '',
+  "released_at" timestamp,
+  "released_by" text NOT NULL DEFAULT '',
+  "release_reason" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "device_leases_device_idx" ON "device_leases" ("device_id");
