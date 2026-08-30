@@ -7,6 +7,7 @@ import { Dot, Legend, Panel, Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { linkRemoteDevice, removeRemoteDevice, renameRemoteDevice, setRemoteConsent } from "@/app/actions";
 import { deviceLabel, deviceSubLabel, needsNickname } from "@/lib/deviceName";
+import DeviceNoticeControls, { type OpenHold, type OpenNotice } from "@/components/DeviceNoticeControls";
 
 export type RemoteDevice = {
   id: number;
@@ -26,6 +27,12 @@ export type RemoteDevice = {
   canConnect: boolean;
   refusal: string;
   canManage: boolean;
+  /** The open repossession notice, if the machine carries one. */
+  notice: OpenNotice | null;
+  /** The open engineering hold, if it is held. */
+  hold: OpenHold | null;
+  canPostNotice: boolean;
+  canRaiseHold: boolean;
 };
 
 /**
@@ -181,6 +188,16 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
                   }}>remove</button>
               </div>
             )}
+
+            <DeviceNoticeControls
+              deviceId={d.id}
+              label={deviceLabel(d.nickname, d.name)}
+              consentMode={d.consentMode}
+              notice={d.notice}
+              hold={d.hold}
+              canPostNotice={d.canPostNotice}
+              canRaiseHold={d.canRaiseHold}
+            />
           </div>
         ))}
         {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 10 }}>{error}</div>}
