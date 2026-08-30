@@ -39,6 +39,20 @@ export function nextStage(s: string): RestorationStage | null {
   return RESTORATION_STAGES[i + 1];
 }
 
+/** A project parked in one stage this long is a project somebody stopped
+ * pushing - the queue turns its pill amber to say so. */
+export const STALE_DAYS = 14;
+
+export const daysInStage = (stageSince: Date, now: Date): number =>
+  Math.max(0, Math.floor((now.getTime() - stageSince.getTime()) / 86_400_000));
+
+/** The queue pill's tone: in motion, done, or sitting too long. */
+export function queueStageTone(stage: string, stageSince: Date, now: Date): Tone {
+  if (stage === "complete") return "good";
+  if (daysInStage(stageSince, now) > STALE_DAYS) return "warn";
+  return RESTORATION_STAGE_TONE[stage as RestorationStage] ?? "info";
+}
+
 export const RESTORATION_SOURCES = ["acquired", "trade_in", "client_transfer"] as const;
 export type RestorationSource = (typeof RESTORATION_SOURCES)[number];
 export const RESTORATION_SOURCE_LABEL: Record<RestorationSource, string> = {

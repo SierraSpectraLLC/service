@@ -2216,3 +2216,96 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 }
 .report-fab:hover, .report-fab:focus-visible { opacity: 1; color: var(--ink); }
 @media print { .report-fab { display: none; } }
+
+/* ── Restoration pipeline (docs/mocks/ridgeline-restoration-flow.html) ──────
+   The reseller flow's three shapes, drawn once here: the stage strip across
+   the top of a project, the gate rows on a "Ready to advance?" card, and the
+   provenance figure in the sidebar. Everything reads from the existing
+   tokens - stage tones are the ordinary tone vocabulary here, NOT the
+   per-tenant stage_defs hexes, because these five stages are fixed in code. */
+.proj-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 0 16px; align-items: start; }
+.side-wrap { position: sticky; top: 16px; }
+@media (max-width: 900px) {
+  .proj-grid { grid-template-columns: minmax(0, 1fr); }
+  .side-wrap { position: static; }
+}
+
+.pipeline {
+  display: flex; background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm);
+  margin-bottom: var(--sp-4);
+}
+.pipeline .stage {
+  flex: 1; padding: 8px 12px; border: none; border-right: 1px solid var(--line);
+  min-width: 0; background: none; text-align: left; font-family: inherit;
+  text-decoration: none; display: block; color: inherit;
+}
+.pipeline .stage:last-child { border-right: none; }
+.pipeline a.stage { cursor: pointer; }
+.pipeline a.stage:hover .nm { color: var(--link); }
+.pipeline .stage .num { font-family: var(--mono); font-size: var(--fs-micro); color: var(--mut); display: block; font-weight: 700; }
+.pipeline .stage .nm {
+  font-size: var(--fs-small); font-weight: 600; color: var(--mut);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block;
+}
+.pipeline .stage.done .num::after { content: " ✓"; color: var(--t-good-fg); }
+.pipeline .stage.active { background: var(--navy); }
+.pipeline .stage.active .nm { color: #fff; }
+.pipeline .stage.active .num { color: var(--sky); }
+/* A stage the project has not reached: visible so the road ahead reads, but
+   not a link - there is nothing there to see yet. */
+.pipeline .stage.ahead .nm, .pipeline .stage.ahead .num { color: var(--t-faint-fg); }
+.pipeline .stage:focus-visible { outline: 2px solid var(--sky); outline-offset: -2px; }
+@media (max-width: 720px) {
+  .pipeline .stage .nm { display: none; }
+  .pipeline .stage.active .nm { display: block; }
+}
+
+/* The system's shop tag beside its title - same tint family as an info pill,
+   square-cornered because it is an identifier, not a status. */
+.sysid {
+  font-family: var(--mono); font-size: var(--fs-small); font-weight: 700;
+  color: var(--t-info-fg); background: var(--t-info-bg);
+  padding: 2px 8px; border-radius: var(--radius);
+}
+
+/* Gate rows. A system item wears its computed mark; a confirm item is a
+   checkbox the action stamps with who/when. The source tag keeps the two
+   honest: nobody mistakes a computed fact for a promise. */
+.gate-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 0;
+  border-bottom: 1px solid var(--bg); font-size: var(--fs-body);
+}
+.gate-item:last-child { border-bottom: none; }
+.gate-item .gate-mark {
+  width: 18px; height: 18px; border-radius: 999px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: var(--fs-micro); font-weight: 800;
+}
+.gate-mark.ok { background: var(--t-good-bg); color: var(--t-good-fg); }
+.gate-mark.wait { background: var(--t-warn-bg); color: var(--t-warn-fg); }
+.gate-item .gate-src {
+  margin-left: auto; font-size: var(--fs-micro); color: var(--mut);
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.gate-item label {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font-weight: 400; font-size: var(--fs-body); color: var(--ink); margin: 0;
+}
+.gate-item input[type="checkbox"] { accent-color: var(--navy); width: 15px; height: 15px; }
+
+/* The provenance card: one figure, its meter, and the line items under it. */
+.prov-figure { font-size: var(--fs-metric); font-weight: 800; color: var(--navy); font-variant-numeric: tabular-nums; }
+.prov-figure .unit { font-size: var(--fs-lead); color: var(--mut); font-weight: 600; }
+.prov-sub { font-size: var(--fs-small); color: var(--mut); margin-bottom: var(--sp-2); }
+.meter-fill.prov { background: linear-gradient(90deg, var(--navy) 0%, var(--sky) 100%); }
+.prov-list { list-style: none; margin: 0; padding: 0; }
+.prov-list li {
+  font-size: var(--fs-small); padding: 6px 0; border-bottom: 1px solid var(--bg);
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+}
+.prov-list li:last-child { border-bottom: none; }
+.prov-note {
+  font-size: var(--fs-meta); color: var(--mut);
+  margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line);
+}

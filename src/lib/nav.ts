@@ -250,6 +250,9 @@ function staffSections(ctx: NavContext): NavSection[] {
          question, so it leads the group. */
       { href: "/calendar", label: "Calendar" },
       { href: "/maintenance", label: "Maintenance" },
+      /* The reseller pipeline: systems moving Receive → Commission. Something
+         the shop DOES, so it sits with the other doing. */
+      { href: "/restorations", label: "Restoration queue" },
       /* The other service companies: who is out there, who we work with, and
          the clients moving between us. Staff, because taking on work that has
          been offered is a shop decision - see lib/clientShare. */

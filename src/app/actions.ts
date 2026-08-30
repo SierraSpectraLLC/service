@@ -21,14 +21,13 @@ import {
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, stipends, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
   dunningEvents, creditOverrides, quotes, quoteLines, payroll, perks, bugReports,
-  restorationProjects, restorationConfirms, componentConditions, provenanceAnswers,
-  findings, outsideWork, handoffKits, checklistRuns, checklistRunItems,
-  shipments, crates, crateContents, checkoutVerdicts, acceptances,
+  restorationProjects, restorationConfirms,
 } from "@/db/schema";
 import {
   RESTORATION_SOURCES, RESTORATION_STAGE_LABEL, STAGE_CONFIRM_KEYS,
-  gateReady, interviewComplete, nextStage, stageGate, type GateSnapshot,
+  gateReady, nextStage,
 } from "@/lib/restoration";
+import { evaluateRestorationGate } from "@/lib/restorationData";
 import { siteLabel } from "@/lib/sites";
 import {
   allNumbers, catalogEntry, catalogName, cleanAliases, currentNumber, MAX_PART_PHOTOS,
@@ -18378,77 +18377,6 @@ async function restorationFor(u: Awaited<ReturnType<typeof requireStaff>>, proje
   const [p] = await db.select().from(restorationProjects).where(eq(restorationProjects.id, projectId));
   if (!p || p.tenantOrgId === null || p.tenantOrgId !== myTenantOrgId(u)) return null;
   return p;
-}
-
-/**
- * Everything the current stage's gate asks about, gathered fresh. The client
- * never hands us gate state - it re-computes here at the moment of advancing,
- * the way a money balance is summed rather than stored.
- */
-async function restorationGateSnapshot(p: typeof restorationProjects.$inferSelect): Promise<GateSnapshot> {
-  const components = await db.select({ id: assets.id, serial: assets.serial })
-    .from(assets).where(eq(assets.instrumentId, p.instrumentId));
-  const serialed = components.filter((c) => c.serial.trim() !== "");
-  const graded = await db.select({ id: componentConditions.id })
-    .from(componentConditions)
-    .where(and(eq(componentConditions.projectId, p.id), ne(componentConditions.grade, "")));
-  const photos = await db.select({ id: attachments.id }).from(attachments)
-    .where(and(eq(attachments.restorationProjectId, p.id), eq(attachments.kind, "Photo")));
-  const answers = await db.select().from(provenanceAnswers).where(eq(provenanceAnswers.projectId, p.id));
-  const openTasks = await db.select({ id: tasks.id }).from(tasks)
-    .where(and(eq(tasks.restorationProjectId, p.id), ne(tasks.state, "Done")));
-  const blankParts = await db.select({ id: parts.id }).from(parts)
-    .where(and(eq(parts.restorationProjectId, p.id), eq(parts.partNumber, "")));
-  const undocumented = await db.select({ id: outsideWork.id }).from(outsideWork)
-    .where(and(eq(outsideWork.projectId, p.id), isNull(outsideWork.reportAttachmentId)));
-  const verdicts = await db.select().from(checkoutVerdicts)
-    .where(eq(checkoutVerdicts.projectId, p.id)).orderBy(desc(checkoutVerdicts.recordedAt));
-  const latest = (phase: string) => verdicts.find((v) => v.phase === phase);
-  // Unticked non-heading items on this project's checklist runs, by stage.
-  const runItems = await db.select({
-    stage: checklistRuns.stage, heading: checklistRunItems.heading, checkedAt: checklistRunItems.checkedAt,
-  }).from(checklistRunItems)
-    .innerJoin(checklistRuns, eq(checklistRunItems.runId, checklistRuns.id))
-    .where(eq(checklistRuns.projectId, p.id));
-  const openItems = (stage: string) =>
-    runItems.filter((i) => i.stage === stage && !i.heading && i.checkedAt === null).length;
-  // The crate map: every SERIALIZED component in exactly one crate.
-  const crated = await db.select({ assetId: crateContents.assetId }).from(crateContents)
-    .innerJoin(crates, eq(crateContents.crateId, crates.id))
-    .innerJoin(shipments, eq(crates.shipmentId, shipments.id))
-    .where(eq(shipments.projectId, p.id));
-  const timesCrated = new Map<number, number>();
-  for (const c of crated) timesCrated.set(c.assetId, (timesCrated.get(c.assetId) ?? 0) + 1);
-  const mapped = serialed.filter((c) => timesCrated.get(c.id) === 1).length;
-  const [shipment] = await db.select().from(shipments).where(eq(shipments.projectId, p.id));
-  const [acceptance] = await db.select().from(acceptances).where(eq(acceptances.projectId, p.id));
-
-  return {
-    components: { total: components.length, serialed: serialed.length, graded: graded.length },
-    arrivalPhotos: photos.length,
-    interviewComplete: interviewComplete(new Map(answers.map((a) => [a.questionKey, a.answer]))),
-    openTasks: openTasks.length,
-    partsLogged: blankParts.length === 0,
-    outsideDocumented: undocumented.length === 0,
-    verifyVerdictPass: latest("verify")?.verdict === "pass",
-    benchOpenItems: openItems("verify_setup"),
-    wipeDone: p.wipeCertAttachmentId !== null,
-    prepOpenItems: openItems("ship_prep"),
-    crateMap: { total: serialed.length, mapped },
-    trackingOnFile: !!shipment && shipment.trackingNumber.trim() !== "" && shipment.declaredValueCents > 0,
-    buyerSet: p.buyerOrgId !== null,
-    onsitePass: latest("commission")?.verdict === "pass",
-    acceptanceSigned: !!acceptance?.signedAt,
-  };
-}
-
-/** The current stage's gate, freshly evaluated - for the advance action and
- * for the project page's "Ready to advance?" card. */
-async function evaluateRestorationGate(p: typeof restorationProjects.$inferSelect) {
-  const confirmed = await db.select({ key: restorationConfirms.key }).from(restorationConfirms)
-    .where(and(eq(restorationConfirms.projectId, p.id), eq(restorationConfirms.stage, p.stage)));
-  const snap = await restorationGateSnapshot(p);
-  return stageGate(p.stage, snap, new Set(confirmed.map((c) => c.key)));
 }
 
 /**
