@@ -193,7 +193,8 @@ import {
 } from "@/lib/handoff";
 import { composePayload, composePricing, materialize } from "@/lib/clientShareData";
 import {
-  addClientProblem, cleanPlan, inviteCountProblem, invitePlanProblem, PLAN_LABEL,
+  addClientProblem, cleanPlan, freeAllowance, grantProblem, inviteCountProblem,
+  invitePlanProblem, PLAN_LABEL,
 } from "@/lib/plan";
 import { openInvites, planFor } from "@/lib/planData";
 import {
@@ -10257,7 +10258,7 @@ export async function addOrg(name: string, kind: string): Promise<{ error?: stri
    * this function is reachable from anything holding a session - see lib/plan.
    */
   const seat = await planFor(tenant);
-  const capped = addClientProblem(seat.plan, seat.clients, (await getBrand()).contactEmail);
+  const capped = addClientProblem(seat.plan, seat.clients, (await getBrand()).contactEmail, seat.granted);
   if (capped) return { error: capped };
   const [row] = await db.insert(orgs).values({
     name: n, kind: k,
@@ -10881,6 +10882,56 @@ export async function setWorkspacePlan(
   await audit({
     actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: orgId,
     action: `moved ${org.name} to ${PLAN_LABEL[next].toLowerCase()}: ${why}`,
+  });
+  revalidatePath("/settings/tenants");
+  revHouse();
+  return {};
+}
+
+/**
+ * Give ONE free workspace more room than the tier, or take it back. Platform
+ * owner only.
+ *
+ * The tier says one client because the boundary is meant to be reached by
+ * success - see lib/plan. This is the deliberate exception to that, and it
+ * exists because the pitch sometimes needs it: handing a shop two clients at
+ * once converts where handing them one and a wall does not, and the person
+ * making that offer is at the platform, in a conversation, giving something
+ * away on purpose.
+ *
+ * A grant only ever adds. Setting it below the tier is not a way to give a
+ * workspace less than every other free workspace gets - freeAllowance reads
+ * anything under the tier as the tier - because a lever that could quietly
+ * take a shop below the floor is a lever somebody eventually pulls by
+ * accident, and the person it lands on is mid-job.
+ *
+ * Kept when they move to full and still there if they are ever moved back,
+ * which is the honest reading: it records what was promised, and the promise
+ * did not expire because somebody paid for a while.
+ */
+export async function setFreeClients(
+  orgId: number, clients: number, reason: string,
+): Promise<{ error?: string }> {
+  const u = await requirePlatformOwner();
+  // Same as the plan lever above: "why does this shop have two" is a question
+  // somebody will have, and the answer belongs next to the change.
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  // Math.trunc of anything unparseable is NaN, which grantProblem refuses -
+  // so a hand-typed value never reaches the column as garbage.
+  const n = Math.trunc(Number(clients));
+  const bad = grantProblem(n);
+  if (bad) return { error: bad };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org || !org.isOperator) return { error: "Not found" };
+  if (freeAllowance(org.freeClients) === freeAllowance(n)) return {};
+  await db.update(orgs).set({ freeClients: n }).where(eq(orgs.id, orgId));
+  await audit({
+    actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: orgId,
+    action: `set ${org.name}'s free tier to ${freeAllowance(n)} client`
+      + `${freeAllowance(n) === 1 ? "" : "s"}`
+      + `${cleanPlan(org.plan) === "free" ? "" : " (they are on the full plan, so it applies only if they return to free)"}`
+      + `: ${why}`,
   });
   revalidatePath("/settings/tenants");
   revHouse();
@@ -17669,7 +17720,7 @@ export async function decideClientShare(
    */
   if (accept) {
     const seat = await planFor(tenant);
-    const capped = addClientProblem(seat.plan, seat.clients, (await getBrand()).contactEmail);
+    const capped = addClientProblem(seat.plan, seat.clients, (await getBrand()).contactEmail, seat.granted);
     if (capped) return { error: capped };
   }
 

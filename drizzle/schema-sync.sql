@@ -3755,6 +3755,12 @@ CREATE INDEX IF NOT EXISTS "client_shares_invite_idx" ON "client_shares" ("invit
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "plan" text NOT NULL DEFAULT '';
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "plan_since" text NOT NULL DEFAULT '';
 
+-- Room granted by hand on the free tier, above what the tier gives. Zero on
+-- every existing row means nothing changes for anybody: the tier's own limit
+-- applies until somebody at the platform deliberately raises it for one
+-- workspace. See lib/plan.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "free_clients" integer NOT NULL DEFAULT 0;
+
 -- Standing monthly compensation - a phone allowance, a tool stipend - that is
 -- owed whether or not anybody files a claim, and the recurring pass that turns
 -- it into expense rows. Recovered on the merge of main into this branch: the

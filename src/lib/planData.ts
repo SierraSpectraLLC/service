@@ -10,6 +10,11 @@ export type WorkspacePlan = {
   plan: Plan;
   /** Client organizations this workspace holds - what the free tier bounds. */
   clients: number;
+  /**
+   * Room granted to THIS workspace by hand, above the tier. Zero for almost
+   * every workspace; lib/plan decides what it is worth. See orgs.freeClients.
+   */
+  granted: number;
 };
 
 /**
@@ -21,15 +26,19 @@ export type WorkspacePlan = {
  * caller may act at all is decided before this is ever asked.
  */
 export async function planFor(tenantOrgId: number | null): Promise<WorkspacePlan> {
-  if (tenantOrgId === null) return { plan: "", clients: 0 };
+  if (tenantOrgId === null) return { plan: "", clients: 0, granted: 0 };
   const [[row], [tally]] = await Promise.all([
-    db.select({ plan: orgs.plan }).from(orgs).where(eq(orgs.id, tenantOrgId)),
+    db.select({ plan: orgs.plan, granted: orgs.freeClients }).from(orgs).where(eq(orgs.id, tenantOrgId)),
     db.select({ n: count() }).from(orgs).where(and(
       eq(orgs.parentOrgId, tenantOrgId),
       eq(orgs.isOperator, false),
     )),
   ]);
-  return { plan: cleanPlan(row?.plan), clients: Number(tally?.n ?? 0) };
+  return {
+    plan: cleanPlan(row?.plan),
+    clients: Number(tally?.n ?? 0),
+    granted: Number(row?.granted ?? 0),
+  };
 }
 
 /** Invitations this workspace has out and unanswered - see plan.OPEN_INVITES. */
