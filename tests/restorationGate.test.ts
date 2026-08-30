@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  ARRIVAL_PHOTO_MIN, RESTORATION_STAGES, STAGE_CONFIRM_KEYS,
-  gateReady, interviewComplete, nextStage, stageGate, stageIndex,
-  type GateSnapshot,
+  ARRIVAL_PHOTO_MIN, RESTORATION_SOURCES, RESTORATION_STAGES, SOURCE_ID_PREFIX,
+  STAGE_CONFIRM_KEYS, gateReady, interviewComplete, nextStage, nextStagedId,
+  stageGate, stageIndex, type GateSnapshot,
 } from "@/lib/restoration";
 import { PROVENANCE_QUESTIONS } from "@/lib/restoration";
 
@@ -112,6 +112,33 @@ describe("stageGate", () => {
       for (const item of stageGate(stage, allClear(), new Set())) {
         expect(["system", "confirm"]).toContain(item.kind);
       }
+    }
+  });
+});
+
+describe("nextStagedId", () => {
+  it("starts a fresh prefix at 001", () => {
+    expect(nextStagedId([], "ACQ")).toBe("ACQ-001");
+    expect(nextStagedId(["LZ-001", "T-003"], "ACQ")).toBe("ACQ-001");
+  });
+
+  it("continues past the highest, ignoring gaps - a freed number never comes back", () => {
+    expect(nextStagedId(["ACQ-001", "ACQ-007", "ACQ-003"], "ACQ")).toBe("ACQ-008");
+  });
+
+  it("matches its own prefix case-insensitively and whole, not as a substring", () => {
+    expect(nextStagedId(["acq-002"], "ACQ")).toBe("ACQ-003");
+    // TRD-9 must not count toward ACQ, and ACQ-EXTRA-5 is not an ACQ number.
+    expect(nextStagedId(["TRD-009", "ACQ-EXTRA-005"], "ACQ")).toBe("ACQ-001");
+  });
+
+  it("grows past three digits instead of wrapping", () => {
+    expect(nextStagedId(["ACQ-999"], "ACQ")).toBe("ACQ-1000");
+  });
+
+  it("has a prefix for every source", () => {
+    for (const s of RESTORATION_SOURCES) {
+      expect(SOURCE_ID_PREFIX[s], s).toMatch(/^[A-Z]+$/);
     }
   });
 });

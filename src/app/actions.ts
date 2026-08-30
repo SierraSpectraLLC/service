@@ -18390,21 +18390,45 @@ async function restorationFor(u: Awaited<ReturnType<typeof requireStaff>>, proje
 }
 
 /**
- * Open a restoration on a system. The system is an ordinary instruments row,
- * created beforehand like any other intake; one restoration in flight per
- * system at a time.
+ * Open a restoration. The normal case CREATES the system: intake is where a
+ * system first exists, so the truck arriving is the beginning of the record,
+ * not something that waits on one. The new instruments row goes through the
+ * ordinary createInstrument path (shares, checkout seeds, gases, audit) under
+ * the staging tag the receiver chose - ACQ-001 and friends are suggestions,
+ * the field is theirs. Pointing at an existing system instead stays possible
+ * for the machine that already lives on the books (a client trade-in we
+ * service, a bench unit being flipped). One restoration in flight per system.
  */
 export async function createRestorationProject(
-  instrumentId: number, source: string,
+  source: string,
+  target: { instrumentId?: number; externalId?: string; name?: string },
 ): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst) return { error: "Not found" };
-  await assertSystemEditable(u, instrumentId);
   if (!(RESTORATION_SOURCES as readonly string[]).includes(source)) return { error: "Pick where the system came from." };
-  const [active] = await db.select({ id: restorationProjects.id }).from(restorationProjects)
-    .where(and(eq(restorationProjects.instrumentId, instrumentId), ne(restorationProjects.stage, "complete")));
-  if (active) return { error: `${inst.externalId} is already in restoration.` };
+
+  let instrumentId = target.instrumentId ?? 0;
+  let externalId: string;
+  if (instrumentId) {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+    if (!inst) return { error: "Not found" };
+    await assertSystemEditable(u, instrumentId);
+    const [active] = await db.select({ id: restorationProjects.id }).from(restorationProjects)
+      .where(and(eq(restorationProjects.instrumentId, instrumentId), ne(restorationProjects.stage, "complete")));
+    if (active) return { error: `${inst.externalId} is already in restoration.` };
+    externalId = inst.externalId;
+  } else {
+    externalId = (target.externalId ?? "").trim();
+    if (!externalId) return { error: "Give the system its staging ID (ACQ-001, or your own scheme)." };
+    // Checked here rather than left to the unique constraint, which would
+    // reach the browser as a crash instead of a sentence.
+    const clash = await db.select({ id: instruments.id }).from(instruments)
+      .where(sql`lower(${instruments.externalId}) = ${externalId.toLowerCase()}`);
+    if (clash.length) return { error: `${externalId} is already on the books - pick another tag.` };
+    instrumentId = await createInstrument({ externalId, client: "", category: "", priority: 99 });
+    const name = (target.name ?? "").trim();
+    if (name) await db.update(instruments).set({ name }).where(eq(instruments.id, instrumentId));
+  }
+
   const [p] = await db.insert(restorationProjects).values({
     tenantOrgId: myTenantOrgId(u),
     instrumentId,
@@ -18414,7 +18438,9 @@ export async function createRestorationProject(
   await audit({
     actor: u.email, instrumentId, entityType: "restoration", entityId: p.id,
     tenantOrgId: myTenantOrgId(u),
-    action: `opened restoration receiving for ${inst.externalId}`,
+    action: target.instrumentId
+      ? `opened restoration receiving for ${externalId}`
+      : `staged ${externalId} and opened restoration receiving`,
   });
   revRestoration(p.id);
   return { id: p.id };

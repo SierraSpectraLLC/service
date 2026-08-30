@@ -8,7 +8,8 @@ import { forTenant, readTenant } from "@/lib/tenancy";
 import { fmtWhen } from "@/lib/when";
 import {
   RESTORATION_SOURCES, RESTORATION_SOURCE_LABEL, RESTORATION_STAGES,
-  RESTORATION_STAGE_LABEL, daysInStage, queueStageTone, type RestorationStage,
+  RESTORATION_STAGE_LABEL, SOURCE_ID_PREFIX, daysInStage, nextStagedId,
+  queueStageTone, type RestorationStage,
 } from "@/lib/restoration";
 import { restorationQueue } from "@/lib/restorationData";
 import { getSystemLabels } from "@/lib/systemLabel";
@@ -45,6 +46,12 @@ export default async function RestorationsPage({ searchParams }: {
     .orderBy(asc(instruments.externalId));
   const openable = candidates.filter((c) => !c.archived && !busy.includes(c.id));
   const openLabels = await getSystemLabels(openable);
+  // The staging tag each source suggests - computed over everything on the
+  // books (archived included) so a freed number is never re-suggested.
+  const allIds = candidates.map((c) => c.externalId);
+  const suggestions = Object.fromEntries(
+    RESTORATION_SOURCES.map((s) => [s, nextStagedId(allIds, SOURCE_ID_PREFIX[s])]),
+  ) as Record<string, string>;
 
   const wanted = (r: (typeof rows)[number]) =>
     (!stage || r.project.stage === stage)
@@ -98,9 +105,12 @@ export default async function RestorationsPage({ searchParams }: {
       <PageHead title="Restoration queue"
         crumb={<><Link href="/assets">Assets</Link> / <b>Restoration queue</b></>} />
       <Toolbar
-        actions={<NewRestorationButton systems={openable.map((s) => ({
-          id: s.id, externalId: s.externalId, label: openLabels.get(s.id) ?? s.model,
-        }))} />}
+        actions={<NewRestorationButton
+          systems={openable.map((s) => ({
+            id: s.id, externalId: s.externalId, label: openLabels.get(s.id) ?? s.model,
+          }))}
+          suggestions={suggestions}
+        />}
         facets={
           <>
             <FacetStrip facets={[
