@@ -33,6 +33,10 @@ export type RemoteDevice = {
   hold: OpenHold | null;
   canPostNotice: boolean;
   canRaiseHold: boolean;
+  /** When the machine was last successfully told, in shop time. */
+  noticePushed: string;
+  /** The engine's words when the last attempt failed, else "". */
+  noticeError: string;
 };
 
 /**
@@ -198,6 +202,8 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
               hold={d.hold}
               canPostNotice={d.canPostNotice}
               canRaiseHold={d.canRaiseHold}
+              noticePushed={d.noticePushed}
+              noticeError={d.noticeError}
             />
           </div>
         ))}

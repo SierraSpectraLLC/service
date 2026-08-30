@@ -646,6 +646,38 @@ views rarely are.
 
 ---
 
+## Notices on a machine's screen
+
+The repossession notices and safety holds posted from `/remote` are delivered by
+the portal calling the engine - there is no inbound route and nothing to open.
+Two things on the host decide whether they arrive, and neither announces itself
+when it is wrong.
+
+**`REMOTE_ADMIN_USER` needs Remote Control and Agent Console on the device
+group.** Notices ride on `runcommands` type 4, which the server refuses without
+rights `8 | 16`, and the agent re-checks the same two before it will act. A site
+administrator does not automatically hold them on every group. Without them
+every push comes back `Access denied` - which the machine list now says out
+loud, under the notice: *Not delivered to the machine - Access denied.*
+
+**A toast is what a person actually sees; the tray entry needs MeshCentral
+Assistant.** Every push sends both. The standing `agentmsg` entry is the record,
+but it renders through the agent's local IPC socket, which only has a listener
+when the **MeshCentral Assistant** desktop app is installed alongside the agent
+- the background service alone displays nothing at all. The toast needs no
+companion app, so on a plain service-only install the toast is the whole of what
+the user sees, and it fires only when the notice CHANGES rather than at every
+hourly re-assertion.
+
+If you want a notice that persists on screen rather than one that appears once,
+install MeshCentral Assistant on the lab PCs. If you do not, expect the toast
+and the portal's own record and nothing on the machine between them.
+
+> Checking it worked: post a notice, then look at the machine's row on
+> `/remote`. It says either *On the machine since \<time\>* or exactly what the
+> engine refused with. `api/cron/notices` re-asserts hourly, so a machine that
+> was asleep picks it up on the next run rather than never.
+
 ## Troubleshooting
 
 These are the failures actually hit standing this up the first time, in the order

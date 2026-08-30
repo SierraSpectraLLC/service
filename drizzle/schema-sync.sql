@@ -3821,3 +3821,7 @@ CREATE TABLE IF NOT EXISTS "safety_holds" (
   "created_at" timestamp NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS "safety_holds_device_idx" ON "safety_holds" ("device_id");
+
+ALTER TABLE "remote_devices" ADD COLUMN IF NOT EXISTS "notice_state" text NOT NULL DEFAULT '';
+ALTER TABLE "remote_devices" ADD COLUMN IF NOT EXISTS "notice_pushed_at" timestamp;
+ALTER TABLE "remote_devices" ADD COLUMN IF NOT EXISTS "notice_error" text NOT NULL DEFAULT '';

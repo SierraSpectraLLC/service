@@ -120,6 +120,17 @@ const REVIEWED: Record<string, string> = {
     + "workspace, and the address the account is created for is read off the "
     + "ROW rather than taken from the caller, so a stolen link can only ever "
     + "post keys to the inbox the sender chose.",
+  "syncDeviceNotices":
+    "Delivery bookkeeping in lib/fleetNoticeData, and not a server action - "
+    + "nothing reaches it over the network. Its deviceId comes from its "
+    + "callers, never from a request: the four notice and hold actions, each "
+    + "of which has already resolved the device through deviceWithOrg(id, "
+    + "readTenant(u)) and mayEnroll before calling, and api/cron/notices, "
+    + "which is instance-wide by design and sits behind cronAuthorized. The "
+    + "three columns it writes - notice_state, notice_pushed_at, notice_error "
+    + "- are a record of whether the engine accepted a push, hold no tenant "
+    + "data, and take no caller-supplied value. The scanner cannot see the "
+    + "gating because it lives one frame up, in every caller.",
   "markHandoffOpened":
     "Same public token, and it sets one timestamp once - the WHERE carries the "
     + "token AND opened_at IS NULL. Nothing about a workspace is reachable "

@@ -56,6 +56,7 @@ const EFFECTS = [
  */
 export default function DeviceNoticeControls({
   deviceId, label, consentMode, consentWhy, notice, hold, canPostNotice, canRaiseHold,
+  noticePushed, noticeError,
 }: {
   deviceId: number;
   label: string;
@@ -66,6 +67,8 @@ export default function DeviceNoticeControls({
   hold: OpenHold | null;
   canPostNotice: boolean;
   canRaiseHold: boolean;
+  noticePushed: string;
+  noticeError: string;
 }) {
   const [sheet, setSheet] = useState<null | "notice" | "hold">(null);
   const [error, setError] = useState("");
@@ -192,6 +195,21 @@ export default function DeviceNoticeControls({
             <button className="btn link" disabled={pending} onClick={clearNotice}>clear notice</button>
           )}
         </div>
+      )}
+
+      {/* Whether the machine was actually told. Said plainly, because a notice
+          that reached nobody looks exactly like one that landed - which is how
+          this shipped with a delivery path that displayed nothing at all. */}
+      {(notice || hold) && (
+        noticeError ? (
+          <div className="t-meta" style={{ color: "var(--t-bad-fg)" }}>
+            Not delivered to the machine - {noticeError}
+          </div>
+        ) : noticePushed ? (
+          <div className="mut t-meta">On the machine since {noticePushed}.</div>
+        ) : (
+          <div className="mut t-meta">Not sent to the machine yet.</div>
+        )
       )}
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>

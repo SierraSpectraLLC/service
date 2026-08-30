@@ -144,6 +144,10 @@ export default async function RemotePage() {
       // is absent rather than refused.
       canPostNotice: ability.unlink && user.role === "owner",
       canRaiseHold: ability.unlink && isHouseUser,
+      // Whether the machine has actually been told. A notice nobody could
+      // deliver is the failure mode this page exists to make visible.
+      noticePushed: d.noticePushedAt ? shopTime(d.noticePushedAt) : "",
+      noticeError: d.noticeError,
     };
   }).filter((d) => d.canConnect || d.canManage || d.refusal !== "" || isHouseUser);
 

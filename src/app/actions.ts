@@ -18397,10 +18397,10 @@ export async function postDeviceNotice(
       + ` at ${row.orgName ?? "an unassigned organization"} (approved by ${u.email})`,
     tenantOrgId: device.tenantOrgId,
   });
-  // Deliver now so the person who just acted sees it land. Best-effort by
-  // contract: the row above is the record, and api/cron/notices re-asserts on
-  // the hour, so a machine that is switched off or a host that is down must
-  // not fail a write that has already happened.
+  // Deliver now so the person who just acted sees it land. The write above has
+  // already happened and must not be failed by a sleeping laptop, so the result
+  // is not returned - but it IS recorded on the device row, and the page reads
+  // it back, which is the difference between best-effort and silent.
   await syncDeviceNotices(deviceId).catch(() => ({}));
   revalidatePath("/remote");
   return {};
@@ -18417,10 +18417,10 @@ export async function clearDeviceNotice(deviceId: number): Promise<{ error?: str
     action: `cleared the repossession notice on ${row.device.nickname || row.device.name || "a machine"}`,
     tenantOrgId: row.device.tenantOrgId,
   });
-  // Deliver now so the person who just acted sees it land. Best-effort by
-  // contract: the row above is the record, and api/cron/notices re-asserts on
-  // the hour, so a machine that is switched off or a host that is down must
-  // not fail a write that has already happened.
+  // Deliver now so the person who just acted sees it land. The write above has
+  // already happened and must not be failed by a sleeping laptop, so the result
+  // is not returned - but it IS recorded on the device row, and the page reads
+  // it back, which is the difference between best-effort and silent.
   await syncDeviceNotices(deviceId).catch(() => ({}));
   revalidatePath("/remote");
   return {};
@@ -18466,10 +18466,10 @@ export async function raiseSafetyHold(
     action: `raised a ${effect} safety hold on ${device.nickname || device.name || "a machine"}: ${reason}`,
     tenantOrgId: device.tenantOrgId,
   });
-  // Deliver now so the person who just acted sees it land. Best-effort by
-  // contract: the row above is the record, and api/cron/notices re-asserts on
-  // the hour, so a machine that is switched off or a host that is down must
-  // not fail a write that has already happened.
+  // Deliver now so the person who just acted sees it land. The write above has
+  // already happened and must not be failed by a sleeping laptop, so the result
+  // is not returned - but it IS recorded on the device row, and the page reads
+  // it back, which is the difference between best-effort and silent.
   await syncDeviceNotices(deviceId).catch(() => ({}));
   revalidatePath("/remote");
   return {};
@@ -18490,10 +18490,10 @@ export async function clearSafetyHold(deviceId: number, resolution: string): Pro
     action: `cleared the safety hold on ${row.device.nickname || row.device.name || "a machine"}: ${said}`,
     tenantOrgId: row.device.tenantOrgId,
   });
-  // Deliver now so the person who just acted sees it land. Best-effort by
-  // contract: the row above is the record, and api/cron/notices re-asserts on
-  // the hour, so a machine that is switched off or a host that is down must
-  // not fail a write that has already happened.
+  // Deliver now so the person who just acted sees it land. The write above has
+  // already happened and must not be failed by a sleeping laptop, so the result
+  // is not returned - but it IS recorded on the device row, and the page reads
+  // it back, which is the difference between best-effort and silent.
   await syncDeviceNotices(deviceId).catch(() => ({}));
   revalidatePath("/remote");
   return {};

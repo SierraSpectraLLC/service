@@ -3852,6 +3852,15 @@ export const remoteDevices = pgTable("remote_devices", {
   // engine is the authority, this is what we can show without it.
   lastSeenAt: timestamp("last_seen_at"),
   enrolledBy: text("enrolled_by").notNull().default(""),
+  // What lib/fleetNoticeData last managed to put on this machine's screen, and
+  // when. Delivery is a fact about the DEVICE rather than about a notice row -
+  // one push carries whatever the machine should currently say - and it is
+  // recorded because the alternative is what shipped first: a posted notice and
+  // a silent failure look identical, so nobody learns the agent was unreachable.
+  noticeState: text("notice_state").notNull().default(""),
+  noticePushedAt: timestamp("notice_pushed_at"),
+  /** Blank when the last push worked. The engine's own words when it did not. */
+  noticeError: text("notice_error").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   unique("remote_device_node_unique").on(t.nodeId),

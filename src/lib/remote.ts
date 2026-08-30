@@ -362,19 +362,29 @@ export async function applyDeviceConsent(nodeId: string, mode: "consent" | "unat
 // knows how to say it to MeshCentral 1.2.4. Read against agents/meshcore.js and
 // meshuser.js of that version, the same way the cookie format above was.
 //
-// The engine gives us three ways to put words on a lab PC and only one of them
-// is right for this:
+// The engine gives us three ways to put words on a lab PC, and the useful
+// answer turned out to be two of them together:
 //
-//   * `toast` is a first-class control-API action, and transient - the agent
-//     hands it to the OS notifier and forgets it. A repossession notice that
-//     vanishes in ten seconds is not a notice.
 //   * `messagebox`/`alertbox` are modal, and NOT reachable from the control API
 //     at all - meshuser.js has no case for either. That is load-bearing rather
 //     than inconvenient: lib/fleetNotice promises a rendering the agent cannot
 //     make modal, and on this engine that promise is structural.
-//   * `agentmsg add|remove|list` is a standing list the agent holds and shows
-//     through its tray. That is the one that matches a notice, so it is the one
-//     used here.
+//   * `agentmsg add|remove|list` is a standing list, and it PERSISTS - but it
+//     displays through broadcastToRegisteredApps, which returns immediately
+//     unless a separate local app has registered over the agent's IPC socket.
+//     That app is the MeshCentral Assistant tray, a install of its own. On a
+//     service-only agent - the ordinary case, and what the enrollment link in
+//     app/remote/enroll hands out - an agentmsg is stored, reported to the
+//     server, and shown to nobody. This was shipped believing otherwise, and
+//     the first machine it was tried on displayed nothing at all.
+//   * `toast` calls the agent's own toaster module directly, with no IPC and no
+//     companion app, so it is the one thing that reliably reaches a screen. It
+//     is transient, which is why it cannot be the whole answer.
+//
+// So: agentmsg carries the standing record, toast is what a person actually
+// sees, and the toast is sent only when the notice set CHANGES (see
+// noticeFingerprint) so that hourly re-assertion does not become an hourly
+// popup.
 //
 // `agentmsg` is an agent CONSOLE command, reached with `runcommands` type 4,
 // which needs Remote Control (8) and Agent Console (16) on the node - the agent
@@ -404,6 +414,15 @@ export function consoleSafe(text: string): string {
 }
 
 /**
+ * A short stable fingerprint of what a machine is being told, so a re-assertion
+ * can tell "the same thing again" from "something new". Only a change earns a
+ * toast; the standing list is refreshed either way.
+ */
+export function noticeFingerprint(notices: Notice[]): string {
+  return notices.map((n) => `${n.kind}:${n.text}:${n.contact}`).join("|");
+}
+
+/**
  * The exact console commands that leave a machine showing `notices` and nothing
  * else. Pure, so the quoting above is arguable in a test rather than only on a
  * customer's PC.
@@ -418,12 +437,16 @@ export function consoleSafe(text: string): string {
  * lib/fleetNotice keeps them apart so that a renderer WITH two fields can use
  * two, and this is the renderer that has one.
  */
-export function agentMessageCommands(notices: Notice[]): string[] {
+export function agentMessageCommands(notices: Notice[], announce = false): string[] {
   const cmds = ["clearagentmsg"];
   for (const n of notices) {
     const line = n.contact ? `${n.text} (${n.contact})` : n.text;
     const safe = consoleSafe(line);
-    if (safe) cmds.push(`agentmsg add "${safe}" ${NOTICE_ICON}`);
+    if (!safe) continue;
+    cmds.push(`agentmsg add "${safe}" ${NOTICE_ICON}`);
+    // The half a person actually sees. Only on a change, so a machine carrying
+    // a week-old notice is not popped at every re-assertion.
+    if (announce) cmds.push(`toast "${safe}"`);
   }
   return cmds;
 }
@@ -447,12 +470,14 @@ export function agentMessageCommands(notices: Notice[]): string[] {
  * lib/fleetNotice is most anxious to protect. So the rung stays permission that
  * is never taken up, which is the degradation that module already allows for.
  */
-export async function pushNoticesTo(nodeId: string, notices: Notice[]): Promise<{ error?: string }> {
+export async function pushNoticesTo(
+  nodeId: string, notices: Notice[], announce = false,
+): Promise<{ error?: string }> {
   const cfg = remoteConfig();
   if (!cfg) return { error: NOT_CONFIGURED };
   if (!nodeId) return { error: "That machine has no node id yet." };
   try {
-    for (const cmds of agentMessageCommands(notices)) {
+    for (const cmds of agentMessageCommands(notices, announce)) {
       await engineCall(cfg, "runcommands", { nodeids: [nodeId], type: 4, runAsUser: 0, cmds });
     }
     return {};
