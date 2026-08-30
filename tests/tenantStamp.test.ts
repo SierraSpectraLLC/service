@@ -42,6 +42,9 @@ const STAMPED = [
   // read it. Missed when the table landed on main - both the DDL and this line
   // were, which is what the completeness check below exists to catch.
   "stipends",
+  // What a lab PC says on its own screen. Both take the device's stamp: a
+  // notice or a hold belongs to the workspace whose machine carries it.
+  "deviceNotices", "safetyHolds",
 ];
 
 const walk = (dir: string): string[] =>
