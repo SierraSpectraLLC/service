@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { gt, isNull, or } from "drizzle-orm";
 import { cronAuthorized } from "@/lib/cronAuth";
 import { db } from "@/db";
-import { deviceNotices, safetyHolds } from "@/db/schema";
+import { deviceLockouts, deviceNotices, safetyHolds } from "@/db/schema";
 import { noticesForDevice } from "@/lib/fleetNoticeData";
+import { enforceDeviceLockout } from "@/lib/deviceLockoutData";
 import { pushNoticesTo, remoteConfigured } from "@/lib/remote";
 
 /**
- * Re-assert what every machine should be saying about itself.
+ * Re-assert what every machine should be saying about itself, and re-apply
+ * every theft lockout.
  *
  * Needed because the agent holds its message list in memory (see
  * lib/remote.pushNoticesTo): a PC that reboots overnight comes back with a
@@ -64,7 +66,24 @@ export async function GET(req: Request) {
     else pushed++;
   }
 
+  // Lockouts, which are a different job on the same pass. A notice is
+  // re-asserted so it survives a reboot; a lockout is re-APPLIED because
+  // repetition is the only thing that gives it force - one logoff is a
+  // nuisance, a logoff every time the machine appears is a machine that
+  // cannot be used. Held open until somebody releases it.
+  const locked = await db.select({ deviceId: deviceLockouts.deviceId }).from(deviceLockouts)
+    .where(isNull(deviceLockouts.releasedAt)).catch(() => []);
+  let enforced = 0, enforceFailed = 0;
+  for (const { deviceId } of locked) {
+    const res = await enforceDeviceLockout(deviceId);
+    if (res.error) enforceFailed++;
+    else if (res.applied) enforced++;
+  }
+
   // An offline machine counts as failed and is retried on the next run, which
   // is the whole design rather than a shortfall in it.
-  return NextResponse.json({ pushed, cleared, failed, devices: deviceIds.length });
+  return NextResponse.json({
+    pushed, cleared, failed, devices: deviceIds.length,
+    lockouts: locked.length, enforced, enforceFailed,
+  });
 }

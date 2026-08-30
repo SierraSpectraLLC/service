@@ -1,12 +1,14 @@
 import { redirect } from "next/navigation";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { deviceNotices, instruments, orgs, remoteDevices, safetyHolds } from "@/db/schema";
+import { deviceLeases, deviceLockouts, deviceNotices, instruments, orgs, remoteDevices, safetyHolds } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
 import { shopTime } from "@/lib/shopday";
 import { consentModeFor, remoteAbility } from "@/lib/remoteAccess";
 import { listGroupDevices, NOT_CONFIGURED, reconcileOrgDevices, remoteConfigured } from "@/lib/remote";
+import { leaseState } from "@/lib/leaseGuard";
+import { leaseConfig } from "@/lib/leaseGuardData";
 import { forTenant, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import RemoteDevicesPanel from "@/components/RemoteDevicesPanel";
 import { PageHead } from "@/components/ui";
@@ -76,16 +78,25 @@ export default async function RemotePage() {
   // notice is history, and history belongs in the audit trail rather than on
   // a device list.
   const deviceIds = deviceRows.map((d) => d.id);
-  const [noticeRows, holdRows] = deviceIds.length === 0 ? [[], []] : await Promise.all([
+  const [noticeRows, holdRows, lockoutRows, leaseRows] = deviceIds.length === 0 ? [[], [], [], []] : await Promise.all([
     db.select().from(deviceNotices)
       .where(and(inArray(deviceNotices.deviceId, deviceIds), isNull(deviceNotices.clearedAt)))
       .catch(() => []),
     db.select().from(safetyHolds)
       .where(and(inArray(safetyHolds.deviceId, deviceIds), isNull(safetyHolds.clearedAt)))
       .catch(() => []),
+    db.select().from(deviceLockouts)
+      .where(and(inArray(deviceLockouts.deviceId, deviceIds), isNull(deviceLockouts.releasedAt)))
+      .catch(() => []),
+    db.select().from(deviceLeases)
+      .where(and(inArray(deviceLeases.deviceId, deviceIds), isNull(deviceLeases.releasedAt)))
+      .catch(() => []),
   ]);
   const noticeByDevice = new Map(noticeRows.map((n) => [n.deviceId, n]));
   const holdByDevice = new Map(holdRows.map((h) => [h.deviceId, h]));
+  const lockoutByDevice = new Map(lockoutRows.map((l) => [l.deviceId, l]));
+  const leaseByDevice = new Map(leaseRows.map((l) => [l.deviceId, l]));
+  const leaseReady = leaseConfig() !== null;
 
   // The systems each device could be linked to, and the custody facts that decide
   // whether a session needs somebody at the far end.
@@ -110,6 +121,7 @@ export default async function RemotePage() {
     const consent = consentModeFor(d, system ? { ownerOrgId: system.ownerOrgId, stages: system.stages } : null);
     const notice = noticeByDevice.get(d.id) ?? null;
     const hold = holdByDevice.get(d.id) ?? null;
+    const lockout = lockoutByDevice.get(d.id) ?? null;
     return {
       id: d.id,
       name: d.name,
@@ -144,6 +156,38 @@ export default async function RemotePage() {
       // is absent rather than refused.
       canPostNotice: ability.unlink && user.role === "owner",
       canRaiseHold: ability.unlink && isHouseUser,
+      // Whether the machine has actually been told. A notice nobody could
+      // deliver is the failure mode this page exists to make visible.
+      noticePushed: d.noticePushedAt ? shopTime(d.noticePushedAt) : "",
+      noticeError: d.noticeError,
+      lockout: lockout ? {
+        reference: lockout.reference, reason: lockout.reason, contact: lockout.contact,
+        force: lockout.force as "notify" | "logoff" | "shutdown",
+        decidedBy: lockout.decidedBy, raised: shopTime(lockout.createdAt),
+        lastEnforced: lockout.lastEnforcedAt ? shopTime(lockout.lastEnforcedAt) : "",
+        enforceError: lockout.enforceError,
+      } : null,
+      // Reporting a machine stolen is the owner's call alone, matching the
+      // action's own gate.
+      canLock: ability.unlink && user.role === "owner",
+      lease: (() => {
+        const l = leaseByDevice.get(d.id);
+        if (!l) return null;
+        const state = leaseState(
+          { armed: l.armed, expiresAt: l.expiresAt, graceDays: l.graceDays, releasedAt: l.releasedAt, force: l.force as "notify" | "lock" },
+          new Date(),
+        );
+        return {
+          armed: l.armed, force: l.force as "notify" | "lock",
+          leaseDays: l.leaseDays, graceDays: l.graceDays, state,
+          expires: l.expiresAt ? shopTime(l.expiresAt) : "",
+          lastRenewed: l.lastRenewedAt ? shopTime(l.lastRenewedAt) : "",
+          suspended: l.suspendedAt !== null, suspendReason: l.suspendReason,
+        };
+      })(),
+      // Arming and releasing a lease is owner-only, and only when the signing
+      // key exists - otherwise the controls promise something that cannot be sent.
+      canManageLease: ability.unlink && user.role === "owner" && leaseReady,
     };
   }).filter((d) => d.canConnect || d.canManage || d.refusal !== "" || isHouseUser);
 

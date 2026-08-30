@@ -7,7 +7,7 @@ import { Dot, Legend, Panel, Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { linkRemoteDevice, removeRemoteDevice, renameRemoteDevice, setRemoteConsent } from "@/app/actions";
 import { deviceLabel, deviceSubLabel, needsNickname } from "@/lib/deviceName";
-import DeviceNoticeControls, { type OpenHold, type OpenNotice } from "@/components/DeviceNoticeControls";
+import DeviceManage, { type OpenHold, type OpenLease, type OpenLockout, type OpenNotice } from "@/components/DeviceManage";
 
 export type RemoteDevice = {
   id: number;
@@ -33,6 +33,15 @@ export type RemoteDevice = {
   hold: OpenHold | null;
   canPostNotice: boolean;
   canRaiseHold: boolean;
+  /** When the machine was last successfully told, in shop time. */
+  noticePushed: string;
+  /** The engine's words when the last attempt failed, else "". */
+  noticeError: string;
+  /** The open theft lockout, if the machine is under one. */
+  lockout: OpenLockout | null;
+  canLock: boolean;
+  lease: OpenLease | null;
+  canManageLease: boolean;
 };
 
 /**
@@ -189,7 +198,7 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
               </div>
             )}
 
-            <DeviceNoticeControls
+            <DeviceManage
               deviceId={d.id}
               label={deviceLabel(d.nickname, d.name)}
               consentMode={d.consentMode}
@@ -198,6 +207,12 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
               hold={d.hold}
               canPostNotice={d.canPostNotice}
               canRaiseHold={d.canRaiseHold}
+              noticePushed={d.noticePushed}
+              noticeError={d.noticeError}
+              lockout={d.lockout}
+              canLock={d.canLock}
+              lease={d.lease}
+              canManageLease={d.canManageLease}
             />
           </div>
         ))}

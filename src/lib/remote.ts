@@ -37,6 +37,7 @@ import { orgs, remoteDevices } from "@/db/schema";
 import { tenantOfOrg } from "@/lib/tenancy";
 import { brandingFrom, type AgentBranding } from "@/lib/agentName";
 import type { Notice } from "@/lib/fleetNotice";
+import type { LockoutPlan } from "@/lib/deviceLockout";
 
 /** How long a connect URL is good for. Bounds the START of a session, not its length. */
 export const CONNECT_TTL_SECONDS = 120;
@@ -362,19 +363,29 @@ export async function applyDeviceConsent(nodeId: string, mode: "consent" | "unat
 // knows how to say it to MeshCentral 1.2.4. Read against agents/meshcore.js and
 // meshuser.js of that version, the same way the cookie format above was.
 //
-// The engine gives us three ways to put words on a lab PC and only one of them
-// is right for this:
+// The engine gives us three ways to put words on a lab PC, and the useful
+// answer turned out to be two of them together:
 //
-//   * `toast` is a first-class control-API action, and transient - the agent
-//     hands it to the OS notifier and forgets it. A repossession notice that
-//     vanishes in ten seconds is not a notice.
 //   * `messagebox`/`alertbox` are modal, and NOT reachable from the control API
 //     at all - meshuser.js has no case for either. That is load-bearing rather
 //     than inconvenient: lib/fleetNotice promises a rendering the agent cannot
 //     make modal, and on this engine that promise is structural.
-//   * `agentmsg add|remove|list` is a standing list the agent holds and shows
-//     through its tray. That is the one that matches a notice, so it is the one
-//     used here.
+//   * `agentmsg add|remove|list` is a standing list, and it PERSISTS - but it
+//     displays through broadcastToRegisteredApps, which returns immediately
+//     unless a separate local app has registered over the agent's IPC socket.
+//     That app is the MeshCentral Assistant tray, a install of its own. On a
+//     service-only agent - the ordinary case, and what the enrollment link in
+//     app/remote/enroll hands out - an agentmsg is stored, reported to the
+//     server, and shown to nobody. This was shipped believing otherwise, and
+//     the first machine it was tried on displayed nothing at all.
+//   * `toast` calls the agent's own toaster module directly, with no IPC and no
+//     companion app, so it is the one thing that reliably reaches a screen. It
+//     is transient, which is why it cannot be the whole answer.
+//
+// So: agentmsg carries the standing record, toast is what a person actually
+// sees, and the toast is sent only when the notice set CHANGES (see
+// noticeFingerprint) so that hourly re-assertion does not become an hourly
+// popup.
 //
 // `agentmsg` is an agent CONSOLE command, reached with `runcommands` type 4,
 // which needs Remote Control (8) and Agent Console (16) on the node - the agent
@@ -404,6 +415,15 @@ export function consoleSafe(text: string): string {
 }
 
 /**
+ * A short stable fingerprint of what a machine is being told, so a re-assertion
+ * can tell "the same thing again" from "something new". Only a change earns a
+ * toast; the standing list is refreshed either way.
+ */
+export function noticeFingerprint(notices: Notice[]): string {
+  return notices.map((n) => `${n.kind}:${n.text}:${n.contact}`).join("|");
+}
+
+/**
  * The exact console commands that leave a machine showing `notices` and nothing
  * else. Pure, so the quoting above is arguable in a test rather than only on a
  * customer's PC.
@@ -418,12 +438,16 @@ export function consoleSafe(text: string): string {
  * lib/fleetNotice keeps them apart so that a renderer WITH two fields can use
  * two, and this is the renderer that has one.
  */
-export function agentMessageCommands(notices: Notice[]): string[] {
+export function agentMessageCommands(notices: Notice[], announce = false): string[] {
   const cmds = ["clearagentmsg"];
   for (const n of notices) {
     const line = n.contact ? `${n.text} (${n.contact})` : n.text;
     const safe = consoleSafe(line);
-    if (safe) cmds.push(`agentmsg add "${safe}" ${NOTICE_ICON}`);
+    if (!safe) continue;
+    cmds.push(`agentmsg add "${safe}" ${NOTICE_ICON}`);
+    // The half a person actually sees. Only on a change, so a machine carrying
+    // a week-old notice is not popped at every re-assertion.
+    if (announce) cmds.push(`toast "${safe}"`);
   }
   return cmds;
 }
@@ -447,12 +471,78 @@ export function agentMessageCommands(notices: Notice[]): string[] {
  * lib/fleetNotice is most anxious to protect. So the rung stays permission that
  * is never taken up, which is the degradation that module already allows for.
  */
-export async function pushNoticesTo(nodeId: string, notices: Notice[]): Promise<{ error?: string }> {
+export async function pushNoticesTo(
+  nodeId: string, notices: Notice[], announce = false,
+): Promise<{ error?: string }> {
   const cfg = remoteConfig();
   if (!cfg) return { error: NOT_CONFIGURED };
   if (!nodeId) return { error: "That machine has no node id yet." };
   try {
-    for (const cmds of agentMessageCommands(notices)) {
+    for (const cmds of agentMessageCommands(notices, announce)) {
+      await engineCall(cfg, "runcommands", { nodeids: [nodeId], type: 4, runAsUser: 0, cmds });
+    }
+    return {};
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+// ── Locking a stolen machine out of itself ──────────────────────────────────
+//
+// lib/deviceLockout decides WHETHER; this is what the engine can actually do
+// about it, read out of the same 1.2.4 source as everything above.
+//
+// The obvious command is the wrong one. The agent console's `lock` runs
+// `RunDll32.exe user32.dll,LockWorkStation` on Windows and `loginctl
+// lock-session` on Linux - which any holder of the Windows password undoes in
+// two seconds, so against a thief it is theatre. It is not used here.
+//
+// `power 1` is the one that means something: ExecPowerState LOGOFF ends the
+// desktop session, so getting back in needs credentials. Repeated on every
+// enforcement pass, a machine whose taker does not know the password is a
+// machine that cannot be used. `power 2` is SHUTDOWN for when that is wanted.
+//
+// Both go through `runcommands` type 4, the same door as a notice, so no new
+// right is needed beyond the 8|16 that path already requires. (poweraction,
+// the other route, validates actiontype from 2 upward and so cannot express
+// LOGOFF at all, besides wanting RESETOFF rights of its own.)
+//
+// The honest limits are in lib/deviceLockout.LOCKOUT_REACH, which the UI
+// prints next to the button rather than leaving to a reader's optimism.
+
+/**
+ * The console commands that enforce one lockout, in the order they must run.
+ *
+ * The message goes FIRST and always. Whoever is sitting there may be a thief,
+ * but may equally be a shipper, a buyer of stolen goods who does not know it,
+ * or a customer whose machine we have got wrong - and in every one of those
+ * cases the number on the screen is what gets the instrument home. Ending the
+ * session before saying why would just produce a mystery.
+ */
+export function lockoutCommands(plan: LockoutPlan): string[] {
+  const said = consoleSafe(plan.text);
+  const cmds = [`clearagentmsg`, `agentmsg add "${said}" ${NOTICE_ICON}`, `toast "${said}"`];
+  // Order matters: shutdown would cut the logoff short and lose nothing, but
+  // sending both is how a shutdown that is refused still ends the session.
+  if (plan.endsSession) cmds.push("power 1");
+  if (plan.powersOff) cmds.push("power 2");
+  return cmds;
+}
+
+/**
+ * Enforce one lockout on one machine, now.
+ *
+ * Best-effort in the same sense as pushNoticesTo, and for a sharper reason: a
+ * machine that is offline cannot be locked, and no amount of retrying changes
+ * that. api/cron/notices re-runs this on every pass, which is what turns a
+ * single logoff into a machine that will not stay usable.
+ */
+export async function pushLockoutTo(nodeId: string, plan: LockoutPlan): Promise<{ error?: string }> {
+  const cfg = remoteConfig();
+  if (!cfg) return { error: NOT_CONFIGURED };
+  if (!nodeId) return { error: "That machine has no node id yet." };
+  try {
+    for (const cmds of lockoutCommands(plan)) {
       await engineCall(cfg, "runcommands", { nodeids: [nodeId], type: 4, runAsUser: 0, cmds });
     }
     return {};

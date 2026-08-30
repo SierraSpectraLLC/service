@@ -39,6 +39,10 @@
     {
       "path": "/api/cron/notices",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/lease-watch",
+      "schedule": "0 * * * *"
     }
   ]
 }

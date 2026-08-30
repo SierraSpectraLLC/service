@@ -3852,6 +3852,15 @@ export const remoteDevices = pgTable("remote_devices", {
   // engine is the authority, this is what we can show without it.
   lastSeenAt: timestamp("last_seen_at"),
   enrolledBy: text("enrolled_by").notNull().default(""),
+  // What lib/fleetNoticeData last managed to put on this machine's screen, and
+  // when. Delivery is a fact about the DEVICE rather than about a notice row -
+  // one push carries whatever the machine should currently say - and it is
+  // recorded because the alternative is what shipped first: a posted notice and
+  // a silent failure look identical, so nobody learns the agent was unreachable.
+  noticeState: text("notice_state").notNull().default(""),
+  noticePushedAt: timestamp("notice_pushed_at"),
+  /** Blank when the last push worked. The engine's own words when it did not. */
+  noticeError: text("notice_error").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   unique("remote_device_node_unique").on(t.nodeId),
@@ -3882,6 +3891,88 @@ export const deviceNotices = pgTable("device_notices", {
   clearedBy: text("cleared_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("device_notices_device_idx").on(t.deviceId)]);
+
+/**
+ * The lease a shipped system enforces on itself while offline.
+ *
+ * A fourth kind, and the only one that acts without us - see lib/leaseGuard for
+ * why it is neither a notice, a hold, nor the online theft lockout. No invoice
+ * column, and none may be added: tests/leaseGuard pins the directive as
+ * invariant under credit standing, exactly as the other three paths are. The
+ * lease is renewed or released by a recorded decision, never by the ledger.
+ *
+ * `force` defaults to 'notify' - a lease arms warning-only until somebody
+ * deliberately chooses to let it lock, which is the safe default for a machine
+ * whose title has passed to the customer.
+ */
+export const deviceLeases = pgTable("device_leases", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  deviceId: integer("device_id").notNull().references(() => remoteDevices.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }),
+  /** Armed at ship, disarmed only by release. */
+  armed: boolean("armed").notNull().default(false),
+  /** notify | lock - see lib/leaseGuard.LeaseForce. Defaults to warning-only. */
+  force: text("force").notNull().default("notify"),
+  /** Length of each renewed lease, in days. Customizable; 7 by default. */
+  leaseDays: integer("lease_days").notNull().default(7),
+  /** Warning-only days after expiry before a lock lease locks. */
+  graceDays: integer("grace_days").notNull().default(3),
+  /** When the current signed lease runs out. Advanced on every renewal. */
+  expiresAt: timestamp("expires_at"),
+  /** Monotonic, embedded in each signed lease; the guard refuses a lower one. */
+  counter: integer("counter").notNull().default(0),
+  /** Last time the guard fetched a fresh lease. The dead-man signal we watch. */
+  lastRenewedAt: timestamp("last_renewed_at"),
+  armedBy: text("armed_by").notNull().default(""),
+  /** A recorded human decision to stop re-leasing - the leverage lever. Null = renew normally. Never set by the ledger. */
+  suspendedAt: timestamp("suspended_at"),
+  suspendedBy: text("suspended_by").notNull().default(""),
+  suspendReason: text("suspend_reason").notNull().default(""),
+  /** Set once at sign-off. A released lease is terminal - no un-release exists. */
+  releasedAt: timestamp("released_at"),
+  releasedBy: text("released_by").notNull().default(""),
+  /** Required to release: the payment and sign-off this confirms. */
+  releaseReason: text("release_reason").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("device_leases_device_idx").on(t.deviceId)]);
+
+/**
+ * A machine locked out because it is reported stolen.
+ *
+ * A third kind, deliberately not a rung on either of the other two - see
+ * lib/deviceLockout for why a theft claim is neither commercial nor
+ * engineering. No invoice column, and none may be added: tests/deviceLockout
+ * pins the decision as invariant under credit standing exactly as the safety
+ * path is pinned.
+ *
+ * `reference` is required by the pure module and is the friction that keeps
+ * this from becoming a collections tool: a crime report exists outside this
+ * software, and a balance does not.
+ */
+export const deviceLockouts = pgTable("device_lockouts", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  deviceId: integer("device_id").notNull().references(() => remoteDevices.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }),
+  /** Police report, insurance claim, RMA - something filed somewhere else. */
+  reference: text("reference").notNull().default(""),
+  /** Why, in a sentence, for the person who reads this in six months. */
+  reason: text("reason").notNull().default(""),
+  /** Who the finder should call. Required - a locked machine with no number is a brick. */
+  contact: text("contact").notNull().default(""),
+  /** notify | logoff | shutdown */
+  force: text("force").notNull().default("logoff"),
+  decidedBy: text("decided_by").notNull().default(""),
+  /** Last time the agent was actually made to act on it. */
+  lastEnforcedAt: timestamp("last_enforced_at"),
+  enforceError: text("enforce_error").notNull().default(""),
+  releasedAt: timestamp("released_at"),
+  releasedBy: text("released_by").notNull().default(""),
+  /** Required to release: recovered, returned, reported in error. */
+  releaseReason: text("release_reason").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("device_lockouts_device_idx").on(t.deviceId)]);
 
 /**
  * An engineering hold on a machine. No money column, and none may be added -

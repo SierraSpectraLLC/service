@@ -646,6 +646,61 @@ views rarely are.
 
 ---
 
+## Notices on a machine's screen
+
+The repossession notices and safety holds posted from `/remote` are delivered by
+the portal calling the engine - there is no inbound route and nothing to open.
+Two things on the host decide whether they arrive, and neither announces itself
+when it is wrong.
+
+**`REMOTE_ADMIN_USER` needs Remote Control and Agent Console on the device
+group.** Notices ride on `runcommands` type 4, which the server refuses without
+rights `8 | 16`, and the agent re-checks the same two before it will act. A site
+administrator does not automatically hold them on every group. Without them
+every push comes back `Access denied` - which the machine list now says out
+loud, under the notice: *Not delivered to the machine - Access denied.*
+
+**A toast is what a person actually sees; the tray entry needs MeshCentral
+Assistant.** Every push sends both. The standing `agentmsg` entry is the record,
+but it renders through the agent's local IPC socket, which only has a listener
+when the **MeshCentral Assistant** desktop app is installed alongside the agent
+- the background service alone displays nothing at all. The toast needs no
+companion app, so on a plain service-only install the toast is the whole of what
+the user sees, and it fires only when the notice CHANGES rather than at every
+hourly re-assertion.
+
+If you want a notice that persists on screen rather than one that appears once,
+install MeshCentral Assistant on the lab PCs. If you do not, expect the toast
+and the portal's own record and nothing on the machine between them.
+
+### Theft lockout
+
+`/remote` can also lock a machine out of itself after it is reported stolen
+(owner only, and it will not save without a report or claim reference). It rides
+the same `runcommands` type 4 door as notices, so it needs no rights beyond the
+`8 | 16` above, and it is enforced again on every hourly pass rather than once -
+repetition is the only thing that gives it force.
+
+What it sends is a message naming the reference and a contact number, then
+`power 1` (LOGOFF), and `power 2` (SHUTDOWN) at the strongest setting. It
+deliberately does **not** send the agent console's `lock`: that runs
+`LockWorkStation`, which anybody holding the Windows password undoes at once, so
+against a thief it is theatre.
+
+Be clear with yourself about the ceiling. This ends the desktop session whenever
+the machine is online and reachable, which stops somebody who does not have the
+Windows password from using it. It does nothing to a machine kept offline, and
+it does not survive the agent being uninstalled, the disk being reimaged or the
+drive being moved to another chassis. It is a deterrent and a route home - the
+number on the screen is the part most likely to actually recover an instrument.
+Real protection against a determined thief is BitLocker, physical security and
+insurance; this is not a substitute for any of them.
+
+> Checking it worked: post a notice, then look at the machine's row on
+> `/remote`. It says either *On the machine since \<time\>* or exactly what the
+> engine refused with. `api/cron/notices` re-asserts hourly, so a machine that
+> was asleep picks it up on the next run rather than never.
+
 ## Troubleshooting
 
 These are the failures actually hit standing this up the first time, in the order
