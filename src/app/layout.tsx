@@ -16,7 +16,7 @@ import HeaderNav from "@/components/HeaderNav";
 import MobileNav from "@/components/MobileNav";
 import AccountMenu from "@/components/AccountMenu";
 import ViewSwitch from "@/components/ViewSwitch";
-import { mayChooseView } from "@/lib/viewMode";
+import { availableViews, mayChooseView } from "@/lib/viewMode";
 import { NavIcon, SearchIcon, MessagesIcon, InboxIcon } from "@/components/NavIcons";
 import ViewAsBar from "@/components/ViewAsBar";
 import { viewAsPeople } from "@/app/actions";
@@ -225,8 +225,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     viewAs={mayViewAs && !view.persona
                       ? <ViewAsBar orgs={orgOptions} people={peopleOptions} active={null} />
                       : undefined}
-                    viewSwitch={!isStaff && mayChooseView(facts.orgResells)
-                      ? <ViewSwitch mode={facts.resells ? "reseller" : "lab"} orgName={user.orgName || "Your company"} />
+                    /* Only for organization members: staff read the board by
+                       role, and a login with no organization has no landing
+                       of its own for the choice to change. */
+                    viewSwitch={!isStaff && facts.hasOrg && mayChooseView(facts.orgResells)
+                      ? <ViewSwitch mode={facts.view} modes={availableViews(facts.orgResells)}
+                          orgName={user.orgName || "Your company"} />
                       : undefined}
                   />
                 </span>

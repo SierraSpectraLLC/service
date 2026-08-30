@@ -425,7 +425,7 @@ describe("what is an alert on a reseller's landing, and what is not", () => {
        lib/viewMode. */
     expect(page).toMatch(/mode: asReseller \? "reseller" : "lab"/);
     expect(page).toMatch(
-      /resellerView\(\s*meRow\?\.viewMode \?\? "", startRow\?\.startView \?\? "", orgSelf\?\.resaleEnabled \?\? false\)/);
+      /viewModeFor\(meRow\?\.viewMode \?\? "", startRow\?\.startView \?\? "", orgSelf\?\.resaleEnabled \?\? false\)/);
     expect(page).toMatch(/if \(asReseller\) \{/);
   });
 
@@ -435,10 +435,12 @@ describe("what is an alert on a reseller's landing, and what is not", () => {
        rule, read by all of them. */
     for (const f of [
       // The shell reads it through lib/navData, which is the one place the
-      // nav's facts are gathered now.
+      // nav's facts are gathered now. The landing and the nav resolve the full
+      // three-way view (the board joined the two halves); /units only needs
+      // to know whether this reader is on the pipeline.
       "src/lib/navData.ts", "src/app/(dashboard)/page.tsx", "src/app/units/page.tsx",
     ]) {
-      expect(read(f), f).toMatch(/resellerView\(/);
+      expect(read(f), f).toMatch(/resellerView\(|viewModeFor\(/);
     }
     /* And nothing decides the SHAPE off the raw flag any more. Asserted as
        "every read is feeding one of the sanctioned readers" rather than as a
@@ -450,9 +452,9 @@ describe("what is an alert on a reseller's landing, and what is not", () => {
       page.slice(Math.max(0, (m.index ?? 0) - 220), (m.index ?? 0) + 40));
     expect(reads.length).toBeGreaterThan(0);
     for (const ctx of reads) {
-      // The view rule, which clamps it, or the offer of a second view, which
+      // The view rule, which clamps it, or the offer of other views, which
       // asks the same question - never a branch that picks a landing itself.
-      expect(/resellerView\(|mayChooseView\(|showShipping=/.test(ctx), ctx).toBe(true);
+      expect(/resellerView\(|viewModeFor\(|mayChooseView\(|availableViews\(|showShipping=/.test(ctx), ctx).toBe(true);
     }
     // And the one read OUTSIDE the view rule is still the company capability.
     expect(reads.filter((c) => /showShipping=/.test(c))).toHaveLength(1);

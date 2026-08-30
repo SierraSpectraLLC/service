@@ -97,7 +97,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
     ? await db.select({
         email: users.email, name: users.name, firstName: users.firstName, lastName: users.lastName,
         title: users.title, passwordHash: users.passwordHash, passwordTempUntil: users.passwordTempUntil,
-        lastSeenAt: users.lastSeenAt,
+        lastSeenAt: users.lastSeenAt, viewMode: users.viewMode,
       }).from(users).where(inArray(users.email, emails))
     : [];
   const accountOf = new Map(accountRows.map((a) => [a.email.toLowerCase(), a]));
@@ -247,6 +247,10 @@ export default async function OrgSettingsPage({ params, searchParams }: {
             canSeePayroll: r.canSeePayroll,
             canSeeMoney: r.canSeeMoney,
             startView: r.startView,
+            // Their own choice, which outranks the starting view - shown so
+            // an operator assigning views can see when one has stopped
+            // mattering. See lib/viewMode.
+            ownView: a?.viewMode ?? "",
             name: a ? [a.firstName, a.lastName].filter(Boolean).join(" ") || a.name || "" : "",
             title: a?.title ?? "",
             signedIn: !!a?.lastSeenAt,

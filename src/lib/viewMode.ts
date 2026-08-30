@@ -13,13 +13,20 @@
 // are in the wrong half of it, and there was no way to say so.
 //
 // So the org's flag becomes the DEFAULT rather than the answer, and a person
-// can say which half they work on. Nothing about permissions moves: both views
-// show the same systems to the same people with the same rights. This is which
+// can say which half they work on. Nothing about permissions moves: every view
+// shows the same systems to the same people with the same rights. This is which
 // question the page leads with, and that is a preference, not a privilege.
+//
+// A third shape, "board", joined the two halves: the operator's own working
+// table - the dashboard the shop opens every morning - offered to a client's
+// people over the card landing. Same rows, same tenancy scope, denser answer.
+// It is never a default: a company is a lab or a reseller, but the board is a
+// way of reading either, so it exists only as a per-person choice (their own,
+// or a starting view their operator set).
 //
 // Pure. The column is users.view_mode and the switch is components/ViewSwitch.
 
-export const VIEW_MODES = ["lab", "reseller"] as const;
+export const VIEW_MODES = ["lab", "board", "reseller"] as const;
 export type ViewMode = (typeof VIEW_MODES)[number];
 
 /**
@@ -38,13 +45,15 @@ export const isViewPref = (v: string): v is ViewPref =>
  * WHICH VIEWS THIS COMPANY HAS AT ALL.
  *
  * The equipment view is universal - every company that owns instruments has
- * instruments to keep running. The pipeline only exists for a company that
- * sells things, and a standard client must never land on one: an empty
- * pipeline is not a harmless extra screen, it is the app telling a lab it is
- * something it is not.
+ * instruments to keep running. So is the board: it is the same systems the
+ * card landing shows, on the operator's working table instead, and tenancy
+ * already decides which rows are on it. The pipeline only exists for a
+ * company that sells things, and a standard client must never land on one:
+ * an empty pipeline is not a harmless extra screen, it is the app telling a
+ * lab it is something it is not.
  */
 export function availableViews(orgResells: boolean): ViewMode[] {
-  return orgResells ? ["lab", "reseller"] : ["lab"];
+  return orgResells ? ["lab", "board", "reseller"] : ["lab", "board"];
 }
 
 export const viewAllowed = (mode: string, orgResells: boolean): boolean =>
@@ -78,6 +87,10 @@ export const resellerView = (
   own: string, assigned: string, orgResells: boolean,
 ): boolean => viewModeFor(own, assigned, orgResells) === "reseller";
 
+export const boardView = (
+  own: string, assigned: string, orgResells: boolean,
+): boolean => viewModeFor(own, assigned, orgResells) === "board";
+
 /**
  * What the switch calls each one, in the words of somebody choosing.
  *
@@ -88,21 +101,23 @@ export const resellerView = (
  */
 export const VIEW_LABEL: Record<ViewMode, string> = {
   lab: "Equipment",
+  board: "The board",
   reseller: "Sales pipeline",
 };
 
 export const VIEW_BLURB: Record<ViewMode, string> = {
   lab: "What is running, what is down, what is due",
+  board: "Every system on one table - stages, parts, tasks and whose move it is",
   reseller: "What is moving toward a sale, and what has stalled",
 };
 
 /**
  * Is there a second shape worth offering this person at all?
  *
- * Only where the company does both. A lab that has never sold anything has no
- * pipeline to switch to, and an empty one offered in a menu is a feature that
- * teaches somebody the app is not for them. The moment their org turns resale
- * on, everybody there gets the choice.
+ * Since the board became universal every organization has at least two, so
+ * today this is always true - but the rule stays "more than one available
+ * view" rather than a literal, because the menu must keep tracking
+ * availableViews if either ever changes shape again.
  */
 export const mayChooseView = (orgResells: boolean): boolean =>
   availableViews(orgResells).length > 1;

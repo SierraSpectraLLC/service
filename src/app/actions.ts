@@ -10693,9 +10693,13 @@ export async function setStartView(id: number, mode: string): Promise<{ error?: 
   await db.update(clientAllowlist).set({ startView: mode }).where(eq(clientAllowlist.id, id));
   await audit({
     actor: u.email, entityType: "settings", entityId: row.entry,
-    action: mode
-      ? `${row.entry} now starts in the ${VIEW_LABEL[mode as ViewMode].toLowerCase()} view`
-      : `${row.entry} now starts in their organization's default view`,
+    action: mode === "board"
+      // "in the the board view" is what the generic sentence makes of this
+      // label; the log is read out loud, so it gets its own phrasing.
+      ? `${row.entry} now starts on the board`
+      : mode
+        ? `${row.entry} now starts in the ${VIEW_LABEL[mode as ViewMode].toLowerCase()} view`
+        : `${row.entry} now starts in their organization's default view`,
     field: "start_view", oldValue: row.startView, newValue: mode,
   });
   revalidatePath("/", "layout");

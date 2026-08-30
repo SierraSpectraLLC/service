@@ -2,7 +2,7 @@
 
 import { useOptimistic, useTransition } from "react";
 import { setMyViewMode } from "@/app/actions";
-import { VIEW_BLURB, VIEW_LABEL, VIEW_MODES, type ViewMode } from "@/lib/viewMode";
+import { VIEW_BLURB, VIEW_LABEL, type ViewMode } from "@/lib/viewMode";
 
 /**
  * Which half of the app I work in, on a company that does both.
@@ -16,9 +16,11 @@ import { VIEW_BLURB, VIEW_LABEL, VIEW_MODES, type ViewMode } from "@/lib/viewMod
  * opening this menu is usually here because the app is showing them the wrong
  * thing, and the first useful sentence is which thing it thinks they want.
  */
-export default function ViewSwitch({ mode, orgName }: {
+export default function ViewSwitch({ mode, modes, orgName }: {
   /** The mode in force right now, already resolved from the org's default. */
   mode: ViewMode;
+  /** The views this person's company has at all. See lib/viewMode.availableViews. */
+  modes: ViewMode[];
   orgName: string;
 }) {
   const [pending, start] = useTransition();
@@ -28,10 +30,10 @@ export default function ViewSwitch({ mode, orgName }: {
     <div className="menu-sub" onClick={(e) => e.stopPropagation()}>
       <div className="eyebrow" style={{ marginBottom: 4 }}>Your view</div>
       <div className="mut t-meta" style={{ marginBottom: 6 }}>
-        {orgName} does both. Pick the half you work in - it changes what these
-        pages lead with, not what you can see.
+        Pick the one you work from - it changes what these pages lead with,
+        not what you can see.
       </div>
-      {VIEW_MODES.map((m) => (
+      {modes.map((m) => (
         <button
           key={m}
           type="button"

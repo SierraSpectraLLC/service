@@ -64,14 +64,11 @@ describe("a choice that overrides it", () => {
 });
 
 describe("who is offered the choice", () => {
-  it("offers it where the company does both", () => {
+  it("offers it to everybody, now that the board is universal", () => {
+    // Every organization has at least the card landing and the board, so
+    // there is always a real choice to teach.
     expect(mayChooseView(true)).toBe(true);
-  });
-
-  it("does not offer a pipeline to a company that has never sold anything", () => {
-    // An empty second view in a menu is a feature that teaches somebody the
-    // app is not for them.
-    expect(mayChooseView(false)).toBe(false);
+    expect(mayChooseView(false)).toBe(true);
   });
 });
 
@@ -80,6 +77,7 @@ describe("what it is called", () => {
     // "lab mode" and "reseller mode" are what the app calls its own branches.
     // A COO is picking which half of the company they work in.
     expect(VIEW_LABEL.lab).toBe("Equipment");
+    expect(VIEW_LABEL.board).toBe("The board");
     expect(VIEW_LABEL.reseller).toBe("Sales pipeline");
     for (const m of VIEW_MODES) expect(VIEW_BLURB[m], m).toBeTruthy();
   });
@@ -116,9 +114,9 @@ describe("a starting view the operator set", () => {
 });
 
 describe("a standard client can never land on a reseller screen", () => {
-  it("has only the one view to give", () => {
-    expect(availableViews(false)).toEqual(["lab"]);
-    expect(availableViews(true)).toEqual(["lab", "reseller"]);
+  it("has no pipeline to give", () => {
+    expect(availableViews(false)).toEqual(["lab", "board"]);
+    expect(availableViews(true)).toEqual(["lab", "board", "reseller"]);
     expect(viewAllowed("reseller", false)).toBe(false);
     expect(viewAllowed("lab", false)).toBe(true);
   });
@@ -139,7 +137,44 @@ describe("a standard client can never land on a reseller screen", () => {
     expect(resellerView("reseller", "reseller", false)).toBe(false);
   });
 
-  it("offers a lab no second view to switch to", () => {
-    expect(mayChooseView(false)).toBe(false);
+  it("still offers a lab the board", () => {
+    // The clamp is about the view the company lacks, never about choice
+    // itself: the board is the same scoped rows on a denser table, and every
+    // company has it.
+    expect(mayChooseView(false)).toBe(true);
+    expect(viewAllowed("board", false)).toBe(true);
+  });
+});
+
+describe("the board, for anybody", () => {
+  it("is a choice at a lab and at a reseller alike", () => {
+    expect(viewModeFor("board", "", false)).toBe("board");
+    expect(viewModeFor("board", "", true)).toBe("board");
+  });
+
+  it("can be where the operator starts somebody", () => {
+    // The point of the feature: a client who should open on the operator's
+    // own table does, before they ever find a menu.
+    expect(viewModeFor("", "board", false)).toBe("board");
+    expect(viewModeFor("", "board", true)).toBe("board");
+  });
+
+  it("is NEVER a default", () => {
+    // A company is a lab or a reseller; the board is a way of reading either.
+    // Nobody lands on it without somebody - themselves or their operator -
+    // having chosen it.
+    expect(viewModeFor("", "", false)).toBe("lab");
+    expect(viewModeFor("", "", true)).toBe("reseller");
+  });
+
+  it("loses to the person's own choice like any starting view", () => {
+    expect(viewModeFor("lab", "board", false)).toBe("lab");
+    expect(viewModeFor("board", "lab", false)).toBe("board");
+  });
+
+  it("does not read as a reseller anywhere", () => {
+    // The nav asks resellerView to pick its shape; a client on the board
+    // still gets the equipment nav, not the pipeline's.
+    expect(resellerView("board", "", true)).toBe(false);
   });
 });

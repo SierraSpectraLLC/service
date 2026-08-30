@@ -34,7 +34,7 @@ import { PageHead } from "@/components/ui";
 import ClientCoverage from "@/components/ClientCoverage";
 import MoneyCard from "@/components/MoneyCard";
 import { seesBooksFor } from "@/lib/financeData";
-import { mayChooseView, resellerView } from "@/lib/viewMode";
+import { availableViews, mayChooseView, viewModeFor } from "@/lib/viewMode";
 import ViewTour from "@/components/ViewTour";
 
 export const dynamic = "force-dynamic";
@@ -109,7 +109,12 @@ export default async function Home({ searchParams }: {
     db.select().from(instruments).where(and(eq(instruments.archived, false), mine(instruments.id))).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(parts).where(mine(parts.instrumentId)),
     db.select().from(instrumentGases).where(mine(instrumentGases.instrumentId)),
-    db.select().from(auditLog).where(mine(auditLog.instrumentId)).orderBy(desc(auditLog.createdAt)).limit(200),
+    // The activity log is the shop's working memory, and it is deliberately
+    // not a client panel (see lib/clientView). Staff only, for the same reason
+    // - and a client page load stops paying for 200 rows it never showed.
+    user.role === "owner" || user.role === "staff"
+      ? db.select().from(auditLog).where(mine(auditLog.instrumentId)).orderBy(desc(auditLog.createdAt)).limit(200)
+      : Promise.resolve([]),
     // Sheet parity is an internal reconciliation, and this is the one query on
     // the page with neither mine() nor a tenant filter. Its result was thrown
     // away for non-staff at the point of use, which meant every client page
@@ -296,11 +301,42 @@ export default async function Home({ searchParams }: {
     };
   });
 
+  /* ── Which shape this client reads ──────────────────────────────────────
+     Resolved BEFORE the landing is built, because "board" opts out of the
+     landing entirely: the person falls through to the operator's own table
+     below, on exactly the rows tenancy already scoped for them. Three answers,
+     closest first - their own choice, the starting view their operator set,
+     their company's default - same rule the nav reads. See lib/viewMode. */
+  const orgSelf = user.orgId !== null ? orgNames.find((o) => o.id === user.orgId) : undefined;
+  const [meRow] = !isStaff && user.orgId !== null
+    ? await db.select({ viewMode: users.viewMode, viewTourAt: users.viewTourAt })
+        .from(users).where(eq(users.email, user.email.toLowerCase())).catch(() => [])
+    : [];
+  const [startRow] = !isStaff && user.orgId !== null
+    ? await db.select({ startView: clientAllowlist.startView })
+        .from(clientAllowlist).where(eq(clientAllowlist.entry, user.email.toLowerCase())).catch(() => [])
+    : [];
+  const clientMode = !isStaff && user.orgId !== null
+    ? viewModeFor(meRow?.viewMode ?? "", startRow?.startView ?? "", orgSelf?.resaleEnabled ?? false)
+    : null;
+  /* Said once, on the page they land on: which view they are in and where
+     the switch is. The account menu is the right home for a personal setting
+     and the wrong place to discover one - somebody started in a view by
+     their operator has no reason to suspect there is another. */
+  const tour = clientMode !== null && mayChooseView(orgSelf?.resaleEnabled ?? false) && !meRow?.viewTourAt
+    ? <ViewTour
+        mode={clientMode}
+        others={availableViews(orgSelf?.resaleEnabled ?? false).filter((m) => m !== clientMode)}
+        assigned={(startRow?.startView ?? "") !== "" && (meRow?.viewMode ?? "") === ""} />
+    : null;
+
   /* ── The client's own product ──────────────────────────────────────────
      Everything below runs only for a non-staff viewer, and only for one who
-     belongs to an organization. Staff pay nothing for it; a client stops
-     paying for the parts of the board that were never theirs. */
-  if (!isStaff && user.orgId !== null) {
+     belongs to an organization - and not for one reading the board, whose
+     page is the shared table at the bottom of this file. Staff pay nothing
+     for it; a client stops paying for the parts of the board that were never
+     theirs. */
+  if (!isStaff && user.orgId !== null && clientMode !== "board") {
     const pmDueRows = rows.length
       ? await db.select({ instrumentId: pmSchedules.instrumentId, nextDue: pmSchedules.nextDue })
           .from(pmSchedules)
@@ -432,29 +468,10 @@ export default async function Home({ searchParams }: {
       };
     });
 
-    const orgSelf = orgNames.find((o) => o.id === user.orgId);
-    /* WHICH HALF OF THE APP THIS PERSON WORKS IN. The org's resale flag is the
-       default, not the answer: a COO put in charge of the equipment at a
-       reselling company opens a pipeline of stock when what they came for is
-       whether the instruments are running. Same rule the nav reads, so a page
-       and the nav above it cannot disagree. See lib/viewMode. */
-    const [meRow] = await db.select({ viewMode: users.viewMode, viewTourAt: users.viewTourAt })
-      .from(users).where(eq(users.email, user.email.toLowerCase())).catch(() => []);
-    const [startRow] = await db.select({ startView: clientAllowlist.startView })
-      .from(clientAllowlist).where(eq(clientAllowlist.entry, user.email.toLowerCase())).catch(() => []);
-    const asReseller = resellerView(
-      meRow?.viewMode ?? "", startRow?.startView ?? "", orgSelf?.resaleEnabled ?? false);
-    /* Said once, on the page they land on: which view they are in and where
-       the switch is. The account menu is the right home for a personal setting
-       and the wrong place to discover one - somebody started in a view by
-       their operator has no reason to suspect there is another. Only where
-       there IS another; teaching a control somebody does not have is noise. */
-    const tour = mayChooseView(orgSelf?.resaleEnabled ?? false) && !meRow?.viewTourAt
-      ? <ViewTour
-          mode={asReseller ? "reseller" : "lab"}
-          other={asReseller ? "lab" : "reseller"}
-          assigned={(startRow?.startView ?? "") !== "" && (meRow?.viewMode ?? "") === ""} />
-      : null;
+    /* WHICH HALF OF THE APP THIS PERSON WORKS IN was resolved above the
+       branch - the same three answers the nav reads, so a page and the nav
+       above it cannot disagree. See lib/viewMode. */
+    const asReseller = clientMode === "reseller";
 
     const todos = await clientTodos({
       orgId: user.orgId, today,
@@ -637,6 +654,7 @@ export default async function Home({ searchParams }: {
   // for reading news.
   return (
     <>
+      {tour}
       {/* Whose move is it, in money - above the board, because an unbilled
           closed job is work that is finished and still costing. The owner's,
           though: three lines naming what the shop is owed and by whom are the

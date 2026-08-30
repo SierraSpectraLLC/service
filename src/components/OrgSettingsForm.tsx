@@ -36,6 +36,8 @@ type Entry = {
   canSeePayroll?: boolean;
   canSeeMoney?: boolean;
   startView?: string;
+  /** The view they picked for themselves, which outranks startView. "" = none. */
+  ownView?: string;
   /** Whether they have ever actually been here. */
   signedIn?: boolean;
   /** "their own" | "expired" | "6d left" | "" - see lib/tempPassword. */
@@ -411,12 +413,12 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
               ) : r.canSeeMoney !== false ? (
                 <span className="pill neutral">quotes &amp; invoices</span>
               ) : null}
-              {/* WHERE THEY START. Only where this organization has a second
-                  view to start them in - a lab has one shape, so there is
-                  nothing here to choose and a picker would be a question with
-                  one answer. A starting point only: the moment they pick for
-                  themselves, theirs wins. See lib/viewMode. */}
-              {isOwner && resaleOn && !domain && (
+              {/* WHERE THEY START. Every organization now has at least two
+                  views - the card landing and the board - so the picker is a
+                  real question for everybody; the pipeline joins the list only
+                  where the company sells. A starting point only: the moment
+                  they pick for themselves, theirs wins. See lib/viewMode. */}
+              {isOwner && !domain && (
                 <label className="t-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontWeight: 400, color: "var(--slate)", textTransform: "none", letterSpacing: 0 }}
                   title="Which view this person opens the app in, until they choose for themselves">
                   starts in
@@ -430,8 +432,19 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
                     })}>
                     <option value="">their company&apos;s default</option>
                     <option value="lab">Equipment</option>
-                    <option value="reseller">Sales pipeline</option>
+                    <option value="board">The board</option>
+                    {resaleOn && <option value="reseller">Sales pipeline</option>}
                   </select>
+                  {/* A starting point loses to what the person chose for
+                      themselves - said HERE, or an operator changes a setting
+                      and watches nothing happen. */}
+                  {!!r.ownView && (
+                    <span className="mut" title="They picked a view for themselves, and their own choice wins over the starting view">
+                      · they chose {r.ownView === "lab" ? "Equipment"
+                        : r.ownView === "board" ? "the board"
+                          : "the sales pipeline"}
+                    </span>
+                  )}
                 </label>
               )}
               {isStaff && !domain && (
