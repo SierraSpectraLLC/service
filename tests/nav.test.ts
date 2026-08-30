@@ -156,6 +156,27 @@ describe("the rules every tree obeys", () => {
     });
   }
 
+  it("keeps the calendar and Documents on a client's tab bar, whatever else gives way", () => {
+    /*
+     * The bar holds five and a lab now wants seven, so two give way - in a
+     * stated order rather than by whatever slice(0, 5) happened to cut off,
+     * which used to shed Documents the moment a seventh door appeared.
+     *
+     * What must survive: Documents, the second most used thing a client comes
+     * here for, and the calendar, which answers the first - when is somebody
+     * coming. What gives way is a page you open deliberately (/owner) and a
+     * place you go to shop (/store, /listings); both stay one tap away in the
+     * header and the drawer.
+     */
+    for (const ctx of [CLIENT_LAB, CLIENT_RESELLER]) {
+      const hrefs = buildNav(ctx).tabs.map((t) => t.href);
+      expect(hrefs.length).toBeLessThanOrEqual(5);
+      expect(hrefs).toContain("/calendar");
+      expect(hrefs).toContain("/documents");
+      expect(hrefs).not.toContain("/owner");
+    }
+  });
+
   it("gives every signed-in reader an account section", () => {
     for (const [who, ctx] of PERSONAS) {
       const account = buildNav(ctx).sections.find((s) => s.key === "account");

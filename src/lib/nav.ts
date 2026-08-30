@@ -121,6 +121,7 @@ export const LABEL = {
   inbox: "Inbox",
   documents: "Documents",
   library: "Library",
+  calendar: "Calendar",
   money: "Financial",
   ops: "Operations",
   account: "Account",
@@ -167,6 +168,16 @@ function primaryOf(ctx: NavContext): NavLeaf[] {
   return [
     { href: "/", label: ctx.resells ? "Your pipeline" : "Your lab" },
     { href: "/work", label: "Requests" },
+    /* When somebody is coming, what is coming due on their machines, and
+       anything they have told us about their own year. The same room the shop
+       reads, scoped to them - one destination and one word, which is the rule
+       this file is built on; app/calendar branches the reading.
+       A PRIMARY row rather than a room in the equipment section, where it
+       first landed: a calendar is not a thing they own, and "when is somebody
+       coming" is close to the top of why a lab opens this portal at all. It
+       sits beside Requests because it is the same subject - what we have asked
+       for, and when it is happening. */
+    { href: "/calendar", label: LABEL.calendar },
     /* Quotes and invoices, named for what the client does with them rather
        than for what the shop filed. */
     ...(ctx.isClientOrg && ctx.seesOwnMoney ? [{ href: "/orders", label: "Approvals" }] : []),
@@ -204,19 +215,31 @@ function tabsOf(ctx: NavContext): TabItem[] {
   }
   /* A client's tab bar IS their primary row - and it agrees with the header
      word for word, because both come from primaryOf.
-     A lab has six doors and a bar holds five, so one gives way: /owner, the
-     coverage-and-spend page. It is the one a person opens deliberately, when
-     they are asking what this is costing, rather than the one they reach for
-     with a thumb - and it stays one tap away in the header and the drawer.
-     Documents is not droppable: it is the second most used thing a client
-     comes here for. */
+     A lab has seven doors and a bar holds five, so two give way, in a stated
+     order rather than by whatever slice(0, 5) happens to cut off. Each one
+     dropped stays a single tap away in the header and the drawer:
+       /owner, the coverage-and-spend page, which a person opens deliberately
+         when they are asking what this is costing rather than reaching for
+         with a thumb;
+       then the parts store - /store for a lab, /listings for a reseller -
+         which is a place you go to shop, not a place you check.
+     Documents is not droppable and neither is the calendar: one is the second
+     most used thing a client comes here for, and the other answers "when is
+     somebody coming", which is the first. Slicing blind used to drop
+     Documents the moment a seventh door appeared. */
   const primary = primaryOf(ctx);
   const icon = (href: string): TabKey =>
     href === "/" ? "home" : href === "/work" ? "work"
       : href === "/orders" ? "approvals"
         : href === "/store" || href === "/listings" ? "parts"
-          : href === "/owner" ? "assets" : "library";
-  const forBar = primary.length > 5 ? primary.filter((l) => l.href !== "/owner") : primary;
+          : href === "/calendar" ? "work"
+            : href === "/owner" ? "assets" : "library";
+  const GIVES_WAY = ["/owner", "/store", "/listings"];
+  let forBar = primary;
+  for (const href of GIVES_WAY) {
+    if (forBar.length <= 5) break;
+    forBar = forBar.filter((l) => l.href !== href);
+  }
   return forBar.slice(0, 5).map((l) => ({ href: l.href, label: l.label, icon: icon(l.href) }));
 }
 
@@ -248,7 +271,7 @@ function staffSections(ctx: NavContext): NavSection[] {
       ...(ctx.modules.eod ? [{ href: "/eod", label: "EOD update" }] : []),
       /* What is happening WHEN, across everything - the field crew's morning
          question, so it leads the group. */
-      { href: "/calendar", label: "Calendar" },
+      { href: "/calendar", label: LABEL.calendar },
       { href: "/maintenance", label: "Maintenance" },
       /* The reseller pipeline: systems moving Receive → Commission. Something
          the shop DOES, so it sits with the other doing. */

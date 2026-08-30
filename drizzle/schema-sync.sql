@@ -4166,3 +4166,18 @@ ALTER TABLE "stock_items" ADD COLUMN IF NOT EXISTS "kind" text NOT NULL DEFAULT 
 -- Superseded by stock_items_room_key above.
 DROP INDEX IF EXISTS "stock_items_room_pn";
 ALTER TABLE "stockrooms" ADD COLUMN IF NOT EXISTS "keeper_email" text NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS "calendar_notes" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "org_id" integer REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "on_date" text NOT NULL,
+  "ends_on" text NOT NULL DEFAULT '',
+  "title" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_by_name" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "calendar_notes_day_idx" ON "calendar_notes" ("on_date");
+CREATE INDEX IF NOT EXISTS "calendar_notes_org_idx" ON "calendar_notes" ("org_id");

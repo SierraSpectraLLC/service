@@ -1,4 +1,5 @@
 import { anticipated, type RecurringTerms } from "@/lib/recurring";
+import { noteDays, noteLabel } from "@/lib/calendarNotes";
 
 /**
  * The company calendar, derived - never stored.
@@ -9,9 +10,15 @@ import { anticipated, type RecurringTerms } from "@/lib/recurring";
  * about to raise itself. The calendar is one more READER of those facts, so
  * it can never disagree with the pages that own them - and there is no event
  * table to drift out of sync.
+ *
+ * ONE exception, and it is deliberate: a "note" is a dated fact with no other
+ * row to live on - a lab shut for an audit week, a delivery expected Tuesday.
+ * It is stored, because there is nothing to derive it from. See
+ * db/schema.calendarNotes.
  */
 
-export type CalKind = "visit" | "pm" | "task" | "quote" | "invoice" | "renewal" | "retainer";
+export type CalKind =
+  | "visit" | "pm" | "task" | "quote" | "invoice" | "renewal" | "retainer" | "note";
 
 export type CalEvent = {
   date: string;             // YYYY-MM-DD
@@ -30,6 +37,7 @@ export const KIND_LABEL: Record<CalKind, string> = {
   invoice: "Invoices due",
   renewal: "Contracts ending",
   retainer: "Retainer cycles",
+  note: "Notes",
 };
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -82,6 +90,12 @@ export type CalendarInputs = {
   quotes: { id: number; number: string; title: string; status: string; expiresOn: string }[];
   invoices: { id: number; number: string; status: string; dueOn: string; orgName: string }[];
   agreements: ({ id: number; number: string; title: string; orgId: number; orgName: string } & RecurringTerms)[];
+  /** Written by hand rather than derived - see the header. */
+  notes?: {
+    id: number; onDate: string; endsOn: string; title: string;
+    /** Whose note, for the shop's own calendar - "" for its own. */
+    orgName: string;
+  }[];
 };
 
 /**
@@ -188,6 +202,21 @@ export function assembleEvents(inp: CalendarInputs, from: string, to: string, to
       out.push({
         date: c.on, kind: "retainer", href: "/money/contracts",
         label: `${label} cycle${a.orgName ? ` - ${a.orgName}` : ""}`, tone: "accent",
+      });
+    }
+  }
+
+  /*
+   * The written notes, one event per day covered. Not late-toned however old
+   * they are: a note is a statement about a day rather than something owed, so
+   * "the site was shut last Tuesday" is not overdue - it just happened.
+   */
+  for (const nt of inp.notes ?? []) {
+    for (const day of noteDays(nt, from, to)) {
+      out.push({
+        date: day, kind: "note", href: `/calendar?m=${day.slice(0, 7)}`,
+        label: `${noteLabel(nt, day)}${nt.orgName ? ` - ${nt.orgName}` : ""}`,
+        tone: "neutral",
       });
     }
   }

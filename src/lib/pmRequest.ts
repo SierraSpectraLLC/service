@@ -11,6 +11,26 @@
 // must not be able to move a contract's maintenance calendar; pulling the real
 // schedule forward stays an engineer's press.
 import { addDays } from "@/lib/pm";
+import { isDay } from "@/lib/calendarNotes";
+
+/**
+ * What a client is asking somebody to come out and DO.
+ *
+ * Both are planned work with a date on them - neither is an emergency, which
+ * is what the severity choices on a fault report are for. They differ in one
+ * consequence: asking for maintenance says upkeep is owed, and the system's
+ * board should say so; asking for service work says nothing about the
+ * maintenance calendar at all.
+ */
+export const VISIT_KINDS = [
+  { key: "pm", label: "Maintenance", hint: "The planned service, nothing is wrong." },
+  { key: "service", label: "Service work", hint: "Something to do that is not upkeep." },
+] as const;
+
+export type VisitKind = (typeof VISIT_KINDS)[number]["key"];
+
+/** An unrecognized kind is maintenance - the ask this flow was built for. */
+export const visitKind = (k: string): VisitKind => (k === "service" ? "service" : "pm");
 
 export const PM_WINDOWS = [
   { key: "now", label: "As soon as you can", days: 0 },
@@ -29,13 +49,36 @@ export function pmWindow(key: string): PmWindow {
   return PM_WINDOWS.find((w) => w.key === key) ?? PM_WINDOWS[1];
 }
 
-/** When the work the request files is due. */
-export const pmRequestDue = (today: string, key: string) => addDays(today, pmWindow(key).days);
+/**
+ * When the work the request files is due.
+ *
+ * A DAY THEY PICKED wins over the horizon, which is the point of letting them
+ * pick one: "the 14th, we have the bay free" is a better thing for the shop to
+ * schedule around than "within a month". A day already behind us is not
+ * honoured - it would file work that is late the moment it exists - and falls
+ * back to the horizon, which is the honest reading of a stale form.
+ */
+export function pmRequestDue(today: string, key: string, preferredOn?: string): string {
+  const want = (preferredOn ?? "").trim();
+  if (isDay(want) && want >= today) return want;
+  return addDays(today, pmWindow(key).days);
+}
+
+/**
+ * What was asked for, in the words that go on the record. The picked day when
+ * there is one, because that is the ask - the horizon it fell inside is not.
+ */
+export function askLabel(key: string, preferredOn?: string, today = ""): string {
+  const want = (preferredOn ?? "").trim();
+  if (isDay(want) && (!today || want >= today)) return `asked for ${want}`;
+  return pmWindow(key).label.toLowerCase();
+}
 
 /** The title staff read in a task list. The note leads, because it's the ask. */
-export function pmRequestTitle(note: string): string {
+export function pmRequestTitle(note: string, kind: string = "pm"): string {
+  const what = visitKind(kind) === "service" ? "Service" : "Maintenance";
   const first = note.trim().split("\n")[0].trim();
-  return first ? `Maintenance requested: ${first.slice(0, 120)}` : "Maintenance requested";
+  return first ? `${what} requested: ${first.slice(0, 120)}` : `${what} requested`;
 }
 
 export type SchedRow = { title: string; nextDue: string; paused: boolean };

@@ -67,6 +67,7 @@ exports[`buildNav, per persona > builds one tree for a client lab 1`] = `
   "primary": [
     "Your lab → /",
     "Requests → /work",
+    "Calendar → /calendar",
     "Approvals → /orders",
     "Your account → /owner",
     "Parts → /store",
@@ -93,8 +94,8 @@ exports[`buildNav, per persona > builds one tree for a client lab 1`] = `
   "tabs": [
     "Your lab → /",
     "Requests → /work",
+    "Calendar → /calendar",
     "Approvals → /orders",
-    "Parts → /store",
     "Documents → /documents",
   ],
 }
@@ -105,6 +106,7 @@ exports[`buildNav, per persona > builds one tree for a client reseller 1`] = `
   "primary": [
     "Your pipeline → /",
     "Requests → /work",
+    "Calendar → /calendar",
     "Approvals → /orders",
     "Listings → /listings",
     "Documents → /documents",
@@ -129,8 +131,8 @@ exports[`buildNav, per persona > builds one tree for a client reseller 1`] = `
   "tabs": [
     "Your pipeline → /",
     "Requests → /work",
+    "Calendar → /calendar",
     "Approvals → /orders",
-    "Listings → /listings",
     "Documents → /documents",
   ],
 }

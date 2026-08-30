@@ -16,7 +16,7 @@ import {
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
   awards, shareLinkSystems, providerProfiles, providerLinks, clientShares, referralFees,
-  leads, leadOffers,
+  leads, leadOffers, calendarNotes,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, stipends, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
@@ -212,7 +212,7 @@ import {
 } from "@/lib/lead";
 import { leadWithOffers, wasOffered } from "@/lib/leadData";
 import { normalizePhone } from "@/lib/sms";
-import { isPlatformStaff, isStaffRole, mayAdminOrg, mayBillOrg, mayCreateOrgs } from "@/lib/tenants";
+import { isPlatformStaff, isStaffRole, mayAdminOrg, mayBillOrg, mayCreateOrgs, tenantOf } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
 import { signInIdentity } from "@/auth";
 import { maySeeTrail, safeQuery, trailAdmins } from "@/lib/trail";
@@ -226,7 +226,8 @@ import { PLACES_DRIVE, type CloudItem } from "@/lib/cloudItems";
 import { parseFrame, serializeFrame } from "@/lib/photoFrame";
 import { isPhotoFile, photoRemovalNote, sharedCover } from "@/lib/photos";
 import { coverOf, photoRecord, photoTwin, type PhotoRecord } from "@/lib/photoPair";
-import { pmRequestDue, pmRequestTitle, pmWindow, scheduleLine } from "@/lib/pmRequest";
+import { askLabel, pmRequestDue, pmRequestTitle, pmWindow, scheduleLine, visitKind } from "@/lib/pmRequest";
+import { checkNote } from "@/lib/calendarNotes";
 import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/houseRole";
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, scopeMatches, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
@@ -6973,7 +6974,13 @@ export async function reportIssue(instrumentId: number, data: {
  * Asking twice doesn't file twice: the second ask lands on the discussion of the
  * open one, which is where a "any update?" belongs.
  */
-export async function requestPm(instrumentId: number, data: { window: string; note: string }):
+export async function requestPm(instrumentId: number, data: {
+  window: string; note: string;
+  /** A day they picked off the calendar. Beats the horizon - see pmRequestDue. */
+  preferredOn?: string;
+  /** pm | service. Maintenance says upkeep is owed; service work does not. */
+  kind?: string;
+}):
 Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; workOrderId?: number }> {
   const u = await requireUser();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
@@ -6986,6 +6993,11 @@ Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; w
   const w = pmWindow(data.window);
   const note = data.note.trim().slice(0, 2000);
   const today = shopToday();
+  const kind = visitKind(data.kind ?? "pm");
+  /* What they asked for, in one phrase, used in every sentence this writes -
+     so the task, the post, the audit line and the email cannot describe the
+     same request three different ways. */
+  const asked = askLabel(data.window, data.preferredOn, today);
   const orgName = u.orgId === null ? (await getBrand()).operatorName : u.orgName || "a client";
   const who = u.name || u.email;
 
@@ -7000,7 +7012,8 @@ Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; w
     .where(and(eq(tasks.instrumentId, instrumentId), eq(tasks.origin, "pm_request"), ne(tasks.state, "Done")))
     .limit(1);
   if (openReq) {
-    await post([`Maintenance requested again - ${w.label.toLowerCase()}.`, note].filter(Boolean).join("\n\n"));
+    await post([`${kind === "service" ? "Service" : "Maintenance"} requested again - ${asked}.`, note]
+      .filter(Boolean).join("\n\n"));
     await audit({
       actor: u.email, instrumentId, entityType: "task", entityId: openReq.id,
       action: `${orgName} followed up on the maintenance request for ${inst.externalId} (open, due ${openReq.dueDate})`,
@@ -7019,14 +7032,17 @@ Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; w
       : eq(pmSchedules.instrumentId, instrumentId));
   const calendar = scheduleLine(scheds, today);
 
-  // Upkeep is owed, and the dashboard should say so - without disturbing where
-  // the system is in its build.
-  if (!inst.stages.includes("Maintenance due")) {
+  /* Upkeep is owed, and the dashboard should say so - without disturbing where
+     the system is in its build. Only for MAINTENANCE: service work is a job
+     somebody wants doing, and marking the machine as owing a PM because a
+     client asked for a bracket to be moved would be a false reading of the
+     board that only an engineer could clear. */
+  if (kind === "pm" && !inst.stages.includes("Maintenance due")) {
     await db.update(instruments).set({ stages: [...inst.stages, "Maintenance due"] }).where(eq(instruments.id, instrumentId));
     await db.insert(stageEvents).values({ instrumentId, stage: "Maintenance due", kind: "added" });
   }
 
-  const dueDate = pmRequestDue(today, w.key);
+  const dueDate = pmRequestDue(today, w.key, data.preferredOn);
   // Planned, not an emergency - the fourth thing a work order can be. It gets a
   // number and a close-out like any other job, because "did the PM we asked for
   // in March ever happen" is exactly the question a work order exists to answer.
@@ -7035,7 +7051,7 @@ Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; w
     instrumentId, assetId: null, tenantOrgId: inst.tenantOrgId,
     orgId: u.orgId ?? inst.ownerOrgId,
     requestedBy: who, requestedByEmail: u.email,
-    title: pmRequestTitle(note), body: [note, calendar].filter(Boolean).join("\n\n"),
+    title: pmRequestTitle(note, kind), body: [note, calendar].filter(Boolean).join("\n\n"),
     severity: "Planned", origin: "pm_request", assignee: "",
     externalId: inst.externalId,
   });
@@ -7043,26 +7059,124 @@ Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; w
   const [task] = await db.insert(tasks).values({
     tenantOrgId: inst.tenantOrgId,
     instrumentId, assetId: null,
-    title: pmRequestTitle(note),
-    body: [note, `Requested by ${who} at ${orgName} - ${w.label.toLowerCase()}.`, calendar].filter(Boolean).join("\n\n"),
+    title: pmRequestTitle(note, kind),
+    body: [note, `Requested by ${who} at ${orgName} - ${asked}.`, calendar].filter(Boolean).join("\n\n"),
     dueDate, origin: "pm_request", workOrderId: wo.id,
   }).returning();
 
-  await post([`${wo.number} · Maintenance requested - ${w.label.toLowerCase()}.`, note].filter(Boolean).join("\n\n"));
-  await handOffForClientAsk(inst, `maintenance requested: ${w.label.toLowerCase()}`, u.email);
+  const what = kind === "service" ? "Service" : "Maintenance";
+  await post([`${wo.number} · ${what} requested - ${asked}.`, note].filter(Boolean).join("\n\n"));
+  await handOffForClientAsk(inst, `${what.toLowerCase()} requested: ${asked}`, u.email);
   await audit({
     actor: u.email, instrumentId, entityType: "task", entityId: task.id,
-    action: `${orgName} asked for maintenance on ${inst.externalId} as ${wo.number} - ${w.label.toLowerCase()}, due ${dueDate}`,
+    action: `${orgName} asked for ${what.toLowerCase()} on ${inst.externalId} as ${wo.number} - ${asked}, due ${dueDate}`,
   });
   await notifyPmRequested({
     to: await houseEmails(inst.tenantOrgId), externalId: inst.externalId, instrumentId, orgName,
-    windowLabel: w.label, note, calendar, requester: who, dueDate,
+    windowLabel: asked, note, calendar, requester: who, dueDate,
   });
 
   rev(instrumentId);
   revalidatePath("/maintenance");
   revalidatePath("/work");
+  revalidatePath("/calendar");
   return { taskId: task.id, number: wo.number, workOrderId: wo.id };
+}
+
+// ── Calendar notes ──────────────────────────────────────────────────────────
+
+/**
+ * Whose calendar a note belongs on, and whether this reader may write there.
+ *
+ * A client writes on their OWN company's calendar and nowhere else - which is
+ * also the only one they can read, so there is nothing to choose. Staff write
+ * on the shop's own (orgId null) or on a client's, because "their site is shut
+ * that week" is as often something the shop was told on the phone as something
+ * the client typed.
+ *
+ * The org is resolved rather than trusted: an id off the wire that is not in
+ * this workspace is refused, which is the same wall every other org-bearing
+ * write in this file puts up.
+ */
+async function noteOrgFor(
+  u: SessionUser, want: number | null | undefined,
+): Promise<{ orgId: number | null; tenantOrgId: number | null } | { error: string }> {
+  const staff = isStaffRole(u.role);
+  if (!staff) {
+    // Not a choice for them: their own company or nothing.
+    if (u.orgId === null) return { error: "Not found" };
+    const [own] = await db.select().from(orgs).where(eq(orgs.id, u.orgId));
+    if (!own) return { error: "Not found" };
+    return { orgId: own.id, tenantOrgId: tenantOf(own) };
+  }
+  const t = myTenantOrgId(u);
+  if (want === null || want === undefined) return { orgId: null, tenantOrgId: t };
+  const [org] = await db.select().from(orgs)
+    .where(and(eq(orgs.id, want), forTenant(orgs.parentOrgId, t)));
+  if (!org) return { error: "That organization is not one of ours" };
+  return { orgId: org.id, tenantOrgId: t };
+}
+
+/**
+ * Write a dated note onto the calendar.
+ *
+ * The only thing on that page somebody types rather than derives, and it earns
+ * the exception: a lab shut for an audit week has no other row in this app to
+ * live on, and a van sent to a locked door is what not knowing costs. See
+ * db/schema.calendarNotes.
+ */
+export async function addCalendarNote(data: {
+  onDate: string; endsOn?: string; title: string; note?: string;
+  /** Staff only: whose calendar. Ignored for a client, who has one. */
+  orgId?: number | null;
+}): Promise<{ error?: string; id?: number }> {
+  const u = await requireUser();
+  const where = await noteOrgFor(u, data.orgId);
+  if ("error" in where) return where;
+  const wrong = checkNote({ onDate: data.onDate, endsOn: data.endsOn, title: data.title });
+  if (wrong) return { error: wrong };
+  const [row] = await db.insert(calendarNotes).values({
+    tenantOrgId: where.tenantOrgId, orgId: where.orgId,
+    onDate: data.onDate, endsOn: (data.endsOn ?? "").trim(),
+    title: data.title.trim().slice(0, 120),
+    note: (data.note ?? "").trim().slice(0, 1000),
+    createdBy: u.email, createdByName: u.name || u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "calendar_note", entityId: row.id, tenantOrgId: where.tenantOrgId,
+    action: `noted "${row.title}" on ${row.onDate}${row.endsOn ? ` - ${row.endsOn}` : ""}`,
+  });
+  revalidatePath("/calendar");
+  return { id: row.id };
+}
+
+/**
+ * Rub one out.
+ *
+ * Deleted rather than archived, which is the right weight for the thing: a
+ * note is a sticky on a wall, not a record of work, and nothing downstream
+ * refers to it. Whoever may write on that calendar may clear it - a colleague
+ * fixing somebody's typo'd shutdown week should not have to find its author.
+ */
+export async function removeCalendarNote(id: number): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const [row] = await db.select().from(calendarNotes).where(eq(calendarNotes.id, id));
+  if (!row) return {};
+  /* Two readers, one rule each, and the same words for every refusal - whether
+     a note exists in another workspace is not a fact to confirm by the shape
+     of an error. Staff of the note's OWN workspace may clear any of its notes;
+     a client may clear one on their own company's calendar, which is the only
+     calendar they can see. */
+  const asStaff = isStaffRole(u.role) && houseOf(u, row.tenantOrgId);
+  const asClient = !isStaffRole(u.role) && u.orgId !== null && row.orgId === u.orgId;
+  if (!asStaff && !asClient) return { error: "Not found" };
+  await db.delete(calendarNotes).where(eq(calendarNotes.id, id));
+  await audit({
+    actor: u.email, entityType: "calendar_note", entityId: id, tenantOrgId: row.tenantOrgId,
+    action: `cleared the note "${row.title}" on ${row.onDate}`,
+  });
+  revalidatePath("/calendar");
+  return {};
 }
 
 /** Point a device at the system it drives, or clear the link. Staff only. */

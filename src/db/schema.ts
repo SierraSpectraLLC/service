@@ -1892,6 +1892,42 @@ export const auditLog = pgTable("audit_log", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("audit_instrument_idx").on(t.instrumentId), index("audit_created_idx").on(t.createdAt)]);
 
+/**
+ * A dated note somebody wrote onto the calendar themselves.
+ *
+ * THE ONE THING ON THE CALENDAR THAT IS NOT DERIVED, and it earns that.
+ * Everything else there is a date the app already keeps for its own reasons -
+ * a booked visit, a cycle falling due, an invoice's due day - so the calendar
+ * can never disagree with the page that owns it. This is the exception,
+ * because the facts it holds have no other row to live on: a lab shut for an
+ * audit week, a delivery expected Tuesday, the fortnight the only person who
+ * can badge us in is away.
+ *
+ * Written by the CLIENT as much as by the shop, and visible to both. That is
+ * the point of it: a shutdown week nobody at the shop knows about is how a
+ * van gets sent to a locked door, and the client is the only one who can say.
+ * orgId is whose note it is - a client's own company, or null for the shop's.
+ */
+export const calendarNotes = pgTable("calendar_notes", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /**
+   * Whose note. A client's organization, or null for one the shop wrote about
+   * itself. Cascade because a note is about that company's own year and has no
+   * meaning once they are gone.
+   */
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+  onDate: text("on_date").notNull(),                  // YYYY-MM-DD, the first day
+  /** The last day, for something spanning several. "" = a single day. */
+  endsOn: text("ends_on").notNull().default(""),
+  title: text("title").notNull().default(""),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  /** The name to show beside it, so a note does not read as an email address. */
+  createdByName: text("created_by_name").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("calendar_notes_day_idx").on(t.onDate), index("calendar_notes_org_idx").on(t.orgId)]);
+
 export const sheetDiffs = pgTable("sheet_diffs", {
   id: serial("id").primaryKey(),
   runAt: timestamp("run_at").notNull().defaultNow(),
