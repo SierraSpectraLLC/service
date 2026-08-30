@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { reportIssue, requestPm } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
+import WeekdayPicker from "@/components/WeekdayPicker";
 import { PM_WINDOWS } from "@/lib/pmRequest";
 
 /**
@@ -38,6 +39,11 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
   // What they are asking for, and - once they ask for upkeep - how soon.
   const [choice, setChoice] = useState<string>("Degraded");
   const [pmWindow, setPmWindow] = useState<string>("month");
+  /* Which days they can have somebody on site. Same question the calendar's
+     ask puts, through the same component, because two spellings of one
+     question drift - and a client who answered it there should not meet a
+     different form here. */
+  const [pmDays, setPmDays] = useState<number[]>([]);
   const [summary, setSummary] = useState("");
   const [details, setDetails] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -56,7 +62,7 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
 
   const close = () => {
     setOpen(false); setError(""); setDone(""); setNumber("");
-    setSummary(""); setDetails(""); setFiles([]); setChoice("Degraded"); setPmWindow("month");
+    setSummary(""); setDetails(""); setFiles([]); setChoice("Degraded"); setPmWindow("month"); setPmDays([]);
   };
 
   const submit = () => {
@@ -65,7 +71,7 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
       try {
         if (isPm) {
           setBusy("Sending...");
-          const res = await requestPm(instrumentId, { window: pmWindow, note: details });
+          const res = await requestPm(instrumentId, { window: pmWindow, note: details, days: pmDays });
           if (res?.error) { setError(res.error); return; }
           setNumber(res?.number ?? "");
           setDone(res?.already ? "already" : "filed");
@@ -154,6 +160,14 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
                   ))}
                 </div>
                 {nextPm && <div className="mut t-small" style={{ marginBottom: 10 }}>{nextPm}</div>}
+
+                {/* And which days, so the shop schedules against how the lab
+                    actually runs rather than guessing and calling back. */}
+                <div className="dialog-section">Days that suit you</div>
+                <div style={{ marginBottom: 12 }}>
+                  <WeekdayPicker value={pmDays} onChange={setPmDays} disabled={pending} />
+                </div>
+
                 <div className="dialog-section">Anything specific</div>
                 <textarea value={details} onChange={(e) => setDetails(e.target.value)} rows={4} autoFocus
                   placeholder="Lamp is at 900 hours, and we'd like the column checked"

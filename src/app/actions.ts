@@ -6976,8 +6976,12 @@ export async function reportIssue(instrumentId: number, data: {
  */
 export async function requestPm(instrumentId: number, data: {
   window: string; note: string;
-  /** A day they picked off the calendar. Beats the horizon - see pmRequestDue. */
-  preferredOn?: string;
+  /**
+   * The weekdays they will have somebody on site, 0 = Sunday. A preference
+   * rather than a booking: it moves the due date forward to the first one that
+   * suits them and rides along on the record for whoever schedules the van.
+   */
+  days?: number[];
   /** pm | service. Maintenance says upkeep is owed; service work does not. */
   kind?: string;
 }):
@@ -6997,7 +7001,7 @@ Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; w
   /* What they asked for, in one phrase, used in every sentence this writes -
      so the task, the post, the audit line and the email cannot describe the
      same request three different ways. */
-  const asked = askLabel(data.window, data.preferredOn, today);
+  const asked = askLabel(data.window, data.days);
   const orgName = u.orgId === null ? (await getBrand()).operatorName : u.orgName || "a client";
   const who = u.name || u.email;
 
@@ -7042,7 +7046,7 @@ Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; w
     await db.insert(stageEvents).values({ instrumentId, stage: "Maintenance due", kind: "added" });
   }
 
-  const dueDate = pmRequestDue(today, w.key, data.preferredOn);
+  const dueDate = pmRequestDue(today, w.key, data.days);
   // Planned, not an emergency - the fourth thing a work order can be. It gets a
   // number and a close-out like any other job, because "did the PM we asked for
   // in March ever happen" is exactly the question a work order exists to answer.

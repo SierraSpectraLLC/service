@@ -242,14 +242,28 @@ describe("asking for a visit on a day", () => {
     return testDb.select().from(tasks);
   };
 
-  it("dates the work to the day they picked", async () => {
+  it("dates the work to the first day of the week that suits them", async () => {
+    // A month from 2026-09-01 is Thursday the 1st of October; a lab covered
+    // Mondays and Wednesdays gets the Monday after it.
     const { requestPm } = await import("@/app/actions");
     who = LAB;
-    const res = await requestPm(LZ_SYS, { window: "month", note: "Bay free that week", preferredOn: "2026-09-23" });
+    const res = await requestPm(LZ_SYS, { window: "month", note: "Bay free those days", days: [1, 3] });
     expect(res.error).toBeUndefined();
     const [task] = await openTasks();
-    expect(task.dueDate).toBe("2026-09-23");
+    expect(task.dueDate).toBe("2026-10-05");
     expect(task.origin).toBe("pm_request");
+  });
+
+  it("writes the preference onto the record, for whoever routes the van", async () => {
+    /*
+     * The due date encodes it, but a scheduler moving the visit needs the
+     * standing fact rather than the one date it produced - "prefers Mon or
+     * Wed" is what tells them Tuesday is no good either.
+     */
+    const { requestPm } = await import("@/app/actions");
+    who = LAB;
+    await requestPm(LZ_SYS, { window: "month", note: "Bay free those days", days: [1, 3] });
+    expect((await openTasks())[0].body).toContain("prefers Mon or Wed");
   });
 
   it("does not move the maintenance calendar - which is the whole rule", async () => {
@@ -261,16 +275,27 @@ describe("asking for a visit on a day", () => {
     const before = await scheds();
     const { requestPm } = await import("@/app/actions");
     who = LAB;
-    await requestPm(LZ_SYS, { window: "now", note: "Please", preferredOn: "2026-09-02" });
+    await requestPm(LZ_SYS, { window: "now", note: "Please", days: [1, 3] });
     expect(await scheds()).toEqual(before);
   });
 
-  it("ignores a day already behind us rather than filing work born late", async () => {
+  it("leaves the horizon alone when no day was named", async () => {
+    // The ordinary ask, and what every request filed before this still gets.
     const { requestPm } = await import("@/app/actions");
     who = LAB;
-    await requestPm(LZ_SYS, { window: "month", note: "Whenever", preferredOn: "2020-01-01" });
-    // Falls back to the horizon: a month from 2026-09-01.
+    await requestPm(LZ_SYS, { window: "month", note: "Whenever suits" });
     expect((await openTasks())[0].dueDate).toBe("2026-10-01");
+  });
+
+  it("drops a day nobody offered rather than dating work by it", async () => {
+    // The array comes off the wire. A Sunday is not on the list, and a request
+    // carrying only Sundays is a request with no preference at all.
+    const { requestPm } = await import("@/app/actions");
+    who = LAB;
+    await requestPm(LZ_SYS, { window: "month", note: "Sundays please", days: [0, 6] });
+    const [task] = await openTasks();
+    expect(task.dueDate).toBe("2026-10-01");
+    expect(task.body).not.toContain("prefers");
   });
 
   it("tells maintenance from service work on the record", async () => {

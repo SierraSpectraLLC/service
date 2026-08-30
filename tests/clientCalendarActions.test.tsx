@@ -2,12 +2,12 @@
 //
 // The two things a client can do on their calendar.
 //
-// The one that needs pinning is the ASK. A date box on a calendar looks like a
-// booking, and the shop's rule is that it is not one - a client picking a day
-// asks for it, and an engineer is on it only once somebody at the shop says
-// so. If this dialog ever stops saying that, somebody stands around on the
-// 23rd waiting for a van nobody dispatched. The copy is the feature here, so
-// the copy is what is asserted.
+// The one that needs pinning is the ASK. A form that takes a preference and
+// then goes quiet reads as a booking, and the shop's rule is that it is not
+// one - a client says when suits, and an engineer is on a day only once
+// somebody at the shop says so. If this dialog stops saying that, somebody
+// stands around waiting for a van nobody dispatched. The copy is the feature
+// here, so the copy is what is asserted.
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -37,28 +37,62 @@ describe("asking for a visit", () => {
     fireEvent.click(screen.getByText("Ask for a visit"));
   };
 
-  it("sends the day they picked, with the system and what they need", async () => {
+  it("sends the days that suit them, with the system and what they need", async () => {
     await openAsk();
     fireEvent.change(screen.getByLabelText("Which system"), { target: { value: "8" } });
-    fireEvent.change(screen.getByLabelText("Preferred day"), { target: { value: "2026-09-23" } });
-    fireEvent.change(screen.getByLabelText("What needs doing"), { target: { value: "Bay free that week" } });
+    fireEvent.click(screen.getByLabelText("Monday"));
+    fireEvent.click(screen.getByLabelText("Wednesday"));
+    fireEvent.change(screen.getByLabelText("What needs doing"), { target: { value: "Bay free those days" } });
     fireEvent.click(screen.getByText("Send the request"));
     await waitFor(() => expect(requestPm).toHaveBeenCalled());
-    const [id, data] = requestPm.mock.calls[0] as unknown as [number, Record<string, string>];
+    const [id, data] = requestPm.mock.calls[0] as unknown as [number, { days: number[]; note: string }];
     expect(id).toBe(8);
-    expect(data.preferredOn).toBe("2026-09-23");
-    expect(data.note).toBe("Bay free that week");
+    expect(data.days).toEqual([1, 3]);
+    expect(data.note).toBe("Bay free those days");
   });
 
-  it("says plainly that picking a day is not booking it", async () => {
+  it("lets them take a day back off", async () => {
+    await openAsk();
+    fireEvent.click(screen.getByLabelText("Monday"));
+    fireEvent.click(screen.getByLabelText("Wednesday"));
+    fireEvent.click(screen.getByLabelText("Monday"));
+    fireEvent.change(screen.getByLabelText("What needs doing"), { target: { value: "x" } });
+    fireEvent.click(screen.getByText("Send the request"));
+    await waitFor(() => expect(requestPm).toHaveBeenCalled());
+    const [, data] = requestPm.mock.calls[0] as unknown as [number, { days: number[] }];
+    expect(data.days).toEqual([3]);
+  });
+
+  it("treats no day at all as a real answer, not a missing one", async () => {
+    // "Whenever suits you" is the ordinary ask and must never be a blocker.
+    await openAsk();
+    fireEvent.change(screen.getByLabelText("What needs doing"), { target: { value: "Whenever" } });
+    expect((screen.getByText("Send the request") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByText("Send the request"));
+    await waitFor(() => expect(requestPm).toHaveBeenCalled());
+    const [, data] = requestPm.mock.calls[0] as unknown as [number, { days: number[] }];
+    expect(data.days).toEqual([]);
+  });
+
+  it("says plainly that asking is not booking", async () => {
     /*
-     * The whole safety of this feature is one sentence. Without it a date box
-     * on a calendar reads as a booking, and the client's next move is to stand
-     * around on the 23rd.
+     * The whole safety of this feature is one sentence. Without it a form that
+     * takes a day and goes quiet reads as a booking, and the client's next
+     * move is to stand around waiting.
      */
     await openAsk();
-    expect(screen.getByText(/does not book it/)).toBeTruthy();
-    expect(screen.getByText(/once we have confirmed/)).toBeTruthy();
+    expect(screen.getByText(/does not book/)).toBeTruthy();
+    expect(screen.getByText(/appear\s+on this calendar as a booked visit/)).toBeTruthy();
+  });
+
+  it("offers the working week, and points weekend work at the box", async () => {
+    await openAsk();
+    for (const day of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]) {
+      expect(screen.getByLabelText(day)).toBeTruthy();
+    }
+    expect(screen.queryByLabelText("Saturday")).toBeNull();
+    expect(screen.queryByLabelText("Sunday")).toBeNull();
+    expect(screen.getByText(/Weekends are not on the list/)).toBeTruthy();
   });
 
   it("will not send an ask with nothing said in it", async () => {

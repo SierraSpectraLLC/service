@@ -4,20 +4,25 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { addCalendarNote, requestPm } from "@/app/actions";
 import { NOTE_MAX_DAYS, checkNote } from "@/lib/calendarNotes";
-import { PM_WINDOWS, VISIT_KINDS } from "@/lib/pmRequest";
+import { PM_WINDOWS, VISIT_KINDS, daysLabel } from "@/lib/pmRequest";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
+import WeekdayPicker from "@/components/WeekdayPicker";
 import { toast } from "@/components/ui/Toast";
 
 /**
  * The two things a client can DO on their calendar.
  *
- * ASK FOR A VISIT, on a day they pick. Which is a request and says so: it
- * files planned work into the shop's queue carrying the date they asked for,
- * and the shop confirms it by booking the visit - at which point it appears
- * here as a booked visit rather than as an open job. A client picking a date
- * does not put an engineer on it, and the copy in this dialog is careful to
- * say that rather than implying a booking; see requestPm, whose own comment
- * is the rule this follows.
+ * ASK FOR A VISIT: how soon, and which days of the week suit them. Which is a
+ * request and says so - it files planned work into the shop's queue carrying
+ * both, and the shop confirms it by booking the visit, at which point it
+ * appears here as a booked visit rather than as an open job. Asking does not
+ * put an engineer on a day, and the copy is careful to say so; see requestPm,
+ * whose own comment is the rule this follows.
+ *
+ * Days of the WEEK rather than a date, because that is the shape of the fact a
+ * lab actually has - "we are covered Mondays and Wednesdays" - and it leaves
+ * the shop free to route a van. A single named date was the first cut of this
+ * and asked the client to guess at a schedule they cannot see.
  *
  * WRITE A NOTE, which is the other half and the reason the portal is worth
  * opening: the shutdown week, the audit, the fortnight the only person who can
@@ -43,7 +48,8 @@ export default function ClientCalendarActions({ systems, today, month }: {
   const seedDay = month === today.slice(0, 7) ? today : firstOfMonth;
 
   const [visit, setVisit] = useState({
-    instrumentId: String(systems[0]?.id ?? ""), kind: "pm", preferredOn: "", window: "month", note: "",
+    instrumentId: String(systems[0]?.id ?? ""), kind: "pm",
+    days: [] as number[], window: "month", note: "",
   });
   const [note, setNote] = useState({ onDate: seedDay, endsOn: "", title: "", note: "" });
 
@@ -51,7 +57,7 @@ export default function ClientCalendarActions({ systems, today, month }: {
     setError("");
     setVisit({
       instrumentId: String(systems[0]?.id ?? ""), kind: "pm",
-      preferredOn: "", window: "month", note: "",
+      days: [], window: "month", note: "",
     });
     setOpen("visit");
   };
@@ -70,7 +76,7 @@ export default function ClientCalendarActions({ systems, today, month }: {
       setError("");
       const res = await requestPm(parseInt(visit.instrumentId, 10), {
         window: visit.window, note: visit.note,
-        preferredOn: visit.preferredOn, kind: visit.kind,
+        days: visit.days, kind: visit.kind,
       });
       if (res?.error) { setError(res.error); return; }
       toast({
@@ -100,8 +106,8 @@ export default function ClientCalendarActions({ systems, today, month }: {
         )}
         <button className="btn sm" onClick={openNote}>Add a note</button>
         <span className="mut t-small" style={{ flex: "1 1 220px" }}>
-          Ask for a date and we will confirm it. Notes are for anything we should
-          know - a shutdown, an audit week, a delivery.
+          Tell us when suits and we will confirm a date. Notes are for anything we
+          should know - a shutdown, an audit week, a delivery.
         </span>
       </div>
 
@@ -111,7 +117,7 @@ export default function ClientCalendarActions({ systems, today, month }: {
           footer={
             <>
               <DialogStatus error={error} problem={visitProblem}
-                ok={visit.preferredOn ? `Asking for ${visit.preferredOn}` : undefined} />
+                ok={visit.days.length ? `Prefers ${daysLabel(visit.days)}` : undefined} />
               <button className="btn" onClick={() => setOpen(null)} disabled={pending}>Cancel</button>
               <button className="btn accent" onClick={askForVisit} disabled={pending || !!visitProblem}>
                 {pending ? "Sending..." : "Send the request"}
@@ -141,28 +147,22 @@ export default function ClientCalendarActions({ systems, today, month }: {
             where you can set how bad it is and attach a photo.
           </div>
 
-          <div className="dialog-section">When</div>
-          <div className="pf2" style={{ marginBottom: 8 }}>
-            <div>
-              <label>A day that suits you</label>
-              <input type="date" value={visit.preferredOn} min={today} aria-label="Preferred day"
-                disabled={pending}
-                onChange={(e) => setVisit({ ...visit, preferredOn: e.target.value })} />
-            </div>
-            <div>
-              <label>Or how soon</label>
-              <select value={visit.window} aria-label="How soon" disabled={pending || !!visit.preferredOn}
-                onChange={(e) => setVisit({ ...visit, window: e.target.value })}>
-                {PM_WINDOWS.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
-              </select>
-            </div>
-          </div>
-          {/* Said plainly, because a date box that looks like a booking is the
-              one way this feature could mislead somebody into standing around
+          <div className="dialog-section">How soon</div>
+          <select value={visit.window} aria-label="How soon" disabled={pending}
+            style={{ marginBottom: 8 }}
+            onChange={(e) => setVisit({ ...visit, window: e.target.value })}>
+            {PM_WINDOWS.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
+          </select>
+
+          <div className="dialog-section">Days that suit you</div>
+          <WeekdayPicker value={visit.days} disabled={pending}
+            onChange={(days) => setVisit({ ...visit, days })} />
+          {/* Said plainly, because a form that takes a preference and then goes
+              quiet is the one way this could leave somebody standing around
               waiting for an engineer nobody dispatched. */}
-          <div className="field-hint" style={{ marginBottom: 8 }}>
-            Picking a day asks for it - it does not book it. You will see it on this
-            calendar as a booked visit once we have confirmed.
+          <div className="field-hint" style={{ margin: "8px 0" }}>
+            This asks - it does not book. We will confirm a date, and it will appear
+            on this calendar as a booked visit.
           </div>
 
           <label>What needs doing</label>
