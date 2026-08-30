@@ -1,18 +1,21 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  agreements, appSettings, assets, instruments, invoices, orgs, pmSchedules, quotes, tasks,
+  agreements, appSettings, assets, instruments, invoices, orgs, pmSchedules, quotes, restorationProjects, tasks,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isPlatformStaff, isStaffRole, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
-import { assembleEvents, monthGrid, monthOf, monthTitle, shiftMonth } from "@/lib/calendar";
+import { assembleEvents, monthGrid, monthOf, monthTitle, promiseTone, shiftMonth } from "@/lib/calendar";
+import { RESTORATION_STAGE_LABEL, type RestorationStage } from "@/lib/restoration";
+import { getSystemLabels } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import CalendarBoard from "@/components/CalendarBoard";
 import CalendarFeedCard from "@/components/CalendarFeedCard";
-import { PageHead } from "@/components/ui";
+import TvRefresh from "@/components/TvRefresh";
+import { Dot, Id, Legend, PageHead } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -25,14 +28,15 @@ export const dynamic = "force-dynamic";
  * those live on, and closing the work clears the calendar by itself.
  */
 export default async function CalendarPage({ searchParams }: {
-  searchParams: Promise<{ m?: string }>;
+  searchParams: Promise<{ m?: string; view?: string }>;
 }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
   const t = readTenant(user);
   const today = shopToday();
-  const { m } = await searchParams;
+  const { m, view } = await searchParams;
+  const tv = view === "tv";
   const ym = /^\d{4}-\d{2}$/.test(m ?? "") ? m! : monthOf(today);
   const { weeks, days } = monthGrid(ym);
   const from = days[0], to = days[days.length - 1];
@@ -47,8 +51,11 @@ export default async function CalendarPage({ searchParams }: {
       db.select().from(invoices).where(forTenant(invoices.tenantOrgId, t)),
       db.select().from(agreements).where(forTenant(agreements.tenantOrgId, t)),
       db.select({ id: orgs.id, name: orgs.name }).from(orgs),
-      db.select({ id: instruments.id, externalId: instruments.externalId, dueOn: instruments.dueOn, archived: instruments.archived })
-        .from(instruments)
+      db.select({
+        id: instruments.id, externalId: instruments.externalId, dueOn: instruments.dueOn,
+        archived: instruments.archived, name: instruments.name, model: instruments.model,
+        location: instruments.location, client: instruments.client,
+      }).from(instruments)
         .where(forTenant(instruments.tenantOrgId, t)),
       db.select({ id: assets.id, kind: assets.kind, model: assets.model, instrumentId: assets.instrumentId })
         .from(assets).where(forTenant(assets.tenantOrgId, t)),
@@ -90,19 +97,87 @@ export default async function CalendarPage({ searchParams }: {
     })),
   }, from, to, today);
 
+  /*
+   * The wall's right-hand rail: EVERY promised system, not just this month's -
+   * a TV in a lab answers "what is due and where is it", and a promise sitting
+   * in October must not vanish because the screen shows September. "Where" is
+   * the best answer each system can give: its restoration stage while it is in
+   * the pipeline, else the bench it sits on, else whose it is.
+   */
+  const promised = instRows.filter((i) => !i.archived && i.dueOn)
+    .sort((a, b) => a.dueOn.localeCompare(b.dueOn));
+  const promLabels = await getSystemLabels(promised);
+  const inFlight = promised.length
+    ? await db.select({ instrumentId: restorationProjects.instrumentId, stage: restorationProjects.stage })
+        .from(restorationProjects)
+        .where(and(inArray(restorationProjects.instrumentId, promised.map((p) => p.id)), ne(restorationProjects.stage, "complete")))
+    : [];
+  const whereOf = (i: (typeof promised)[number]) => {
+    const stage = inFlight.find((r) => r.instrumentId === i.id)?.stage;
+    if (stage) return RESTORATION_STAGE_LABEL[stage as RestorationStage] ?? stage;
+    return i.location || i.client || "—";
+  };
+
+  const rail = (
+    <aside>
+      <section className="card">
+        <h2 className="card-title">Promised</h2>
+        {promised.map((i) => (
+          <Link key={i.id} href={`/instruments/${i.id}`} className="prom-row" style={{ textDecoration: "none", color: "inherit" }}>
+            <Dot tone={promiseTone(i.dueOn, today)} />
+            <div className="pbody">
+              <div className="t-body" style={{ fontWeight: 600 }}>
+                <Id>{i.externalId}</Id>{" "}
+                {promLabels.get(i.id) || i.model}
+              </div>
+              <div className="mut t-small">{whereOf(i)}</div>
+            </div>
+            <span className="pwhen">{i.dueOn}</span>
+          </Link>
+        ))}
+        {promised.length === 0 && (
+          <div className="empty"><b>Nothing promised</b>Set a due date on a system and it lines up here.</div>
+        )}
+      </section>
+      <Legend items={[
+        { tone: "bad", label: "past its day" },
+        { tone: "warn", label: "due within a week" },
+        { tone: "info", label: "further out" },
+      ]} />
+    </aside>
+  );
+
+  const monthNav = (
+    <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+      <Link className="btn sm" href={`/calendar?m=${shiftMonth(ym, -1)}${tv ? "&view=tv" : ""}`} aria-label="Previous month">←</Link>
+      <b className="t-body" style={{ minWidth: 110, textAlign: "center" }}>{monthTitle(ym)}</b>
+      <Link className="btn sm" href={`/calendar?m=${shiftMonth(ym, 1)}${tv ? "&view=tv" : ""}`} aria-label="Next month">→</Link>
+      {ym !== monthOf(today) && <Link className="btn sm" href={tv ? "/calendar?view=tv" : "/calendar"}>Today</Link>}
+      <Link className="btn sm" href={tv ? `/calendar?m=${ym}` : `/calendar?m=${ym}&view=tv`}>
+        {tv ? "Exit TV mode" : "TV mode"}
+      </Link>
+    </span>
+  );
+
+  if (tv) {
+    return (
+      <div className="container fluid">
+        <TvRefresh />
+        <PageHead title="Calendar" actions={monthNav} />
+        <div className="cal-tv">
+          <div><CalendarBoard ym={ym} weeks={weeks} events={events} today={today} /></div>
+          {rail}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container wide">
       <PageHead
         title="Calendar"
         sub="Every dated fact in one place: booked visits, maintenance due, tasks, money. Each entry links to the record that owns it."
-        actions={
-          <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <Link className="btn sm" href={`/calendar?m=${shiftMonth(ym, -1)}`} aria-label="Previous month">←</Link>
-            <b className="t-body" style={{ minWidth: 110, textAlign: "center" }}>{monthTitle(ym)}</b>
-            <Link className="btn sm" href={`/calendar?m=${shiftMonth(ym, 1)}`} aria-label="Next month">→</Link>
-            {ym !== monthOf(today) && <Link className="btn sm" href="/calendar">Today</Link>}
-          </span>
-        }
+        actions={monthNav}
       />
       <CalendarBoard ym={ym} weeks={weeks} events={events} today={today} />
       {/* The feed's secret lives on app_settings, one row for the whole

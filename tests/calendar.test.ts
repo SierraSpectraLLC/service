@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  assembleEvents, eventsToIcs, monthGrid, monthTitle, shiftMonth, type CalendarInputs,
+  assembleEvents, eventsToIcs, monthGrid, monthTitle, promiseTone, shiftMonth, type CalendarInputs,
 } from "@/lib/calendar";
 
 /**
@@ -30,6 +30,15 @@ describe("the month grid", () => {
     expect(shiftMonth("2026-12", 1)).toBe("2027-01");
     expect(shiftMonth("2026-01", -1)).toBe("2025-12");
     expect(monthTitle("2026-08")).toBe("August 2026");
+  });
+});
+
+describe("promiseTone", () => {
+  it("late is bad, a week out is warn, beyond is calm - boundaries included", () => {
+    expect(promiseTone("2026-08-24", T)).toBe("bad");   // yesterday
+    expect(promiseTone("2026-08-25", T)).toBe("warn");  // today: not late yet, but loud
+    expect(promiseTone("2026-09-01", T)).toBe("warn");  // exactly seven days out
+    expect(promiseTone("2026-09-02", T)).toBe("info");  // eight
   });
 });
 

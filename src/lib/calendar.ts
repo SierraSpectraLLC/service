@@ -209,6 +209,17 @@ export function assembleEvents(inp: CalendarInputs, from: string, to: string, to
   return out.sort((x, y) => x.date.localeCompare(y.date) || x.kind.localeCompare(y.kind));
 }
 
+/**
+ * The wall's verdict on one promise: late is bad, inside a week is warn,
+ * further out is calm. Shared by the TV rail and anything else that colors
+ * a promise, so "about to be late" means one thing everywhere.
+ */
+export function promiseTone(dueOn: string, today: string): "bad" | "warn" | "info" {
+  if (dueOn < today) return "bad";
+  const days = Math.round((Date.parse(dueOn) - Date.parse(today)) / 86_400_000);
+  return days <= 7 ? "warn" : "info";
+}
+
 /** Escape ICS text per RFC 5545. */
 const icsText = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
 
