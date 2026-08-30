@@ -7,9 +7,7 @@ import { Dot, Legend, Panel, Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { linkRemoteDevice, removeRemoteDevice, renameRemoteDevice, setRemoteConsent } from "@/app/actions";
 import { deviceLabel, deviceSubLabel, needsNickname } from "@/lib/deviceName";
-import DeviceNoticeControls, { type OpenHold, type OpenNotice } from "@/components/DeviceNoticeControls";
-import DeviceLockoutControls, { type OpenLockout } from "@/components/DeviceLockoutControls";
-import DeviceLeaseControls, { type OpenLease } from "@/components/DeviceLeaseControls";
+import DeviceManage, { type OpenHold, type OpenLease, type OpenLockout, type OpenNotice } from "@/components/DeviceManage";
 
 export type RemoteDevice = {
   id: number;
@@ -200,7 +198,7 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
               </div>
             )}
 
-            <DeviceNoticeControls
+            <DeviceManage
               deviceId={d.id}
               label={deviceLabel(d.nickname, d.name)}
               consentMode={d.consentMode}
@@ -211,18 +209,8 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
               canRaiseHold={d.canRaiseHold}
               noticePushed={d.noticePushed}
               noticeError={d.noticeError}
-            />
-
-            <DeviceLockoutControls
-              deviceId={d.id}
-              label={deviceLabel(d.nickname, d.name)}
               lockout={d.lockout}
               canLock={d.canLock}
-            />
-
-            <DeviceLeaseControls
-              deviceId={d.id}
-              label={deviceLabel(d.nickname, d.name)}
               lease={d.lease}
               canManageLease={d.canManageLease}
             />
