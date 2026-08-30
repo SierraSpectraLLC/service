@@ -3925,6 +3925,10 @@ export const deviceLeases = pgTable("device_leases", {
   /** Last time the guard fetched a fresh lease. The dead-man signal we watch. */
   lastRenewedAt: timestamp("last_renewed_at"),
   armedBy: text("armed_by").notNull().default(""),
+  /** A recorded human decision to stop re-leasing - the leverage lever. Null = renew normally. Never set by the ledger. */
+  suspendedAt: timestamp("suspended_at"),
+  suspendedBy: text("suspended_by").notNull().default(""),
+  suspendReason: text("suspend_reason").notNull().default(""),
   /** Set once at sign-off. A released lease is terminal - no un-release exists. */
   releasedAt: timestamp("released_at"),
   releasedBy: text("released_by").notNull().default(""),

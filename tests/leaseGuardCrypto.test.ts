@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  deriveMachineSecret, generateLeaseKeypair, generateMasterSecret,
-  offlineUnlockCode, signLease, signRelease, verifyLease, verifyRelease, verifyUnlockCode,
+  deriveMachineSecret, generateLeaseKeypair, generateMasterSecret, guardProof,
+  offlineUnlockCode, signLease, signRelease, verifyGuardProof, verifyLease,
+  verifyRelease, verifyUnlockCode,
 } from "@/lib/leaseGuardCrypto";
 
 const keys = generateLeaseKeypair();
@@ -80,5 +81,30 @@ describe("the offline unlock code an engineer reads aloud", () => {
   it("needs the master secret - a guessed secret does not match", () => {
     const wrong = deriveMachineSecret(generateMasterSecret(), "node//abc");
     expect(verifyUnlockCode(wrong, 7, offlineUnlockCode(secret, 7))).toBe(false);
+  });
+});
+
+describe("the guard proving itself to the renew endpoint", () => {
+  const master = generateMasterSecret();
+  const secret = deriveMachineSecret(master, "node//abc");
+  const NOW = 1_800_000_000_000;
+  const ts = Math.floor(NOW / 1000);
+
+  it("accepts a fresh proof from the right secret", () => {
+    expect(verifyGuardProof(secret, "node//abc", ts, guardProof(secret, "node//abc", ts), NOW)).toBe(true);
+  });
+
+  it("rejects a stale timestamp - bounds replay without a stored nonce", () => {
+    const old = ts - 3600;
+    expect(verifyGuardProof(secret, "node//abc", old, guardProof(secret, "node//abc", old), NOW)).toBe(false);
+  });
+
+  it("rejects a proof for a different node, even at the right time", () => {
+    expect(verifyGuardProof(secret, "node//abc", ts, guardProof(secret, "node//xyz", ts), NOW)).toBe(false);
+  });
+
+  it("rejects a proof from a machine that does not hold the secret", () => {
+    const wrong = deriveMachineSecret(generateMasterSecret(), "node//abc");
+    expect(verifyGuardProof(secret, "node//abc", ts, guardProof(wrong, "node//abc", ts), NOW)).toBe(false);
   });
 });

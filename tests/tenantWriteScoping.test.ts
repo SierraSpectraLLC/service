@@ -120,6 +120,17 @@ const REVIEWED: Record<string, string> = {
     + "workspace, and the address the account is created for is read off the "
     + "ROW rather than taken from the caller, so a stolen link can only ever "
     + "post keys to the inbox the sender chose.",
+  "issueRenewal":
+    "The guard renewal path in lib/leaseGuardData, reached only by "
+    + "api/remote/lease - which is public precisely because its caller is an "
+    + "unattended machine with no session. It is not gated by tenant because it "
+    + "cannot be: the authorization is the machine SECRET, which the endpoint "
+    + "verifies (verifyGuardProof) before this runs, and which only a guard "
+    + "provisioned for that exact node holds. The write advances the lease "
+    + "counter, expiry and last-renewed time on the single row whose device the "
+    + "proven nodeId names - no caller-supplied id, no money, no tenant data. "
+    + "The decision to grant is lib/leaseGuard.renewalDecision, which takes only "
+    + "standing and is pinned money-invariant.",
   "syncDeviceNotices":
     "Delivery bookkeeping in lib/fleetNoticeData, and not a server action - "
     + "nothing reaches it over the network. Its deviceId comes from its "

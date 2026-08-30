@@ -140,3 +140,37 @@ export function verifyUnlockCode(machineSecretB64: string, counter: number, code
   for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ got.charCodeAt(i);
   return diff === 0;
 }
+
+// ── The guard authenticating itself to the renew endpoint ───────────────────
+
+/**
+ * The proof a guard presents to renew: an HMAC over its node id and a
+ * timestamp, keyed by its per-machine secret. The endpoint derives the same
+ * secret from the master and checks it, so only a guard actually holding the
+ * secret gets a lease - the renew endpoint is not a lease-dispenser for anyone
+ * who knows a node id.
+ *
+ * Stateless on both ends: the timestamp bounds replay to a short window without
+ * the server having to remember a nonce, which a serverless renew path could
+ * not do anyway. Replay inside the window is harmless - it just re-issues a
+ * lease the guard was entitled to.
+ */
+export function guardProof(machineSecretB64: string, nodeId: string, unixSeconds: number): string {
+  return createHmac("sha256", Buffer.from(machineSecretB64, "base64"))
+    .update(`renew-v1|${nodeId}|${unixSeconds}`).digest("base64url");
+}
+
+/** How far a guard's clock may drift from ours before its proof is stale. */
+export const GUARD_PROOF_SKEW_SECONDS = 300;
+
+export function verifyGuardProof(
+  machineSecretB64: string, nodeId: string, unixSeconds: number, proof: string, now = Date.now(),
+): boolean {
+  if (!Number.isFinite(unixSeconds)) return false;
+  if (Math.abs(Math.floor(now / 1000) - unixSeconds) > GUARD_PROOF_SKEW_SECONDS) return false;
+  const want = guardProof(machineSecretB64, nodeId, unixSeconds);
+  if (proof.length !== want.length) return false;
+  let diff = 0;
+  for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ proof.charCodeAt(i);
+  return diff === 0;
+}

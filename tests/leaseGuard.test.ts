@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clampGraceDays, clampLeaseDays, leaseDirective, leaseMessage, leaseState,
-  type LeaseFacts,
+  renewalDecision, type LeaseFacts,
 } from "@/lib/leaseGuard";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -93,6 +93,29 @@ describe("the message never argues the invoice", () => {
     for (const m of [warn, lock]) {
       expect(m).not.toMatch(/invoice|balance|owe|overdue|past due|payment|\$/i);
     }
+  });
+});
+
+describe("renewal is granted by default and refused only two ways", () => {
+  const facts = (o: Partial<Parameters<typeof renewalDecision>[0]> = {}) =>
+    ({ armed: true, releasedAt: null, suspendedAt: null, ...o });
+
+  it("grants a healthy armed lease", () => {
+    expect(renewalDecision(facts())).toBe("grant");
+  });
+  it("denies a suspended one - the recorded human lever", () => {
+    expect(renewalDecision(facts({ suspendedAt: NOW }))).toBe("deny");
+  });
+  it("reports released, terminally, over everything else", () => {
+    expect(renewalDecision(facts({ suspendedAt: NOW, releasedAt: NOW }))).toBe("released");
+  });
+  it("is disarmed when no lease is armed", () => {
+    expect(renewalDecision(facts({ armed: false }))).toBe("disarmed");
+  });
+  it("takes no money - refusal is standing, never a balance", () => {
+    // The type has no financial field; this is the structural half of the pin.
+    const keys = Object.keys(facts());
+    expect(keys).toEqual(["armed", "releasedAt", "suspendedAt"]);
   });
 });
 

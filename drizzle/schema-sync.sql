@@ -3864,3 +3864,7 @@ CREATE TABLE IF NOT EXISTS "device_leases" (
   "created_at" timestamp NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS "device_leases_device_idx" ON "device_leases" ("device_id");
+
+ALTER TABLE "device_leases" ADD COLUMN IF NOT EXISTS "suspended_at" timestamp;
+ALTER TABLE "device_leases" ADD COLUMN IF NOT EXISTS "suspended_by" text NOT NULL DEFAULT '';
+ALTER TABLE "device_leases" ADD COLUMN IF NOT EXISTS "suspend_reason" text NOT NULL DEFAULT '';

@@ -137,6 +137,44 @@ export function leaseMessage(contact: string, action: "warn" | "lock"): string {
     : `This system is operating under a supplier lease that needs renewal.${call}`;
 }
 
+// ── Renewal: the decision that actually applies the leverage ────────────────
+//
+// A guard renews silently whenever it reaches us, or it would lapse constantly
+// and lock working labs - so renewal is granted BY DEFAULT. That means the
+// online case is covered by simply refusing to renew: a machine we decline to
+// re-lease keeps checking in and still lapses when its current lease runs out.
+//
+// Refusal has exactly two causes, and NEITHER is a balance:
+//
+//   * the machine is offline - nothing to refuse; it lapses on its own. This is
+//     the theft-kept-dark case the whole guard exists for.
+//   * a human SUSPENDED renewal - a recorded decision with a name and a reason
+//     (lib/leaseGuardData). This is the lever, and pulling it is the deliberate
+//     act that "unpaid past terms" might prompt - decided by a person, never
+//     wired to the invoice table. The money-invariant test depends on this
+//     function taking no money.
+
+export type RenewalFacts = {
+  armed: boolean;
+  releasedAt: Date | null;
+  /** Set by a human to stop re-leasing this machine. Null = renew normally. */
+  suspendedAt: Date | null;
+};
+
+/**
+ * What the guard's check-in is answered with. `grant` issues a fresh full lease;
+ * `deny` leaves the machine to lapse; `released` tells it to stand down and
+ * uninstall; `disarmed` means no lease is in force.
+ */
+export type RenewalDecision = "grant" | "deny" | "released" | "disarmed";
+
+export function renewalDecision(f: RenewalFacts): RenewalDecision {
+  if (f.releasedAt !== null) return "released";
+  if (!f.armed) return "disarmed";
+  if (f.suspendedAt !== null) return "deny";
+  return "grant";
+}
+
 /** Clamp a customized lease length into the allowed range. */
 export function clampLeaseDays(days: number): number {
   return Math.min(LEASE_DAYS_MAX, Math.max(LEASE_DAYS_MIN, Math.round(days)));
