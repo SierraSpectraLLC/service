@@ -807,6 +807,102 @@ const FIXTURE = `
       activity: [{ actor: "Dev Owner", action: "archived", field: "", newValue: "", createdAt: "2026-06-22T09:00:00Z" }],
     })}'::jsonb);
 
+  -- ── T-003: the restoration demo from docs/mocks/ridgeline-restoration-flow.html ──
+  -- Mid-pipeline (Verify) so every earlier stage has a read-only record to
+  -- open and the later gates still have work to demand.
+  INSERT INTO instruments (external_id, client, name, model, category, manufacturer, tenant_org_id, stages, notes)
+    VALUES ('T-003', 'Lab Zen', 'Thermo Trace 1310 GC · ISQ 7000 · TriPlus 500 HS', 'Trace 1310 GC', 'GC/MS', 'Thermo',
+      (SELECT id FROM orgs WHERE name = 'Sierra Spectra'), '{Refurbishment}', 'Auction lot - restoration demo.');
+  INSERT INTO assets (instrument_id, kind, model, serial, manufacturer, status, tenant_org_id, sort_order)
+    SELECT i.id, v.kind, v.model, v.serial, v.mfr, 'In service', i.tenant_org_id, v.ord
+    FROM instruments i, (VALUES
+      ('Mass spec', 'ISQ 7000', 'ISQ7N2009006', 'Thermo', 1),
+      ('GC', 'Trace 1310 GC', '720001783', 'Thermo', 2),
+      ('Headspace', 'TriPlus 500', '820100261', 'Thermo', 3),
+      ('Vacuum pump', 'Edwards RV3', '180675201', 'Edwards', 4)
+    ) AS v(kind, model, serial, mfr, ord)
+    WHERE i.external_id = 'T-003';
+  INSERT INTO restoration_projects (tenant_org_id, instrument_id, source, stage, stage_since, assignee, created_by, created_at)
+    SELECT tenant_org_id, id, 'acquired', 'verify', now() - interval '1 day', 'Dev Owner', '${OWNER}', now() - interval '9 days'
+    FROM instruments WHERE external_id = 'T-003';
+  INSERT INTO component_conditions (project_id, asset_id, grade, graded_by, graded_at)
+    SELECT p.id, a.id, v.grade, '${OWNER}', now() - interval '8 days'
+    FROM restoration_projects p
+    JOIN instruments i ON i.id = p.instrument_id AND i.external_id = 'T-003'
+    JOIN assets a ON a.instrument_id = i.id
+    JOIN (VALUES ('ISQ7N2009006','C'), ('720001783','B'), ('820100261','D'), ('180675201','B')) AS v(serial, grade)
+      ON v.serial = a.serial;
+  INSERT INTO findings (project_id, asset_id, severity, title, created_by, created_at)
+    SELECT p.id, a.id, v.sev, v.title, '${OWNER}', now() - interval '8 days'
+    FROM restoration_projects p
+    JOIN instruments i ON i.id = p.instrument_id AND i.external_id = 'T-003'
+    JOIN assets a ON a.instrument_id = i.id
+    JOIN (VALUES
+      ('820100261', 'bad', 'Headspace arm not operating properly'),
+      ('ISQ7N2009006', 'warn', 'Electron multiplier suspect — verify gain before release')
+    ) AS v(serial, sev, title) ON v.serial = a.serial;
+  INSERT INTO tasks (tenant_org_id, instrument_id, asset_id, title, state, assignee, origin, restoration_project_id, finding_id, completed_at)
+    SELECT p.tenant_org_id, p.instrument_id, f.asset_id, f.title, 'Done', 'Bill Reyes', 'finding', p.id, f.id, now() - interval '3 days'
+    FROM restoration_projects p
+    JOIN instruments i ON i.id = p.instrument_id AND i.external_id = 'T-003'
+    JOIN findings f ON f.project_id = p.id;
+  INSERT INTO tasks (tenant_org_id, instrument_id, title, state, assignee, restoration_project_id, completed_at)
+    SELECT p.tenant_org_id, p.instrument_id, 'Full PM — source clean, filament, septa, liner, pump oil', 'Done', 'Bill Reyes', p.id, now() - interval '2 days'
+    FROM restoration_projects p JOIN instruments i ON i.id = p.instrument_id AND i.external_id = 'T-003';
+  INSERT INTO provenance_answers (project_id, question_key, answer, answered_by)
+    SELECT p.id, v.k, v.a, '${OWNER}'
+    FROM restoration_projects p
+    JOIN instruments i ON i.id = p.instrument_id AND i.external_id = 'T-003',
+    (VALUES ('operational_at_deinstall','unknown'), ('last_pm_date','unknown'), ('pm_docs','none'), ('contract_history','unknown')) AS v(k, a);
+  INSERT INTO handoff_kits (project_id, software_notes, license_status, utilities, cred_username)
+    SELECT p.id, 'TraceFinder required — no active license on system', 'required',
+      '100–240 V · 50/60 Hz · 50 A max · 6-15 plug · no vent required', 'LZ1'
+    FROM restoration_projects p JOIN instruments i ON i.id = p.instrument_id AND i.external_id = 'T-003';
+  INSERT INTO parts (instrument_id, restoration_project_id, name, part_number, qty, vendor, cost_cents, status, installed_at)
+    SELECT p.instrument_id, p.id, v.name, v.pn, v.qty, v.vendor, v.cents, 'Installed', to_char(now() - interval '3 days', 'YYYY-MM-DD')
+    FROM restoration_projects p
+    JOIN instruments i ON i.id = p.instrument_id AND i.external_id = 'T-003',
+    (VALUES
+      ('Electron multiplier', 'WE023950', '1', 'Frit & Ferrule', 68500),
+      ('Filament assembly', '1R120-1005', '1', 'Stock', 21200),
+      ('RV3 pump oil (1L)', 'H11025011', '2', 'Stock', 5800)
+    ) AS v(name, pn, qty, vendor, cents);
+  INSERT INTO attachments (instrument_id, restoration_project_id, file_name, kind, description, url, size, uploaded_by)
+    SELECT p.instrument_id, p.id, v.fname, v.kind, v.descr, v.url, v.size, 'Dev Owner'
+    FROM restoration_projects p
+    JOIN instruments i ON i.id = p.instrument_id AND i.external_id = 'T-003',
+    (VALUES
+      ('arrival-front.jpg', 'Photo', 'Restoration photo', 'https://blob.local/t003-1.jpg', 412000),
+      ('arrival-rear.jpg', 'Photo', 'Restoration photo', 'https://blob.local/t003-2.jpg', 398000),
+      ('arrival-serials.jpg', 'Photo', 'Restoration photo', 'https://blob.local/t003-3.jpg', 371000),
+      ('arrival-crate.jpg', 'Photo', 'Restoration photo', 'https://blob.local/t003-4.jpg', 405000),
+      ('MotionRepair RMA MR-2231 report.pdf', 'Report', 'Outside work report - MotionRepair Co.', 'https://blob.local/t003-rma.pdf', 122000),
+      ('Wipe certificate.pdf', 'Report', 'Prior-owner data wipe certificate', 'https://blob.local/t003-wipe.pdf', 88000)
+    ) AS v(fname, kind, descr, url, size);
+  INSERT INTO outside_work (project_id, vendor, rma_number, description, cost_cents, report_attachment_id, created_by)
+    SELECT p.id, 'MotionRepair Co.', 'MR-2231', 'Headspace arm drive rebuild', 42000,
+      (SELECT id FROM attachments WHERE file_name = 'MotionRepair RMA MR-2231 report.pdf'), '${OWNER}'
+    FROM restoration_projects p JOIN instruments i ON i.id = p.instrument_id AND i.external_id = 'T-003';
+  UPDATE restoration_projects SET
+      pc_backup_at = now() - interval '1 day',
+      wipe_cert_attachment_id = (SELECT id FROM attachments WHERE file_name = 'Wipe certificate.pdf')
+    WHERE instrument_id = (SELECT id FROM instruments WHERE external_id = 'T-003');
+  INSERT INTO restoration_confirms (project_id, stage, key, confirmed_by, confirmed_at)
+    SELECT p.id, v.stage, v.k, '${OWNER}', now() - interval '2 days'
+    FROM restoration_projects p
+    JOIN instruments i ON i.id = p.instrument_id AND i.external_id = 'T-003',
+    (VALUES ('receive','handoff_vaulted'), ('restore','task_photos')) AS v(stage, k);
+  INSERT INTO audit_log (tenant_org_id, instrument_id, entity_type, entity_id, actor, action, created_at)
+    SELECT p.tenant_org_id, p.instrument_id, 'restoration', p.id::text, v.actor, v.action, now() - (v.days || ' days')::interval
+    FROM restoration_projects p
+    JOIN instruments i ON i.id = p.instrument_id AND i.external_id = 'T-003',
+    (VALUES
+      ('${OWNER}', 'opened restoration receiving for T-003', '9'),
+      ('${OWNER}', 'received 4 components — matched to catalog', '8'),
+      ('bill@sierraspectra.test', 'completed full PM · parts logged', '2'),
+      ('${OWNER}', 'advanced T-003 to Restoring', '5'),
+      ('${OWNER}', 'advanced T-003 to Verifying', '1')
+    ) AS v(actor, action, days);
   -- Three lab PCs, so /remote is a list rather than an empty state, and the
   -- notice controls have something to sit under. Between them they cover the
   -- three things that panel renders: a machine that is quiet, one carrying a

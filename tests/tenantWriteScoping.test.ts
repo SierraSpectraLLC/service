@@ -42,6 +42,10 @@ const GUARD_VOCABULARY = new RegExp([
   "adminOrgGate\\(", "mayAdminOrg\\(", "maySeeBooks\\(", "mayEditPayroll\\(",
   "validationDocAccess\\(", "assertRequestDecider\\(", "guardFor\\(", "ownStage\\(",
   "folderById\\(", "roomAccess\\(", "deviceWithOrg\\(", "stockAccess\\(",
+  // app/actions.restorationFor: fetches the project and refuses any whose
+  // tenantOrgId is not the caller's own workspace ("Not found", the tenancy
+  // doctrine). Every restoration write goes through it first.
+  "restorationFor\\(",
   /*
    * app/actions.workableReport, which is the reimbursement desk's whole gate
    * and says so at length: houseOf(u, report.tenantOrgId) FIRST, because

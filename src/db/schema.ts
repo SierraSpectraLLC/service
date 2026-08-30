@@ -1325,7 +1325,8 @@ export const tasks = pgTable("tasks", {
   // '' = hand-made | 'checkout' = auto-generated test | 'pm' = from a maintenance
   // schedule | 'issue' = raised by whoever owns the system saying it is broken |
   // 'pm_request' = the client asking for upkeep (no schedule attached on purpose:
-  // completing it must not move a contract's calendar - see lib/pmRequest)
+  // completing it must not move a contract's calendar - see lib/pmRequest) |
+  // 'finding' = queued automatically from a restoration receiving finding
   origin: text("origin").notNull().default(""),
   assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }), // optional: which asset this is about
   // Which schedule generated this task; completing it advances that schedule.
@@ -1347,9 +1348,18 @@ export const tasks = pgTable("tasks", {
   // work order is a wrapper around work that happened, and deleting the wrapper
   // must not delete the record of the work.
   workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
+  // The restoration project this task works, when it works one - the Restore
+  // stage's task list. Set null: the record of the work outlives the project.
+  restorationProjectId: integer("restoration_project_id").references((): AnyPgColumn => restorationProjects.id, { onDelete: "set null" }),
+  // The receiving finding that raised it, so the UI can say "from finding #n".
+  findingId: integer("finding_id").references((): AnyPgColumn => findings.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   completedAt: timestamp("completed_at"),
-}, (t) => [index("tasks_instrument_idx").on(t.instrumentId), index("tasks_work_order_idx").on(t.workOrderId)]);
+}, (t) => [
+  index("tasks_instrument_idx").on(t.instrumentId),
+  index("tasks_work_order_idx").on(t.workOrderId),
+  index("tasks_restoration_idx").on(t.restorationProjectId),
+]);
 
 export const checklistItems = pgTable("checklist_items", {
   id: serial("id").primaryKey(),
@@ -1588,6 +1598,9 @@ export const parts = pgTable("parts", {
   note: text("note").notNull().default(""),
   // See lib/stages.PART_STATES - two lanes, bought and made, sharing both ends.
   status: text("status").notNull().default("Needed"),
+  // The restoration project whose cost this part flows into, when there is
+  // one. Set null: the parts record outlives the project (audit-log rule).
+  restorationProjectId: integer("restoration_project_id").references((): AnyPgColumn => restorationProjects.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("parts_instrument_idx").on(t.instrumentId)]);
 
@@ -1749,8 +1762,15 @@ export const attachments = pgTable("attachments", {
   // never expires. The file is not the problem; nobody noticing it lapsed is,
   // so anything dated feeds the expiry attention on the dashboard (lib/gxp).
   expiresOn: text("expires_on").notNull().default(""),
+  // Restoration paperwork: photos and reports on a project, and photo
+  // evidence on a receiving finding. Set null - the file outlives both.
+  restorationProjectId: integer("restoration_project_id").references((): AnyPgColumn => restorationProjects.id, { onDelete: "set null" }),
+  findingId: integer("finding_id").references((): AnyPgColumn => findings.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (t) => [index("attachments_instrument_idx").on(t.instrumentId)]);
+}, (t) => [
+  index("attachments_instrument_idx").on(t.instrumentId),
+  index("attachments_restoration_idx").on(t.restorationProjectId),
+]);
 
 /**
  * A release signature: one person, at one moment, stating that a system (or a
@@ -2216,6 +2236,9 @@ export const workOrders = pgTable("work_orders", {
   // into a list of dates.
   closeSummary: text("close_summary").notNull().default(""),
   closedBy: text("closed_by").notNull().default(""),
+  // The restoration project this job serves - the Commission install is a
+  // Ridgeline job like any other, and this is how the project finds it.
+  restorationProjectId: integer("restoration_project_id").references((): AnyPgColumn => restorationProjects.id, { onDelete: "set null" }),
   resolvedAt: timestamp("resolved_at"),
   closedAt: timestamp("closed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -3868,6 +3891,335 @@ export const remoteDevices = pgTable("remote_devices", {
   index("remote_devices_instrument_idx").on(t.instrumentId),
 ]);
 
+// ---------------------------------------------------------------------------
+// Restoration module - the reseller pipeline (Receive → Restore → Verify →
+// Ship → Commission). Visual reference: docs/mocks/ridgeline-restoration-flow.html.
+// Reuses the existing record wherever one fits: restore tasks are `tasks`
+// rows, parts used are `parts` rows, photos are `attachments`, the ledger is
+// `audit_log`, acceptance signatures are `signoffs`, and the on-site install
+// is an ordinary `work_orders` job. The tables below are only the concepts
+// nothing existing models. Stage/source/grade vocabularies live in
+// lib/restoration.
+// ---------------------------------------------------------------------------
+
+/**
+ * One system moving through the restoration pipeline. The system itself is an
+ * `instruments` row (created at intake like any other); this row is the
+ * PROJECT - a bounded engagement with a stage, a buyer, and a gate between
+ * every stage.
+ *
+ * `stage` moves ONLY through advanceRestorationStage in app/actions, which
+ * re-evaluates the gate server-side and writes a ledger event. Nothing else
+ * may update it - the client's view of a gate is advisory, never the
+ * authority (the signoffGate philosophy, applied to stages).
+ *
+ * Distinct on purpose from the per-tenant kanban `stage_defs`: those are
+ * display labels a tenant may recolor and reorder; these five stages are the
+ * pipeline's contract and are fixed in code.
+ */
+export const restorationProjects = pgTable("restoration_projects", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  // acquired | trade_in | client_transfer - where the system came from
+  source: text("source").notNull().default("acquired"),
+  // receive | restore | verify | ship | commission | complete
+  stage: text("stage").notNull().default("receive"),
+  // When the current stage began - "days in stage" on the queue reads this.
+  stageSince: timestamp("stage_since").notNull().defaultNow(),
+  assignee: text("assignee").notNull().default(""),
+  // The buying client, once known. Nullable until Ship at the latest; the
+  // Ship gate is what insists on it.
+  buyerOrgId: integer("buyer_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  // Data hygiene (Verify stage). The wipe certificate is an attachment
+  // pointer, no FK - same rule as instruments.photoAttachmentId.
+  pcBackupAt: timestamp("pc_backup_at"),
+  wipeCertAttachmentId: integer("wipe_cert_attachment_id"),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+}, (t) => [
+  index("restoration_projects_instrument_idx").on(t.instrumentId),
+  index("restoration_projects_tenant_idx").on(t.tenantOrgId),
+  index("restoration_projects_stage_idx").on(t.stage),
+]);
+
+/**
+ * Condition grade per component per project - a project-scoped join onto
+ * `assets` rather than a column on the asset, because a grade is an opinion
+ * formed at THIS receiving. The asset's own write-once `asFound` prose stays
+ * what it always was; the next restoration of the same unit grades it again.
+ */
+export const componentConditions = pgTable("component_conditions", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => restorationProjects.id, { onDelete: "cascade" }),
+  assetId: integer("asset_id").notNull().references(() => assets.id, { onDelete: "cascade" }),
+  // A | B | C | D | F, '' = not yet graded (the Receive gate counts blanks)
+  grade: text("grade").notNull().default(""),
+  notes: text("notes").notNull().default(""),
+  gradedBy: text("graded_by").notNull().default(""),
+  gradedAt: timestamp("graded_at"),
+}, (t) => [
+  unique("component_condition_unique").on(t.projectId, t.assetId),
+  index("component_conditions_project_idx").on(t.projectId),
+]);
+
+/**
+ * Something wrong, noticed at receiving (or later). A finding logged in the
+ * Receive stage auto-creates a linked restore task (tasks.findingId points
+ * back here) so nothing observed is ever silently dropped. Photos attach via
+ * attachments.findingId.
+ */
+export const findings = pgTable("findings", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => restorationProjects.id, { onDelete: "cascade" }),
+  // Which component, when it is about one. Null = the system as a whole.
+  assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }),
+  // bad | warn
+  severity: text("severity").notNull().default("warn"),
+  title: text("title").notNull(),
+  notes: text("notes").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("findings_project_idx").on(t.projectId)]);
+
+/**
+ * The provenance interview - asked once at receiving, travels with the record
+ * forever. Question set is code-defined for v1 (lib/restoration
+ * PROVENANCE_QUESTIONS); `unknown` is a first-class answer, distinct from a
+ * question nobody asked. Honest gaps beat invented answers.
+ */
+export const provenanceAnswers = pgTable("provenance_answers", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => restorationProjects.id, { onDelete: "cascade" }),
+  // operational_at_deinstall | last_pm_date | pm_docs | contract_history
+  questionKey: text("question_key").notNull(),
+  // The answer value ('unknown' first-class; '' means not yet answered, which
+  // the interview-complete gate refuses - gaps allowed, skips aren't).
+  answer: text("answer").notNull().default(""),
+  // Free-text alongside the enum: the PM date itself, the contract's name.
+  detail: text("detail").notNull().default(""),
+  answeredBy: text("answered_by").notNull().default(""),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [unique("provenance_answer_unique").on(t.projectId, t.questionKey)]);
+
+/**
+ * Third-party work during Restore - documented or it didn't happen. The
+ * vendor's report is an attachment pointer, no FK.
+ */
+export const outsideWork = pgTable("outside_work", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => restorationProjects.id, { onDelete: "cascade" }),
+  vendor: text("vendor").notNull().default(""),
+  rmaNumber: text("rma_number").notNull().default(""),
+  description: text("description").notNull().default(""),
+  reportAttachmentId: integer("report_attachment_id"),
+  costCents: integer("cost_cents").notNull().default(0),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("outside_work_project_idx").on(t.projectId)]);
+
+/**
+ * What the next owner needs: software, utilities, and the workstation login.
+ * The secret is sealed with lib/secretBox (AES-GCM, server-side key) - never
+ * plaintext in the row, never in a client bundle. Reveal is a server action
+ * that decrypts, returns once, and writes a `credential_revealed` ledger
+ * event naming who and when.
+ */
+export const handoffKits = pgTable("handoff_kits", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => restorationProjects.id, { onDelete: "cascade" }),
+  softwareNotes: text("software_notes").notNull().default(""),
+  // '' = not recorded | active | required | none - see lib/restoration
+  licenseStatus: text("license_status").notNull().default(""),
+  utilities: text("utilities").notNull().default(""),
+  // The username is plaintext (it is not a secret); the secret is a sealed
+  // box, '' = none vaulted.
+  credUsername: text("cred_username").notNull().default(""),
+  credSecret: text("cred_secret").notNull().default(""),
+  credUpdatedBy: text("cred_updated_by").notNull().default(""),
+  credUpdatedAt: timestamp("cred_updated_at"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [unique("handoff_kit_project_unique").on(t.projectId)]);
+
+/**
+ * Checklist templates as rows, keyed by instrument category and pipeline
+ * stage - unlike the newline-text templates on procedures/pm_schedules,
+ * these need per-item who/when on execution. tenantOrgId null = seeded
+ * built-in belonging to every workspace (the stage_defs pattern); the GC/MS
+ * ship-prep seed comes from the mockup.
+ */
+export const checklistTemplates = pgTable("checklist_templates", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  // Instrument category it applies to ("GC/MS", "LC/MS", "HPLC"...), '' = any
+  category: text("category").notNull().default(""),
+  // verify_setup | ship_prep | commission_onsite
+  stage: text("stage").notNull(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("checklist_templates_stage_idx").on(t.stage)]);
+
+export const checklistTemplateItems = pgTable("checklist_template_items", {
+  id: serial("id").primaryKey(),
+  templateId: integer("template_id").notNull().references(() => checklistTemplates.id, { onDelete: "cascade" }),
+  text: text("text").notNull(),
+  // A section label rather than a box - same meaning as checklist_items.heading.
+  heading: boolean("heading").notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
+/**
+ * A template instantiated onto a project. Items are FROZEN copies of the
+ * template's items at instantiation - editing a template later must not
+ * rewrite what somebody already signed against.
+ */
+export const checklistRuns = pgTable("checklist_runs", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => restorationProjects.id, { onDelete: "cascade" }),
+  templateId: integer("template_id").references(() => checklistTemplates.id, { onDelete: "set null" }),
+  stage: text("stage").notNull().default(""),
+  name: text("name").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("checklist_runs_project_idx").on(t.projectId)]);
+
+export const checklistRunItems = pgTable("checklist_run_items", {
+  id: serial("id").primaryKey(),
+  runId: integer("run_id").notNull().references(() => checklistRuns.id, { onDelete: "cascade" }),
+  text: text("text").notNull(),
+  heading: boolean("heading").notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
+  // Who ticked it and when. Null checkedAt = unticked; blank checkedBy with a
+  // checkedAt cannot happen - the action stamps both together.
+  checkedBy: text("checked_by").notNull().default(""),
+  checkedAt: timestamp("checked_at"),
+}, (t) => [index("checklist_run_items_run_idx").on(t.runId)]);
+
+/**
+ * Where the system goes and how. Structured address components rather than
+ * one formatted string - lat/lng feeds install dispatch later, and a zip is
+ * queryable where "3148 MLK Blvd, Lynwood, CA 90262" is not. One shipment
+ * per project in v1.
+ */
+export const shipments = pgTable("shipments", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => restorationProjects.id, { onDelete: "cascade" }),
+  destName: text("dest_name").notNull().default(""),
+  addressLine1: text("address_line1").notNull().default(""),
+  city: text("city").notNull().default(""),
+  state: text("state").notNull().default(""),
+  zip: text("zip").notNull().default(""),
+  // Google's own formatted string, kept for display; the components above are
+  // what the record is built on.
+  formatted: text("formatted").notNull().default(""),
+  lat: doublePrecision("lat"),
+  lng: doublePrecision("lng"),
+  contactName: text("contact_name").notNull().default(""),
+  contactPhone: text("contact_phone").notNull().default(""),
+  // Facility flags from the buyer's survey - what the rigger needs to know.
+  dock: boolean("dock").notNull().default(false),
+  groundFloor: boolean("ground_floor").notNull().default(false),
+  liftgate: boolean("liftgate").notNull().default(false),
+  garageDoor: boolean("garage_door").notNull().default(false),
+  secondFloor: boolean("second_floor").notNull().default(false),
+  declaredValueCents: integer("declared_value_cents").notNull().default(0),
+  carrier: text("carrier").notNull().default(""),
+  trackingNumber: text("tracking_number").notNull().default(""),
+  pickupOn: text("pickup_on").notNull().default(""), // YYYY-MM-DD in shop time, blank = unscheduled
+  pickupNote: text("pickup_note").notNull().default(""), // "AM window", "call ahead"
+  shippedAt: timestamp("shipped_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [unique("shipment_project_unique").on(t.projectId)]);
+
+/** Every box, every serial. */
+export const crates = pgTable("crates", {
+  id: serial("id").primaryKey(),
+  shipmentId: integer("shipment_id").notNull().references(() => shipments.id, { onDelete: "cascade" }),
+  label: text("label").notNull(), // "CR-1"
+  weightLb: integer("weight_lb").notNull().default(0),
+  sortOrder: integer("sort_order").notNull().default(0),
+}, (t) => [index("crates_shipment_idx").on(t.shipmentId)]);
+
+/**
+ * Which crate each serialized component rides in. The Ship gate insists every
+ * serialized component maps to EXACTLY one crate; "at most one per crate" is
+ * the unique below, "exactly one overall" is enforced by the gate because it
+ * spans crates.
+ */
+export const crateContents = pgTable("crate_contents", {
+  id: serial("id").primaryKey(),
+  crateId: integer("crate_id").notNull().references(() => crates.id, { onDelete: "cascade" }),
+  assetId: integer("asset_id").notNull().references(() => assets.id, { onDelete: "cascade" }),
+}, (t) => [
+  unique("crate_content_unique").on(t.crateId, t.assetId),
+  index("crate_contents_asset_idx").on(t.assetId),
+]);
+
+/**
+ * A checkout verdict on the record - the bench Verify tune and the on-site
+ * commission tune. Written manually today (source 'manual'); when the
+ * tunecheck service is wired in, parsing fills the same columns with source
+ * 'parsed'. Pointers rather than cascades from the project: verdicts are
+ * history and follow the audit-log philosophy - the record outlives its
+ * subjects.
+ */
+export const checkoutVerdicts = pgTable("checkout_verdicts", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  projectId: integer("project_id").references(() => restorationProjects.id, { onDelete: "set null" }),
+  // Also on the system's own history, so the verdict travels with the serial.
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }),
+  // verify | commission - which stage's checkout this proves
+  phase: text("phase").notNull().default("verify"),
+  // pass | fail
+  verdict: text("verdict").notNull().default(""),
+  // manual | parsed
+  source: text("source").notNull().default("manual"),
+  summary: text("summary").notNull().default(""), // "EI tune · Aug 31, 14:22"
+  // JSON [{name, value, ok}] - the metric grid. Text like the other JSON
+  // columns; lib parses and tolerates blank.
+  metrics: text("metrics").notNull().default(""),
+  reportAttachmentId: integer("report_attachment_id"),
+  recordedBy: text("recorded_by").notNull().default(""),
+  recordedAt: timestamp("recorded_at").notNull().defaultNow(),
+}, (t) => [
+  index("checkout_verdicts_project_idx").on(t.projectId),
+  index("checkout_verdicts_instrument_idx").on(t.instrumentId),
+]);
+
+/**
+ * The buyer's acceptance - requested of a portal user, signed in THEIR
+ * authenticated portal session (never the public share-token path). The
+ * signature act itself is a `signoffs` row, referenced here; this row is the
+ * request's lifecycle around it.
+ */
+export const acceptances = pgTable("acceptances", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => restorationProjects.id, { onDelete: "cascade" }),
+  requestedAt: timestamp("requested_at"),
+  requestedOf: text("requested_of").notNull().default(""), // portal user's email
+  signedAt: timestamp("signed_at"),
+  signedBy: text("signed_by").notNull().default(""),
+  signoffId: integer("signoff_id").references(() => signoffs.id, { onDelete: "set null" }),
+  // The on-site verdict the buyer is accepting against.
+  onsiteVerdictId: integer("onsite_verdict_id").references(() => checkoutVerdicts.id, { onDelete: "set null" }),
+}, (t) => [unique("acceptance_project_unique").on(t.projectId)]);
+
+/**
+ * The human half of a stage gate: 'confirm' checkboxes, persisted with who
+ * and when. The computed 'system' half is never stored - it is re-evaluated
+ * server-side at the moment of advancing, like a money balance.
+ */
+export const restorationConfirms = pgTable("restoration_confirms", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => restorationProjects.id, { onDelete: "cascade" }),
+  stage: text("stage").notNull(),
+  key: text("key").notNull(),
+  confirmedBy: text("confirmed_by").notNull().default(""),
+  confirmedAt: timestamp("confirmed_at").notNull().defaultNow(),
+}, (t) => [unique("restoration_confirm_unique").on(t.projectId, t.stage, t.key)]);
 /**
  * A repossession notice posted to a machine. Commercial, non-blocking, signed.
  *

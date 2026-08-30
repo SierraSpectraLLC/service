@@ -3789,6 +3789,286 @@ ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "stipend_id" integer REFERENCES 
 CREATE INDEX IF NOT EXISTS "expenses_stipend_idx" ON "expenses" ("stipend_id");
 ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "source" text NOT NULL DEFAULT '';
 
+-- ── Restoration module ─────────────────────────────────────────────────────
+-- The reseller pipeline (Receive → Restore → Verify → Ship → Commission).
+-- New tables only for concepts nothing existing models; restore tasks, parts
+-- used, photos, the ledger and acceptance signatures reuse tasks / parts /
+-- attachments / audit_log / signoffs via the ADD COLUMN links below.
+CREATE TABLE IF NOT EXISTS "restoration_projects" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "instrument_id" integer NOT NULL REFERENCES "instruments"("id") ON DELETE CASCADE,
+  "source" text NOT NULL DEFAULT 'acquired',
+  "stage" text NOT NULL DEFAULT 'receive',
+  "stage_since" timestamp NOT NULL DEFAULT now(),
+  "assignee" text NOT NULL DEFAULT '',
+  "buyer_org_id" integer REFERENCES "orgs"("id") ON DELETE SET NULL,
+  "pc_backup_at" timestamp,
+  "wipe_cert_attachment_id" integer,
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "updated_at" timestamp NOT NULL DEFAULT now(),
+  "completed_at" timestamp
+);
+CREATE INDEX IF NOT EXISTS "restoration_projects_instrument_idx" ON "restoration_projects" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "restoration_projects_tenant_idx" ON "restoration_projects" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "restoration_projects_stage_idx" ON "restoration_projects" ("stage");
+
+CREATE TABLE IF NOT EXISTS "component_conditions" (
+  "id" serial PRIMARY KEY,
+  "project_id" integer NOT NULL REFERENCES "restoration_projects"("id") ON DELETE CASCADE,
+  "asset_id" integer NOT NULL REFERENCES "assets"("id") ON DELETE CASCADE,
+  "grade" text NOT NULL DEFAULT '',
+  "notes" text NOT NULL DEFAULT '',
+  "graded_by" text NOT NULL DEFAULT '',
+  "graded_at" timestamp,
+  CONSTRAINT "component_condition_unique" UNIQUE ("project_id","asset_id")
+);
+CREATE INDEX IF NOT EXISTS "component_conditions_project_idx" ON "component_conditions" ("project_id");
+
+CREATE TABLE IF NOT EXISTS "findings" (
+  "id" serial PRIMARY KEY,
+  "project_id" integer NOT NULL REFERENCES "restoration_projects"("id") ON DELETE CASCADE,
+  "asset_id" integer REFERENCES "assets"("id") ON DELETE SET NULL,
+  "severity" text NOT NULL DEFAULT 'warn',
+  "title" text NOT NULL,
+  "notes" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "findings_project_idx" ON "findings" ("project_id");
+
+CREATE TABLE IF NOT EXISTS "provenance_answers" (
+  "id" serial PRIMARY KEY,
+  "project_id" integer NOT NULL REFERENCES "restoration_projects"("id") ON DELETE CASCADE,
+  "question_key" text NOT NULL,
+  "answer" text NOT NULL DEFAULT '',
+  "detail" text NOT NULL DEFAULT '',
+  "answered_by" text NOT NULL DEFAULT '',
+  "updated_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "provenance_answer_unique" UNIQUE ("project_id","question_key")
+);
+
+CREATE TABLE IF NOT EXISTS "outside_work" (
+  "id" serial PRIMARY KEY,
+  "project_id" integer NOT NULL REFERENCES "restoration_projects"("id") ON DELETE CASCADE,
+  "vendor" text NOT NULL DEFAULT '',
+  "rma_number" text NOT NULL DEFAULT '',
+  "description" text NOT NULL DEFAULT '',
+  "report_attachment_id" integer,
+  "cost_cents" integer NOT NULL DEFAULT 0,
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "outside_work_project_idx" ON "outside_work" ("project_id");
+
+CREATE TABLE IF NOT EXISTS "handoff_kits" (
+  "id" serial PRIMARY KEY,
+  "project_id" integer NOT NULL REFERENCES "restoration_projects"("id") ON DELETE CASCADE,
+  "software_notes" text NOT NULL DEFAULT '',
+  "license_status" text NOT NULL DEFAULT '',
+  "utilities" text NOT NULL DEFAULT '',
+  "cred_username" text NOT NULL DEFAULT '',
+  "cred_secret" text NOT NULL DEFAULT '',
+  "cred_updated_by" text NOT NULL DEFAULT '',
+  "cred_updated_at" timestamp,
+  "updated_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "handoff_kit_project_unique" UNIQUE ("project_id")
+);
+
+CREATE TABLE IF NOT EXISTS "checklist_templates" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "category" text NOT NULL DEFAULT '',
+  "stage" text NOT NULL,
+  "name" text NOT NULL,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "checklist_templates_stage_idx" ON "checklist_templates" ("stage");
+
+CREATE TABLE IF NOT EXISTS "checklist_template_items" (
+  "id" serial PRIMARY KEY,
+  "template_id" integer NOT NULL REFERENCES "checklist_templates"("id") ON DELETE CASCADE,
+  "text" text NOT NULL,
+  "heading" boolean NOT NULL DEFAULT false,
+  "sort_order" integer NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS "checklist_runs" (
+  "id" serial PRIMARY KEY,
+  "project_id" integer NOT NULL REFERENCES "restoration_projects"("id") ON DELETE CASCADE,
+  "template_id" integer REFERENCES "checklist_templates"("id") ON DELETE SET NULL,
+  "stage" text NOT NULL DEFAULT '',
+  "name" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "checklist_runs_project_idx" ON "checklist_runs" ("project_id");
+
+CREATE TABLE IF NOT EXISTS "checklist_run_items" (
+  "id" serial PRIMARY KEY,
+  "run_id" integer NOT NULL REFERENCES "checklist_runs"("id") ON DELETE CASCADE,
+  "text" text NOT NULL,
+  "heading" boolean NOT NULL DEFAULT false,
+  "sort_order" integer NOT NULL DEFAULT 0,
+  "checked_by" text NOT NULL DEFAULT '',
+  "checked_at" timestamp
+);
+CREATE INDEX IF NOT EXISTS "checklist_run_items_run_idx" ON "checklist_run_items" ("run_id");
+
+CREATE TABLE IF NOT EXISTS "shipments" (
+  "id" serial PRIMARY KEY,
+  "project_id" integer NOT NULL REFERENCES "restoration_projects"("id") ON DELETE CASCADE,
+  "dest_name" text NOT NULL DEFAULT '',
+  "address_line1" text NOT NULL DEFAULT '',
+  "city" text NOT NULL DEFAULT '',
+  "state" text NOT NULL DEFAULT '',
+  "zip" text NOT NULL DEFAULT '',
+  "formatted" text NOT NULL DEFAULT '',
+  "lat" double precision,
+  "lng" double precision,
+  "contact_name" text NOT NULL DEFAULT '',
+  "contact_phone" text NOT NULL DEFAULT '',
+  "dock" boolean NOT NULL DEFAULT false,
+  "ground_floor" boolean NOT NULL DEFAULT false,
+  "liftgate" boolean NOT NULL DEFAULT false,
+  "garage_door" boolean NOT NULL DEFAULT false,
+  "second_floor" boolean NOT NULL DEFAULT false,
+  "declared_value_cents" integer NOT NULL DEFAULT 0,
+  "carrier" text NOT NULL DEFAULT '',
+  "tracking_number" text NOT NULL DEFAULT '',
+  "pickup_on" text NOT NULL DEFAULT '',
+  "pickup_note" text NOT NULL DEFAULT '',
+  "shipped_at" timestamp,
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "updated_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "shipment_project_unique" UNIQUE ("project_id")
+);
+
+CREATE TABLE IF NOT EXISTS "crates" (
+  "id" serial PRIMARY KEY,
+  "shipment_id" integer NOT NULL REFERENCES "shipments"("id") ON DELETE CASCADE,
+  "label" text NOT NULL,
+  "weight_lb" integer NOT NULL DEFAULT 0,
+  "sort_order" integer NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS "crates_shipment_idx" ON "crates" ("shipment_id");
+
+CREATE TABLE IF NOT EXISTS "crate_contents" (
+  "id" serial PRIMARY KEY,
+  "crate_id" integer NOT NULL REFERENCES "crates"("id") ON DELETE CASCADE,
+  "asset_id" integer NOT NULL REFERENCES "assets"("id") ON DELETE CASCADE,
+  CONSTRAINT "crate_content_unique" UNIQUE ("crate_id","asset_id")
+);
+CREATE INDEX IF NOT EXISTS "crate_contents_asset_idx" ON "crate_contents" ("asset_id");
+
+CREATE TABLE IF NOT EXISTS "checkout_verdicts" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "project_id" integer REFERENCES "restoration_projects"("id") ON DELETE SET NULL,
+  "instrument_id" integer REFERENCES "instruments"("id") ON DELETE SET NULL,
+  "phase" text NOT NULL DEFAULT 'verify',
+  "verdict" text NOT NULL DEFAULT '',
+  "source" text NOT NULL DEFAULT 'manual',
+  "summary" text NOT NULL DEFAULT '',
+  "metrics" text NOT NULL DEFAULT '',
+  "report_attachment_id" integer,
+  "recorded_by" text NOT NULL DEFAULT '',
+  "recorded_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "checkout_verdicts_project_idx" ON "checkout_verdicts" ("project_id");
+CREATE INDEX IF NOT EXISTS "checkout_verdicts_instrument_idx" ON "checkout_verdicts" ("instrument_id");
+
+CREATE TABLE IF NOT EXISTS "acceptances" (
+  "id" serial PRIMARY KEY,
+  "project_id" integer NOT NULL REFERENCES "restoration_projects"("id") ON DELETE CASCADE,
+  "requested_at" timestamp,
+  "requested_of" text NOT NULL DEFAULT '',
+  "signed_at" timestamp,
+  "signed_by" text NOT NULL DEFAULT '',
+  "signoff_id" integer REFERENCES "signoffs"("id") ON DELETE SET NULL,
+  "onsite_verdict_id" integer REFERENCES "checkout_verdicts"("id") ON DELETE SET NULL,
+  CONSTRAINT "acceptance_project_unique" UNIQUE ("project_id")
+);
+
+CREATE TABLE IF NOT EXISTS "restoration_confirms" (
+  "id" serial PRIMARY KEY,
+  "project_id" integer NOT NULL REFERENCES "restoration_projects"("id") ON DELETE CASCADE,
+  "stage" text NOT NULL,
+  "key" text NOT NULL,
+  "confirmed_by" text NOT NULL DEFAULT '',
+  "confirmed_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "restoration_confirm_unique" UNIQUE ("project_id","stage","key")
+);
+
+-- Links from the reused records into the module.
+ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "restoration_project_id" integer REFERENCES "restoration_projects"("id") ON DELETE SET NULL;
+ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "finding_id" integer REFERENCES "findings"("id") ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS "tasks_restoration_idx" ON "tasks" ("restoration_project_id");
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "restoration_project_id" integer REFERENCES "restoration_projects"("id") ON DELETE SET NULL;
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "restoration_project_id" integer REFERENCES "restoration_projects"("id") ON DELETE SET NULL;
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "finding_id" integer REFERENCES "findings"("id") ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS "attachments_restoration_idx" ON "attachments" ("restoration_project_id");
+ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "restoration_project_id" integer REFERENCES "restoration_projects"("id") ON DELETE SET NULL;
+
+-- Seed: the GC/MS ship-prep template from the mockup. Built-in (null tenant),
+-- guarded by existence of the name so it never duplicates.
+INSERT INTO "checklist_templates" ("tenant_org_id","category","stage","name")
+SELECT NULL, 'GC/MS', 'ship_prep', 'GC/MS ship prep'
+WHERE NOT EXISTS (
+  SELECT 1 FROM "checklist_templates" WHERE "tenant_org_id" IS NULL AND "stage" = 'ship_prep' AND "name" = 'GC/MS ship prep'
+);
+INSERT INTO "checklist_template_items" ("template_id","text","heading","sort_order")
+SELECT t."id", v."text", false, v."sort_order"
+FROM "checklist_templates" t,
+  (VALUES
+    ('System vented, source cooled', 0),
+    ('Rough pump oil drained', 1),
+    ('Transfer line disconnected, secured in "U"', 2),
+    ('Tray/carousel in park position', 3),
+    ('Vents & fittings capped/foiled', 4),
+    ('Wiring photographed before disconnect', 5),
+    ('Crated photos — system in crate, pre-lid', 6)
+  ) AS v("text","sort_order")
+WHERE t."tenant_org_id" IS NULL AND t."stage" = 'ship_prep' AND t."name" = 'GC/MS ship prep'
+  AND NOT EXISTS (SELECT 1 FROM "checklist_template_items" i WHERE i."template_id" = t."id");
+
+-- Seeds: the GC/MS bench-setup (verify) and generic on-site (commission)
+-- templates, same guard pattern as the ship-prep seed above.
+INSERT INTO "checklist_templates" ("tenant_org_id","category","stage","name")
+SELECT NULL, 'GC/MS', 'verify_setup', 'GC/MS bench setup'
+WHERE NOT EXISTS (
+  SELECT 1 FROM "checklist_templates" WHERE "tenant_org_id" IS NULL AND "stage" = 'verify_setup' AND "name" = 'GC/MS bench setup'
+);
+INSERT INTO "checklist_template_items" ("template_id","text","heading","sort_order")
+SELECT t."id", v."text", false, v."sort_order"
+FROM "checklist_templates" t,
+  (VALUES
+    ('Gas lines connected & leak-checked', 0),
+    ('Power connected — correct receptacle confirmed', 1),
+    ('Software installed & communicates with all modules', 2),
+    ('Vacuum pulled — base pressure in range', 3),
+    ('Sample pathway leak-free at temperature', 4)
+  ) AS v("text","sort_order")
+WHERE t."tenant_org_id" IS NULL AND t."stage" = 'verify_setup' AND t."name" = 'GC/MS bench setup'
+  AND NOT EXISTS (SELECT 1 FROM "checklist_template_items" i WHERE i."template_id" = t."id");
+
+INSERT INTO "checklist_templates" ("tenant_org_id","category","stage","name")
+SELECT NULL, '', 'commission_onsite', 'On-site commissioning'
+WHERE NOT EXISTS (
+  SELECT 1 FROM "checklist_templates" WHERE "tenant_org_id" IS NULL AND "stage" = 'commission_onsite' AND "name" = 'On-site commissioning'
+);
+INSERT INTO "checklist_template_items" ("template_id","text","heading","sort_order")
+SELECT t."id", v."text", false, v."sort_order"
+FROM "checklist_templates" t,
+  (VALUES
+    ('Crates received — packing list verified, no damage', 0),
+    ('Uncrated & positioned, utilities connected', 1),
+    ('Pump-down — base vacuum in range', 2),
+    ('On-site checkout — record the verdict', 3),
+    ('Buyer method run on-site (if contracted)', 4)
+  ) AS v("text","sort_order")
+WHERE t."tenant_org_id" IS NULL AND t."stage" = 'commission_onsite' AND t."name" = 'On-site commissioning'
+  AND NOT EXISTS (SELECT 1 FROM "checklist_template_items" i WHERE i."template_id" = t."id");
 CREATE TABLE IF NOT EXISTS "device_notices" (
   "id" serial PRIMARY KEY NOT NULL,
   "tenant_org_id" integer,

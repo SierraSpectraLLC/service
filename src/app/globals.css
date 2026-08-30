@@ -2216,3 +2216,179 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 }
 .report-fab:hover, .report-fab:focus-visible { opacity: 1; color: var(--ink); }
 @media print { .report-fab { display: none; } }
+
+/* ── Restoration pipeline (docs/mocks/ridgeline-restoration-flow.html) ──────
+   The reseller flow's three shapes, drawn once here: the stage strip across
+   the top of a project, the gate rows on a "Ready to advance?" card, and the
+   provenance figure in the sidebar. Everything reads from the existing
+   tokens - stage tones are the ordinary tone vocabulary here, NOT the
+   per-tenant stage_defs hexes, because these five stages are fixed in code. */
+.proj-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 0 16px; align-items: start; }
+.side-wrap { position: sticky; top: 16px; }
+@media (max-width: 900px) {
+  .proj-grid { grid-template-columns: minmax(0, 1fr); }
+  .side-wrap { position: static; }
+}
+
+.pipeline {
+  display: flex; background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm);
+  margin-bottom: var(--sp-4);
+}
+.pipeline .stage {
+  flex: 1; padding: 8px 12px; border: none; border-right: 1px solid var(--line);
+  min-width: 0; background: none; text-align: left; font-family: inherit;
+  text-decoration: none; display: block; color: inherit;
+}
+.pipeline .stage:last-child { border-right: none; }
+.pipeline a.stage { cursor: pointer; }
+.pipeline a.stage:hover .nm { color: var(--link); }
+.pipeline .stage .num { font-family: var(--mono); font-size: var(--fs-micro); color: var(--mut); display: block; font-weight: 700; }
+.pipeline .stage .nm {
+  font-size: var(--fs-small); font-weight: 600; color: var(--mut);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block;
+}
+.pipeline .stage.done .num::after { content: " ✓"; color: var(--t-good-fg); }
+.pipeline .stage.active { background: var(--navy); }
+.pipeline .stage.active .nm { color: #fff; }
+.pipeline .stage.active .num { color: var(--sky); }
+/* A stage the project has not reached: visible so the road ahead reads, but
+   not a link - there is nothing there to see yet. */
+.pipeline .stage.ahead .nm, .pipeline .stage.ahead .num { color: var(--t-faint-fg); }
+.pipeline .stage:focus-visible { outline: 2px solid var(--sky); outline-offset: -2px; }
+@media (max-width: 720px) {
+  .pipeline .stage .nm { display: none; }
+  .pipeline .stage.active .nm { display: block; }
+}
+
+/* The system's shop tag beside its title - same tint family as an info pill,
+   square-cornered because it is an identifier, not a status. */
+.sysid {
+  font-family: var(--mono); font-size: var(--fs-small); font-weight: 700;
+  color: var(--t-info-fg); background: var(--t-info-bg);
+  padding: 2px 8px; border-radius: var(--radius);
+}
+
+/* Gate rows. A system item wears its computed mark; a confirm item is a
+   checkbox the action stamps with who/when. The source tag keeps the two
+   honest: nobody mistakes a computed fact for a promise. */
+.gate-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 0;
+  border-bottom: 1px solid var(--bg); font-size: var(--fs-body);
+}
+.gate-item:last-child { border-bottom: none; }
+.gate-item .gate-mark {
+  width: 18px; height: 18px; border-radius: 999px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: var(--fs-micro); font-weight: 800;
+}
+.gate-mark.ok { background: var(--t-good-bg); color: var(--t-good-fg); }
+.gate-mark.wait { background: var(--t-warn-bg); color: var(--t-warn-fg); }
+.gate-item .gate-src {
+  margin-left: auto; font-size: var(--fs-micro); color: var(--mut);
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.gate-item label {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font-weight: 400; font-size: var(--fs-body); color: var(--ink); margin: 0;
+}
+.gate-item input[type="checkbox"] { accent-color: var(--navy); width: 15px; height: 15px; }
+
+/* The provenance card: one figure, its meter, and the line items under it. */
+.prov-figure { font-size: var(--fs-metric); font-weight: 800; color: var(--navy); font-variant-numeric: tabular-nums; }
+.prov-figure .unit { font-size: var(--fs-lead); color: var(--mut); font-weight: 600; }
+.prov-sub { font-size: var(--fs-small); color: var(--mut); margin-bottom: var(--sp-2); }
+.meter-fill.prov { background: linear-gradient(90deg, var(--navy) 0%, var(--sky) 100%); }
+.prov-list { list-style: none; margin: 0; padding: 0; }
+.prov-list li {
+  font-size: var(--fs-small); padding: 6px 0; border-bottom: 1px solid var(--bg);
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+}
+.prov-list li:last-child { border-bottom: none; }
+.prov-note {
+  font-size: var(--fs-meta); color: var(--mut);
+  margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line);
+}
+
+/* Receive stage: the scan bar, grade chips, finding rows, interview rows,
+   and the vaulted-credential note. Same source mock as the pipeline above. */
+.scanbar { display: flex; gap: 8px; align-items: center; }
+/* Mono family only - a field's SIZE belongs to the base input rule and the
+   iOS block at the foot of this file, which must keep the last word. */
+.scanbar input { font-family: var(--mono); }
+.scan-hint { font-size: var(--fs-meta); color: var(--mut); margin-top: 4px; }
+.scan-hint b { color: var(--t-good-fg); }
+
+.gchips { display: flex; gap: 4px; }
+.gchips button {
+  width: 26px; height: 26px; border-radius: var(--radius); border: 1px solid var(--line);
+  background: #fff; color: var(--mut); font-family: var(--mono); font-size: var(--fs-small);
+  font-weight: 700; cursor: pointer; padding: 0;
+}
+.gchips button[aria-pressed="true"] { background: var(--navy); border-color: var(--navy); color: #fff; }
+.gchips button:disabled { cursor: default; opacity: 0.55; }
+.gchips button:focus-visible { outline: 2px solid var(--sky); outline-offset: 1px; }
+
+.finding { display: flex; gap: 8px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--bg); }
+.finding:last-child { border-bottom: none; }
+.fdot { width: 8px; height: 8px; border-radius: 999px; flex: none; margin-top: 6px; }
+.fdot.bad { background: var(--t-bad-fg); }
+.fdot.warn { background: var(--t-warn-fg); }
+.fdot.good { background: var(--t-good-fg); }
+.finding .fbody { min-width: 0; flex: 1; }
+.finding .ftitle { font-size: var(--fs-body); font-weight: 600; }
+.finding .fmeta { font-size: var(--fs-meta); color: var(--mut); margin-top: 2px; }
+.finding .fmeta .pill { margin-left: 4px; }
+
+/* "+ Add" as a quiet dashed row at the foot of a list - an invitation, not a
+   control fighting the content above it. */
+.addrow {
+  display: block; width: 100%; background: none; border: 1px dashed var(--line);
+  border-radius: var(--radius); color: var(--mut); font-family: inherit;
+  font-size: var(--fs-body); font-weight: 600; padding: 8px; margin-top: var(--sp-2); cursor: pointer;
+}
+.addrow:hover { color: var(--link); border-color: var(--sky); }
+.addrow:focus-visible { outline: 2px solid var(--sky); outline-offset: 1px; }
+
+.iv-q { padding: 8px 0; border-bottom: 1px solid var(--bg); }
+.iv-q:last-child { border-bottom: none; }
+.iv-q .q { font-size: var(--fs-body); font-weight: 600; margin-bottom: 4px; }
+.iv-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.cred { display: flex; gap: 4px; align-items: center; min-width: 0; }
+.cred input { font-family: var(--mono); }
+.cred-note { font-size: var(--fs-meta); color: var(--mut); margin-top: 4px; }
+.cred-note b { color: var(--t-good-fg); font-weight: 700; }
+
+/* Verify/Ship/Commission surfaces: checklist rows with a named tick, the
+   verdict banner, its metric tiles, and the transfer hero. */
+.chk {
+  display: flex; align-items: center; gap: 8px; padding: 8px 0;
+  border-bottom: 1px solid var(--bg); font-size: var(--fs-body); cursor: pointer;
+}
+.chk:last-child { border-bottom: none; }
+.chk input { accent-color: var(--navy); width: 15px; height: 15px; flex: none; }
+.chk.heading { cursor: default; font-weight: 700; color: var(--navy); }
+.chk .who { margin-left: auto; font-family: var(--mono); font-size: var(--fs-micro); color: var(--mut); font-weight: 700; }
+
+.verdict {
+  display: flex; align-items: center; gap: 12px; padding: 12px;
+  border: 1px solid var(--t-good-bd); background: var(--t-good-bg);
+  border-radius: var(--radius); margin-bottom: var(--sp-3);
+}
+.verdict .v { font-size: var(--fs-hero); font-weight: 800; color: var(--t-good-fg); }
+.verdict .vd { font-size: var(--fs-small); color: var(--t-good-fg); min-width: 0; }
+.verdict.fail { border-color: var(--t-bad-bd); background: var(--t-bad-bg); }
+.verdict.fail .v, .verdict.fail .vd { color: var(--t-bad-fg); }
+
+.metric { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; }
+.metric .mn { font-size: var(--fs-meta); font-weight: 700; color: var(--mut); }
+.metric .mv { font-family: var(--mono); font-size: var(--fs-body); font-weight: 700; margin-top: 2px; }
+.metric .mv .pill { margin-left: 4px; }
+
+.transfer {
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 16px;
+  background: linear-gradient(180deg, var(--card) 0%, var(--bg) 100%); text-align: center;
+}
+.transfer h3 { margin: 0 0 4px; font-size: var(--fs-hero); font-weight: 800; color: var(--navy); letter-spacing: -0.2px; }
+.transfer p { margin: 0 0 12px; font-size: var(--fs-small); color: var(--mut); }

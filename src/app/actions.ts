@@ -21,8 +21,19 @@ import {
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, stipends, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
   dunningEvents, creditOverrides, quotes, quoteLines, payroll, perks, bugReports,
+  restorationProjects, restorationConfirms, componentConditions, findings,
+  provenanceAnswers, handoffKits, checklistTemplates, checklistTemplateItems,
+  checklistRuns, checklistRunItems, checkoutVerdicts, outsideWork,
+  shipments, crates, crateContents, acceptances,
   deviceNotices, safetyHolds, deviceLockouts, deviceLeases,
 } from "@/db/schema";
+import {
+  CHECKLIST_STAGES, CONDITION_GRADES, FINDING_SEVERITIES, LICENSE_STATES, PROVENANCE_QUESTIONS,
+  RESTORATION_SOURCES, RESTORATION_STAGE_LABEL, STAGE_CONFIRM_KEYS,
+  gateReady, nextStage,
+} from "@/lib/restoration";
+import { evaluateRestorationGate } from "@/lib/restorationData";
+import { open as openSealed, seal } from "@/lib/secretBox";
 import { siteLabel } from "@/lib/sites";
 import { syncDeviceNotices } from "@/lib/fleetNoticeData";
 import { enforceDeviceLockout } from "@/lib/deviceLockoutData";
@@ -18358,6 +18369,891 @@ export async function withdrawLead(leadId: number): Promise<{ error?: string }> 
   return {};
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Restoration module - the reseller pipeline. Stage moves ONLY through
+// advanceRestorationStage below: it re-evaluates the gate server-side and
+// writes the ledger event. See lib/restoration for the vocabulary and the
+// pure gate; docs/mocks/ridgeline-restoration-flow.html for the surface.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function revRestoration(id: number) {
+  revalidatePath("/restorations");
+  revalidatePath(`/restorations/${id}`);
+}
+
+/** The project, only if it is the caller's to work. "Not found" on purpose
+ * for another tenant's project - same rule as the tenancy assertions. */
+async function restorationFor(u: Awaited<ReturnType<typeof requireStaff>>, projectId: number) {
+  const [p] = await db.select().from(restorationProjects).where(eq(restorationProjects.id, projectId));
+  if (!p || p.tenantOrgId === null || p.tenantOrgId !== myTenantOrgId(u)) return null;
+  return p;
+}
+
+/**
+ * Open a restoration on a system. The system is an ordinary instruments row,
+ * created beforehand like any other intake; one restoration in flight per
+ * system at a time.
+ */
+export async function createRestorationProject(
+  instrumentId: number, source: string,
+): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  await assertSystemEditable(u, instrumentId);
+  if (!(RESTORATION_SOURCES as readonly string[]).includes(source)) return { error: "Pick where the system came from." };
+  const [active] = await db.select({ id: restorationProjects.id }).from(restorationProjects)
+    .where(and(eq(restorationProjects.instrumentId, instrumentId), ne(restorationProjects.stage, "complete")));
+  if (active) return { error: `${inst.externalId} is already in restoration.` };
+  const [p] = await db.insert(restorationProjects).values({
+    tenantOrgId: myTenantOrgId(u),
+    instrumentId,
+    source,
+    createdBy: u.email,
+  }).returning({ id: restorationProjects.id });
+  await audit({
+    actor: u.email, instrumentId, entityType: "restoration", entityId: p.id,
+    tenantOrgId: myTenantOrgId(u),
+    action: `opened restoration receiving for ${inst.externalId}`,
+  });
+  revRestoration(p.id);
+  return { id: p.id };
+}
+
+/**
+ * The ONE way a project changes stage. Evaluates the gate server-side -
+ * whatever the client showed is advisory - and writes the ledger event.
+ */
+export async function advanceRestorationStage(projectId: number): Promise<{ error?: string; stage?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const next = nextStage(p.stage);
+  if (!next) return { error: "This restoration is already complete." };
+  const gate = await evaluateRestorationGate(p);
+  if (!gateReady(gate)) {
+    const open = gate.filter((i) => !i.ok).map((i) => i.label);
+    return { error: `The gate is not passed: ${open.join("; ")}` };
+  }
+  const now = new Date();
+  await db.update(restorationProjects).set({
+    stage: next, stageSince: now, updatedAt: now,
+    ...(next === "complete" ? { completedAt: now } : {}),
+  }).where(eq(restorationProjects.id, projectId));
+  const [inst] = await db.select({ externalId: instruments.externalId }).from(instruments)
+    .where(eq(instruments.id, p.instrumentId));
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: "stage", oldValue: p.stage, newValue: next,
+    action: `advanced ${inst?.externalId ?? `restoration #${projectId}`} to ${RESTORATION_STAGE_LABEL[next]}`,
+  });
+  revRestoration(projectId);
+  return { stage: next };
+}
+
+/**
+ * A human gate checkbox - the 'confirm' half of a gate, persisted with who
+ * and when. The computed 'system' half is never writable.
+ */
+export async function confirmRestorationGateItem(
+  projectId: number, key: string, on: boolean,
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  if (!(STAGE_CONFIRM_KEYS[p.stage] ?? []).includes(key)) return { error: "Not found" };
+  if (on) {
+    await db.insert(restorationConfirms)
+      .values({ projectId, stage: p.stage, key, confirmedBy: u.email })
+      .onConflictDoNothing();
+  } else {
+    await db.delete(restorationConfirms).where(and(
+      eq(restorationConfirms.projectId, projectId),
+      eq(restorationConfirms.stage, p.stage),
+      eq(restorationConfirms.key, key),
+    ));
+  }
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: key,
+    action: `${on ? "confirmed" : "unchecked"} gate item "${key}" on the ${p.stage} stage`,
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+// ── Receive stage ───────────────────────────────────────────────────────────
+
+/** The asset, only if it is a component of this project's system. */
+async function projectComponent(p: { instrumentId: number }, assetId: number) {
+  const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
+  return a && a.instrumentId === p.instrumentId ? a : null;
+}
+
+/**
+ * Serial-first receive. Resolution order: (1) a serial already on this
+ * system says so instead of duplicating; (2) an exact serial match on a
+ * shelf spare in this workspace attaches THAT unit - the record travels with
+ * the serial; (3) otherwise a new component is created through the ordinary
+ * createAsset path, so intake procedures, catalog gases and the
+ * model-review queue all fire exactly as they do everywhere else.
+ *
+ * The "Network" answer is v1-honest: everything reads "new" until the
+ * cross-org serial history lookup exists (lib/serialLookup is the seam - it
+ * already finds matches outside the workspace; surfacing them here is a
+ * decision about disclosure, not plumbing).
+ */
+export async function receiveRestorationComponent(
+  projectId: number,
+  data: { serial: string; kind: string; model: string; manufacturer: string },
+): Promise<{ error?: string; assetId?: number; resolved?: "attached" | "created"; network?: "new" }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const serial = data.serial.trim();
+  if (!serial && !data.model.trim() && !data.kind.trim()) {
+    return { error: "Give the component a serial, or at least a type." };
+  }
+
+  if (serial) {
+    const siblings = await db.select().from(assets).where(eq(assets.instrumentId, p.instrumentId));
+    if (siblings.some((a) => a.serial.trim().toLowerCase() === serial.toLowerCase())) {
+      return { error: `Serial ${serial} is already received on this system.` };
+    }
+    // A shelf spare in this workspace with the same serial IS this unit.
+    const spares = await db.select().from(assets)
+      .where(and(isNull(assets.instrumentId), forTenant(assets.tenantOrgId, myTenantOrgId(u))));
+    const spare = spares.find((a) => a.serial.trim().toLowerCase() === serial.toLowerCase());
+    if (spare) {
+      const res = await attachAssets([spare.id], p.instrumentId);
+      if (res?.error) return { error: res.error };
+      await db.insert(componentConditions).values({ projectId, assetId: spare.id }).onConflictDoNothing();
+      await audit({
+        actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+        tenantOrgId: p.tenantOrgId,
+        action: `received SN ${serial} - matched the shelf spare already on record`,
+      });
+      revRestoration(projectId);
+      return { assetId: spare.id, resolved: "attached", network: "new" };
+    }
+  }
+
+  const created = await createAsset(p.instrumentId, {
+    kind: data.kind, model: data.model, serial, manufacturer: data.manufacturer,
+    owner: "", location: "", note: "",
+  });
+  if (created.error || !created.id) return { error: created.error ?? "That didn't save" };
+  await db.insert(componentConditions).values({ projectId, assetId: created.id }).onConflictDoNothing();
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId,
+    action: `received ${data.model.trim() || data.kind.trim() || "a component"}${serial ? ` SN ${serial}` : " (no serial)"} - new to Ridgeline`,
+  });
+  revRestoration(projectId);
+  return { assetId: created.id, resolved: "created", network: "new" };
+}
+
+/** One grade, one component, this project - an opinion formed at THIS
+ * receiving, so it lives on the project rather than the asset. */
+export async function setComponentCondition(
+  projectId: number, assetId: number, grade: string, notes = "",
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  if (grade !== "" && !(CONDITION_GRADES as readonly string[]).includes(grade)) return { error: "Grades run A to F." };
+  const a = await projectComponent(p, assetId);
+  if (!a) return { error: "Not found" };
+  await db.insert(componentConditions)
+    .values({ projectId, assetId, grade, notes: notes.trim(), gradedBy: u.email, gradedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [componentConditions.projectId, componentConditions.assetId],
+      set: { grade, notes: notes.trim(), gradedBy: u.email, gradedAt: new Date() },
+    });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: "condition",
+    action: grade
+      ? `graded ${a.model || a.kind}${a.serial ? ` SN ${a.serial}` : ""} condition ${grade}`
+      : `cleared the grade on ${a.model || a.kind}`,
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/**
+ * A finding: something wrong, noticed and written down. It immediately
+ * queues a restore task carrying the finding's id, so the observation and
+ * the work are one thread - nothing logged is ever silently dropped.
+ */
+export async function logRestorationFinding(
+  projectId: number,
+  data: { assetId?: number | null; severity: string; title: string; notes?: string },
+): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const title = data.title.trim();
+  if (!title) return { error: "Say what was found." };
+  if (!(FINDING_SEVERITIES as readonly string[]).includes(data.severity)) return { error: "Severity is bad or warn." };
+  const assetId = data.assetId ?? null;
+  if (assetId !== null && !(await projectComponent(p, assetId))) return { error: "Not found" };
+
+  const [f] = await db.insert(findings).values({
+    projectId, assetId, severity: data.severity, title,
+    notes: (data.notes ?? "").trim(), createdBy: u.email,
+  }).returning();
+  await db.insert(tasks).values({
+    tenantOrgId: p.tenantOrgId, instrumentId: p.instrumentId, assetId,
+    title, body: (data.notes ?? "").trim(), state: "Open", origin: "finding",
+    restorationProjectId: projectId, findingId: f.id,
+  });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId,
+    action: `logged a ${data.severity === "bad" ? "serious " : ""}finding: ${title} - restore task queued`,
+  });
+  revRestoration(projectId);
+  return { id: f.id };
+}
+
+/** One interview answer. 'unknown' is an answer; only a skipped question is
+ * a gap the gate refuses. */
+export async function answerProvenance(
+  projectId: number, questionKey: string, answer: string, detail = "",
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const q = PROVENANCE_QUESTIONS.find((x) => x.key === questionKey);
+  if (!q) return { error: "Not found" };
+  if (!(q.answers as readonly string[]).includes(answer)) return { error: "That isn't one of the answers." };
+  await db.insert(provenanceAnswers)
+    .values({ projectId, questionKey, answer, detail: detail.trim(), answeredBy: u.email, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [provenanceAnswers.projectId, provenanceAnswers.questionKey],
+      set: { answer, detail: detail.trim(), answeredBy: u.email, updatedAt: new Date() },
+    });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: questionKey, newValue: answer,
+    action: `answered provenance: ${q.question} - ${answer === "unknown" ? "nobody knows" : answer}${detail.trim() ? ` (${detail.trim()})` : ""}`,
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/**
+ * The handoff kit. The credential secret is sealed before it touches the row
+ * (AES-GCM via lib/secretBox) - a blank incoming secret means "leave what is
+ * vaulted alone", so re-saving the card never wipes the vault.
+ */
+export async function saveHandoffKit(
+  projectId: number,
+  data: { softwareNotes: string; licenseStatus: string; utilities: string; credUsername: string; credSecret?: string },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  if (!(LICENSE_STATES as readonly string[]).includes(data.licenseStatus)) return { error: "Pick a license status." };
+  const newSecret = (data.credSecret ?? "").trim();
+  if (newSecret && !vaultConfigured()) return { error: VAULT_UNCONFIGURED };
+
+  const base = {
+    softwareNotes: data.softwareNotes.trim(),
+    licenseStatus: data.licenseStatus,
+    utilities: data.utilities.trim(),
+    credUsername: data.credUsername.trim(),
+    updatedAt: new Date(),
+  };
+  const vaulting = newSecret
+    ? { credSecret: seal(newSecret), credUpdatedBy: u.email, credUpdatedAt: new Date() }
+    : {};
+  await db.insert(handoffKits).values({ projectId, ...base, ...vaulting })
+    .onConflictDoUpdate({ target: [handoffKits.projectId], set: { ...base, ...vaulting } });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId,
+    action: newSecret
+      ? "updated the handoff kit and vaulted the workstation credential"
+      : "updated the handoff kit",
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/**
+ * Reveal = decrypt, return once, and say so on the ledger. The secret never
+ * rides a page render - only this action's response - and every reveal is a
+ * named person at a named time.
+ */
+export async function revealHandoffCredential(projectId: number): Promise<{ error?: string; secret?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const [kit] = await db.select().from(handoffKits).where(eq(handoffKits.projectId, projectId));
+  const secret = openSealed(kit?.credSecret || null);
+  if (secret === null) return { error: "Nothing is vaulted on this project." };
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: "credential_revealed",
+    action: "revealed the vaulted workstation credential",
+  });
+  return { secret };
+}
+
+/**
+ * Arrival (and later, crated) photos: ordinary attachments, additionally
+ * stamped with the project so the gate can count them. They appear on the
+ * system's own photo panel too - one pipeline, one storage bill.
+ */
+export async function addRestorationPhotos(
+  projectId: number, files: { fileName: string; url: string; size: number }[],
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  if (!files.length) return {};
+  const t0 = await resolveTarget({ instrumentId: p.instrumentId, assetId: null });
+  if ("error" in t0) return t0;
+  const owner = await storeOwnerForTarget(t0);
+  const guard = await guardStorage(owner, await storeTenantFor(owner, u), files.reduce((n, f) => n + (f.size || 0), 0));
+  if (guard) return guard;
+  await db.insert(attachments).values(files.map((f) => ({
+    tenantOrgId: t0.tenantOrgId, instrumentId: p.instrumentId,
+    restorationProjectId: projectId,
+    fileName: f.fileName.slice(0, 200), kind: "Photo", url: f.url, size: f.size,
+    uploadedBy: u.name, description: "Restoration photo",
+  })));
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId,
+    action: `added ${files.length} restoration photo${files.length === 1 ? "" : "s"}`,
+  });
+  rev(p.instrumentId);
+  revRestoration(projectId);
+  return {};
+}
+
+// ── Restore stage ───────────────────────────────────────────────────────────
+
+/** A hand-made restore task, beside the ones findings queued. */
+export async function addRestorationTask(
+  projectId: number, data: { title: string; body?: string; assetId?: number | null },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const title = data.title.trim();
+  if (!title) return { error: "Say what the task is." };
+  const assetId = data.assetId ?? null;
+  if (assetId !== null && !(await projectComponent(p, assetId))) return { error: "Not found" };
+  await db.insert(tasks).values({
+    tenantOrgId: p.tenantOrgId, instrumentId: p.instrumentId, assetId,
+    title, body: (data.body ?? "").trim(), state: "Open", restorationProjectId: projectId,
+  });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, action: `added restore task: ${title}`,
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/** A part used on the restoration - flows to cost and to the record. */
+export async function addRestorationPart(
+  projectId: number,
+  data: { name: string; partNumber: string; qty: string; vendor: string; costCents: number },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const name = data.name.trim();
+  if (!name) return { error: "Name the part." };
+  const costCents = Math.max(0, Math.round(data.costCents || 0));
+  await db.insert(parts).values({
+    instrumentId: p.instrumentId, restorationProjectId: projectId,
+    name, partNumber: data.partNumber.trim(), qty: data.qty.trim() || "1",
+    vendor: data.vendor.trim(), costCents, status: "Installed",
+  });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId,
+    action: `logged part ${name}${data.partNumber.trim() ? ` (${data.partNumber.trim()})` : ""}`
+      + (costCents ? ` at $${(costCents / 100).toFixed(2)}` : ""),
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/** Third-party work: documented or it didn't happen. */
+export async function logOutsideWork(
+  projectId: number,
+  data: { vendor: string; rmaNumber: string; description: string; costCents: number },
+): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  if (!data.vendor.trim()) return { error: "Name the vendor." };
+  const [row] = await db.insert(outsideWork).values({
+    projectId, vendor: data.vendor.trim(), rmaNumber: data.rmaNumber.trim(),
+    description: data.description.trim(), costCents: Math.max(0, Math.round(data.costCents || 0)),
+    createdBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId,
+    action: `logged outside work at ${data.vendor.trim()}${data.rmaNumber.trim() ? ` (RMA ${data.rmaNumber.trim()})` : ""} - report pending`,
+  });
+  revRestoration(projectId);
+  return { id: row.id };
+}
+
+/** The vendor's report, attached - what turns a claim into documentation. */
+export async function attachOutsideWorkReport(
+  outsideWorkId: number, file: { fileName: string; url: string; size: number },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(outsideWork).where(eq(outsideWork.id, outsideWorkId));
+  if (!row) return { error: "Not found" };
+  const p = await restorationFor(u, row.projectId);
+  if (!p) return { error: "Not found" };
+  const [att] = await db.insert(attachments).values({
+    tenantOrgId: p.tenantOrgId, instrumentId: p.instrumentId, restorationProjectId: p.id,
+    fileName: file.fileName.slice(0, 200), kind: "Report", url: file.url, size: file.size,
+    uploadedBy: u.name, description: `Outside work report - ${row.vendor}`,
+  }).returning();
+  await db.update(outsideWork).set({ reportAttachmentId: att.id }).where(eq(outsideWork.id, outsideWorkId));
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: p.id,
+    tenantOrgId: p.tenantOrgId, action: `attached the ${row.vendor} outside-work report`,
+  });
+  revRestoration(p.id);
+  return {};
+}
+
+// ── Checklists ──────────────────────────────────────────────────────────────
+
+/**
+ * Instantiate a stage's checklist from its template: items are FROZEN copies,
+ * so editing the template later never rewrites what somebody signed against.
+ * Template choice prefers this workspace's own over the built-ins, and a
+ * category match over a generic one.
+ */
+export async function startRestorationChecklist(
+  projectId: number, stage: string,
+): Promise<{ error?: string; runId?: number }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  if (!(CHECKLIST_STAGES as readonly string[]).includes(stage)) return { error: "Not found" };
+  const [existing] = await db.select().from(checklistRuns)
+    .where(and(eq(checklistRuns.projectId, projectId), eq(checklistRuns.stage, stage)));
+  if (existing) return { runId: existing.id };
+
+  const [inst] = await db.select({ category: instruments.category }).from(instruments)
+    .where(eq(instruments.id, p.instrumentId));
+  const category = (inst?.category ?? "").trim().toLowerCase();
+  const candidates = await db.select().from(checklistTemplates).where(and(
+    eq(checklistTemplates.stage, stage),
+    or(isNull(checklistTemplates.tenantOrgId), forTenant(checklistTemplates.tenantOrgId, myTenantOrgId(u))),
+  ));
+  const score = (t: typeof candidates[number]) =>
+    (t.tenantOrgId !== null ? 2 : 0) + (category && t.category.trim().toLowerCase() === category ? 1 : 0);
+  const template = [...candidates].sort((a, b) => score(b) - score(a))[0] ?? null;
+  const items = template
+    ? await db.select().from(checklistTemplateItems)
+        .where(eq(checklistTemplateItems.templateId, template.id))
+        .orderBy(asc(checklistTemplateItems.sortOrder))
+    : [];
+
+  const [run] = await db.insert(checklistRuns).values({
+    projectId, templateId: template?.id ?? null, stage,
+    name: template?.name ?? "Checklist",
+  }).returning();
+  if (items.length) {
+    await db.insert(checklistRunItems).values(items.map((i) => ({
+      runId: run.id, text: i.text, heading: i.heading, sortOrder: i.sortOrder,
+    })));
+  }
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId,
+    action: `started the ${template?.name ?? stage.replace("_", " ")} checklist (${items.filter((i) => !i.heading).length} items)`,
+  });
+  revRestoration(projectId);
+  return { runId: run.id };
+}
+
+/**
+ * One tick, one name, one time - the row itself is the record, which is why
+ * this table exists instead of a text checklist. Unticking clears both;
+ * no audit line per tick, the who/when on the row is the evidence.
+ */
+export async function tickRestorationChecklistItem(itemId: number, on: boolean): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [item] = await db.select({ item: checklistRunItems, run: checklistRuns })
+    .from(checklistRunItems)
+    .innerJoin(checklistRuns, eq(checklistRunItems.runId, checklistRuns.id))
+    .where(eq(checklistRunItems.id, itemId));
+  if (!item) return { error: "Not found" };
+  const p = await restorationFor(u, item.run.projectId);
+  if (!p) return { error: "Not found" };
+  await db.update(checklistRunItems)
+    .set(on ? { checkedBy: u.email, checkedAt: new Date() } : { checkedBy: "", checkedAt: null })
+    .where(eq(checklistRunItems.id, itemId));
+  revRestoration(p.id);
+  return {};
+}
+
+// ── Verify stage ────────────────────────────────────────────────────────────
+
+/**
+ * A checkout verdict, entered by hand and flagged so - when the tunecheck
+ * service is wired in, parsing fills the same columns with source 'parsed'.
+ * The verdict lands on the project AND the system's history (instrumentId),
+ * so it travels with the serial.
+ */
+export async function recordCheckoutVerdict(
+  projectId: number,
+  data: { phase: string; verdict: string; summary: string },
+  report?: { fileName: string; url: string; size: number },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  if (!["verify", "commission"].includes(data.phase)) return { error: "Not found" };
+  if (!["pass", "fail"].includes(data.verdict)) return { error: "The verdict is pass or fail." };
+  let reportAttachmentId: number | null = null;
+  if (report) {
+    const [att] = await db.insert(attachments).values({
+      tenantOrgId: p.tenantOrgId, instrumentId: p.instrumentId, restorationProjectId: projectId,
+      fileName: report.fileName.slice(0, 200), kind: "Tune report", url: report.url, size: report.size,
+      uploadedBy: u.name, description: data.phase === "verify" ? "Bench checkout report" : "On-site checkout report",
+    }).returning();
+    reportAttachmentId = att.id;
+  }
+  await db.insert(checkoutVerdicts).values({
+    tenantOrgId: p.tenantOrgId, projectId, instrumentId: p.instrumentId,
+    phase: data.phase, verdict: data.verdict, source: "manual",
+    summary: data.summary.trim(), reportAttachmentId, recordedBy: u.email,
+  });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: `${data.phase}_verdict`, newValue: data.verdict,
+    action: `recorded a manual ${data.phase === "verify" ? "bench" : "on-site"} checkout verdict: ${data.verdict.toUpperCase()}`
+      + (report ? " - report attached" : " - no report file"),
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/** Data hygiene: the instrument PC is imaged. */
+export async function markPcBackup(projectId: number, on: boolean): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  await db.update(restorationProjects).set({ pcBackupAt: on ? new Date() : null, updatedAt: new Date() })
+    .where(eq(restorationProjects.id, projectId));
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId,
+    action: on ? "marked the instrument PC imaged" : "cleared the PC backup mark",
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/** The wipe certificate - the part lawyers ask about. */
+export async function attachWipeCert(
+  projectId: number, file: { fileName: string; url: string; size: number },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const [att] = await db.insert(attachments).values({
+    tenantOrgId: p.tenantOrgId, instrumentId: p.instrumentId, restorationProjectId: projectId,
+    fileName: file.fileName.slice(0, 200), kind: "Report", url: file.url, size: file.size,
+    uploadedBy: u.name, description: "Prior-owner data wipe certificate",
+  }).returning();
+  await db.update(restorationProjects).set({ wipeCertAttachmentId: att.id, updatedAt: new Date() })
+    .where(eq(restorationProjects.id, projectId));
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, action: "attached the data wipe certificate",
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+// ── Ship stage ──────────────────────────────────────────────────────────────
+
+/**
+ * Best-effort split of a formatted US address into components. The formatted
+ * string is always kept verbatim; these exist for queries and the dispatch
+ * seam, and a miss leaves them blank rather than wrong.
+ */
+function splitAddress(formatted: string): { addressLine1: string; city: string; state: string; zip: string } {
+  const parts = formatted.split(",").map((s) => s.trim()).filter(Boolean);
+  const out = { addressLine1: "", city: "", state: "", zip: "" };
+  if (parts.length >= 3) {
+    out.addressLine1 = parts[0];
+    out.city = parts[parts.length - 2];
+    const m = /([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/.exec(parts[parts.length - 1]);
+    if (m) { out.state = m[1]; out.zip = m[2]; }
+    else out.state = parts[parts.length - 1];
+  } else if (parts.length === 2) {
+    out.addressLine1 = parts[0];
+    out.city = parts[1];
+  } else {
+    out.addressLine1 = formatted.trim();
+  }
+  return out;
+}
+
+/**
+ * The shipment: destination, contact, facility flags, carrier and cover.
+ * One per project. The address is geocoded on save (degrading to null - a
+ * shipment never fails to save because a maps API sneezed); lat/lng feeds
+ * install dispatch later.
+ */
+export async function saveShipment(
+  projectId: number,
+  data: {
+    destName: string; formatted: string; contactName: string; contactPhone: string;
+    dock: boolean; groundFloor: boolean; liftgate: boolean; garageDoor: boolean; secondFloor: boolean;
+    declaredValueCents: number; carrier: string; trackingNumber: string;
+    pickupOn: string; pickupNote: string;
+  },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const formatted = data.formatted.trim();
+  const split = splitAddress(formatted);
+  const hit = formatted ? await geocode(formatted) : null;
+  const row = {
+    destName: data.destName.trim(), formatted, ...split,
+    lat: hit?.lat ?? null, lng: hit?.lng ?? null,
+    contactName: data.contactName.trim(), contactPhone: data.contactPhone.trim(),
+    dock: data.dock, groundFloor: data.groundFloor, liftgate: data.liftgate,
+    garageDoor: data.garageDoor, secondFloor: data.secondFloor,
+    declaredValueCents: Math.max(0, Math.round(data.declaredValueCents || 0)),
+    carrier: data.carrier.trim(), trackingNumber: data.trackingNumber.trim(),
+    pickupOn: data.pickupOn.trim(), pickupNote: data.pickupNote.trim(),
+    updatedAt: new Date(),
+  };
+  await db.insert(shipments).values({ projectId, ...row })
+    .onConflictDoUpdate({ target: [shipments.projectId], set: row });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId,
+    action: `updated the shipment${data.carrier.trim() ? ` - ${data.carrier.trim()}` : ""}`
+      + (data.trackingNumber.trim() ? `, tracking ${data.trackingNumber.trim()}` : ""),
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/** A shipment row to hang crates on, created quietly if the form hasn't been
+ * saved yet. */
+async function shipmentShell(p: { id: number }): Promise<number> {
+  const [existing] = await db.select({ id: shipments.id }).from(shipments).where(eq(shipments.projectId, p.id));
+  if (existing) return existing.id;
+  const [row] = await db.insert(shipments).values({ projectId: p.id }).returning({ id: shipments.id });
+  return row.id;
+}
+
+export async function addRestorationCrate(
+  projectId: number, label: string, weightLb: number,
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const name = label.trim();
+  if (!name) return { error: "Label the crate (CR-1, CR-2…)." };
+  const shipmentId = await shipmentShell(p);
+  const siblings = await db.select({ sortOrder: crates.sortOrder }).from(crates).where(eq(crates.shipmentId, shipmentId));
+  await db.insert(crates).values({
+    shipmentId, label: name, weightLb: Math.max(0, Math.round(weightLb || 0)),
+    sortOrder: Math.max(0, ...siblings.map((s) => s.sortOrder)) + 1,
+  });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, action: `added crate ${name}`,
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+export async function removeRestorationCrate(crateId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [found] = await db.select({ crate: crates, shipment: shipments })
+    .from(crates).innerJoin(shipments, eq(crates.shipmentId, shipments.id))
+    .where(eq(crates.id, crateId));
+  if (!found) return { error: "Not found" };
+  const p = await restorationFor(u, found.shipment.projectId);
+  if (!p) return { error: "Not found" };
+  await db.delete(crates).where(eq(crates.id, crateId));
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: p.id,
+    tenantOrgId: p.tenantOrgId, action: `removed crate ${found.crate.label} and its manifest lines`,
+  });
+  revRestoration(p.id);
+  return {};
+}
+
+/** Which crate a component rides in - exactly one, so assigning moves it and
+ * crateId 0 takes it out. The Ship gate re-checks the whole map regardless. */
+export async function assignComponentCrate(
+  projectId: number, assetId: number, crateId: number,
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const a = await projectComponent(p, assetId);
+  if (!a) return { error: "Not found" };
+  const shipmentId = await shipmentShell(p);
+  const myCrates = await db.select().from(crates).where(eq(crates.shipmentId, shipmentId));
+  if (crateId !== 0 && !myCrates.some((c) => c.id === crateId)) return { error: "Not found" };
+  if (myCrates.length) {
+    await db.delete(crateContents).where(and(
+      eq(crateContents.assetId, assetId),
+      inArray(crateContents.crateId, myCrates.map((c) => c.id)),
+    ));
+  }
+  if (crateId !== 0) await db.insert(crateContents).values({ crateId, assetId });
+  revRestoration(projectId);
+  return {};
+}
+
+/** The buying client. Set by Ship at the latest - the gate insists. */
+export async function setRestorationBuyer(projectId: number, orgId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  let buyerName = "";
+  if (orgId !== 0) {
+    const list = await visibleOrgs(u);
+    const org = list.find((o) => o.id === orgId && !o.isOperator);
+    if (!org) return { error: "Not found" };
+    buyerName = org.name;
+  }
+  await db.update(restorationProjects)
+    .set({ buyerOrgId: orgId || null, updatedAt: new Date() })
+    .where(eq(restorationProjects.id, projectId));
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: "buyer",
+    action: orgId ? `set the buyer: ${buyerName}` : "cleared the buyer",
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/** Whose plate this project is on. */
+export async function assignRestoration(projectId: number, assignee: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  const name = assignee.trim();
+  await db.update(restorationProjects).set({ assignee: name, updatedAt: new Date() })
+    .where(eq(restorationProjects.id, projectId));
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: "assignee", oldValue: p.assignee, newValue: name,
+    action: name ? `assigned the restoration to ${name}` : "unassigned the restoration",
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+// ── Commission stage ────────────────────────────────────────────────────────
+
+/**
+ * Ask the buyer to sign. The signature happens in THEIR authenticated portal
+ * session on this project's page - never the public share-token path.
+ */
+export async function requestAcceptance(projectId: number, email: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  if (p.buyerOrgId === null) return { error: "Set the buyer first - acceptance is theirs to sign." };
+  const of = email.trim();
+  if (!of.includes("@")) return { error: "Give the buyer contact's email." };
+  const row = { requestedAt: new Date(), requestedOf: of };
+  await db.insert(acceptances).values({ projectId, ...row })
+    .onConflictDoUpdate({ target: [acceptances.projectId], set: row });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, action: `requested buyer acceptance from ${of}`,
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/**
+ * The buyer signs - in their own portal session, which is the whole point.
+ * The act is a signoffs row (the house signature record: typed name as the
+ * intent, frozen evidence snapshot); this wires it to the project and writes
+ * the ledger event escrow will one day key on.
+ */
+export async function signAcceptance(projectId: number, signerName: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const [p] = await db.select().from(restorationProjects).where(eq(restorationProjects.id, projectId));
+  // The signer must BE the buyer: a member of the buying organization, in
+  // their own session. Staff cannot sign for them - that is the phone call
+  // this flow exists to replace.
+  if (!p || p.buyerOrgId === null || u.orgId !== p.buyerOrgId) return { error: "Not found" };
+  const name = signerName.trim();
+  if (!name) return { error: "Type your name - that is the signature." };
+  const [acc] = await db.select().from(acceptances).where(eq(acceptances.projectId, projectId));
+  if (!acc?.requestedAt) return { error: "Acceptance hasn't been requested yet." };
+  if (acc.signedAt) return { error: "Already signed." };
+  const [onsite] = await db.select().from(checkoutVerdicts)
+    .where(and(eq(checkoutVerdicts.projectId, projectId), eq(checkoutVerdicts.phase, "commission")))
+    .orderBy(desc(checkoutVerdicts.recordedAt)).limit(1);
+  const [sig] = await db.insert(signoffs).values({
+    instrumentId: p.instrumentId, signedBy: u.email, signerName: name,
+    meaning: "Accepted delivery and commissioning",
+    data: {
+      version: 1, kind: "restoration_acceptance", projectId,
+      onsiteVerdict: onsite ? { verdict: onsite.verdict, summary: onsite.summary, at: onsite.recordedAt } : null,
+    },
+  }).returning({ id: signoffs.id });
+  await db.update(acceptances).set({
+    signedAt: new Date(), signedBy: u.email, signoffId: sig.id,
+    onsiteVerdictId: onsite?.id ?? null,
+  }).where(eq(acceptances.projectId, projectId));
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: "acceptance_signed",
+    action: `${name} signed buyer acceptance in the portal`,
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/**
+ * Transfer the record on acceptance: the full history moves to the buyer
+ * through the EXISTING handoff flow (frozen dossier for the outgoing side,
+ * ownership + shares + custody event + notifications), then the project
+ * advances to complete through the ordinary gate.
+ */
+export async function transferRestorationToBuyer(projectId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  if (p.buyerOrgId === null) return { error: "No buyer is set." };
+  const [acc] = await db.select().from(acceptances).where(eq(acceptances.projectId, projectId));
+  if (!acc?.signedAt) return { error: "The buyer hasn't signed acceptance yet - that is the release condition." };
+  const handed = await handOffSystem(p.instrumentId, p.buyerOrgId, {
+    note: "Restoration acceptance - record transfers with the serial", keepPreviousAsViewer: true,
+  });
+  // "Already owns it" is fine on a retry; anything else is a real refusal.
+  if (handed?.error && !handed.error.includes("already owns")) return handed;
+  return advanceRestorationStage(projectId).then((r) => (r.error ? { error: r.error } : {}));
+}
 // ---------------- Device notices and safety holds ----------------
 // What a lab PC says on its own screen. lib/fleetNotice holds the decisions and
 // is pure; this is the half that needs a database and an audit trail.
