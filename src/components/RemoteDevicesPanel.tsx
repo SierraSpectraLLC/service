@@ -193,6 +193,7 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
               deviceId={d.id}
               label={deviceLabel(d.nickname, d.name)}
               consentMode={d.consentMode}
+              consentWhy={d.consentWhy}
               notice={d.notice}
               hold={d.hold}
               canPostNotice={d.canPostNotice}

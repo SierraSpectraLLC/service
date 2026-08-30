@@ -35,7 +35,7 @@ const RUNGS = [
 const EFFECTS = [
   { value: "advise", label: "advise - say it, change nothing" },
   { value: "hold", label: "hold - say it louder: do not start new runs" },
-  { value: "lock", label: "lock - may lock the session, at confirmed idle only" },
+  { value: "lock", label: "lock - strongest rung; advisory on this engine" },
 ] as const;
 
 /**
@@ -55,11 +55,13 @@ const EFFECTS = [
  * would not.
  */
 export default function DeviceNoticeControls({
-  deviceId, label, consentMode, notice, hold, canPostNotice, canRaiseHold,
+  deviceId, label, consentMode, consentWhy, notice, hold, canPostNotice, canRaiseHold,
 }: {
   deviceId: number;
   label: string;
   consentMode: "unattended" | "consent";
+  /** Why consent is required, in the words lib/remoteAccess chose. */
+  consentWhy: string;
   notice: OpenNotice | null;
   hold: OpenHold | null;
   canPostNotice: boolean;
@@ -173,7 +175,7 @@ export default function DeviceNoticeControls({
             {hold.dispatchedTo ? ` · sent ${hold.dispatchedTo}` : ""}
           </span>
           {hold.effect === "lock" && consentMode === "consent" && (
-            <span className="mut t-meta">shows as advice here - the system has left our shop</span>
+            <span className="mut t-meta">shows as advice here - {consentWhy}</span>
           )}
           {canRaiseHold && (
             <button className="btn link" disabled={pending} onClick={clearHold}>clear hold</button>
@@ -210,7 +212,7 @@ export default function DeviceNoticeControls({
           footer={
             <>
               <DialogStatus error={error} problem={holdProblem}
-                ok="Advises the machine at its next check-in." />
+                ok="Sent to the machine now, and re-asserted hourly." />
               <button className="btn" onClick={() => setSheet(null)} disabled={pending}>Cancel</button>
               <button className="btn accent" onClick={raiseHold} disabled={pending || !!holdProblem}>
                 {pending ? "Raising..." : "Raise the hold"}
@@ -239,9 +241,11 @@ export default function DeviceNoticeControls({
               machine, so it says out loud what it does not promise. */}
           {holdDraft.effect === "lock" && (
             <div className="mut t-meta" style={{ marginBottom: 8 }}>
-              Permission, not instruction: the agent locks only if it can confirm the machine
-              is idle, and does nothing when it cannot tell.
-              {lockDegrades && " On this machine it will not lock at all - the system has shipped or changed hands, so it lands as advice."}
+              Permission, not instruction - and the support engine never takes it up: its only
+              idle signal counts seconds since somebody touched the keyboard, which cannot tell
+              a running instrument from an empty desk. So the machine is advised and never
+              locked. The rung is still recorded as the call you made.
+              {lockDegrades && ` It is stripped before sending in any case - ${consentWhy}.`}
             </div>
           )}
 
@@ -297,7 +301,7 @@ export default function DeviceNoticeControls({
 
 /** What the far end will show, rendered from what the far end will be sent. */
 function Preview({ notices, empty }: {
-  notices: { kind: "repo" | "safety"; text: string; contact: string; mayLockAtIdle: boolean }[];
+  notices: { kind: "repo" | "safety"; text: string; contact: string }[];
   empty: string;
 }) {
   return (
@@ -309,7 +313,6 @@ function Preview({ notices, empty }: {
         <div key={i} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px", marginBottom: 6 }}>
           <div className="t-small">{n.text}</div>
           {n.contact && <div className="mut t-meta">{n.contact}</div>}
-          {n.mayLockAtIdle && <div className="mut t-meta">May lock the session once the machine is confirmed idle.</div>}
         </div>
       ))}
     </>
