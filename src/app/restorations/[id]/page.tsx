@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { acceptances, auditLog, instruments, orgs, restorationProjects, shipments, vocabTerms } from "@/db/schema";
+import { acceptances, assets, auditLog, instruments, orgs, restorationProjects, shipments, vocabTerms } from "@/db/schema";
 import { requireStaff, requireUser, type SessionUser } from "@/lib/authz";
 import { brandForTenant } from "@/lib/brand";
 import { forTenant, readTenant, viewTenant } from "@/lib/tenancy";
@@ -82,13 +82,17 @@ export default async function RestorationPage({ params, searchParams }: {
           // type's models with the maker riding along for the auto-fill.
           db.select({ kind: vocabTerms.kind, assetType: vocabTerms.assetType, name: vocabTerms.name, manufacturer: vocabTerms.manufacturer })
             .from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, readTenant(staff))),
-        ]).then(([receive, vocab]) => ({
+          // Owner choices, the registry's rule: whoever already owns something.
+          db.select({ owner: assets.owner }).from(assets).where(forTenant(assets.tenantOrgId, readTenant(staff))),
+          db.select({ client: instruments.client }).from(instruments).where(forTenant(instruments.tenantOrgId, readTenant(staff))),
+        ]).then(([receive, vocab, assetOwners, clients]) => ({
           receive,
           kinds: vocab.filter((v) => v.kind === "asset_type").map((v) => v.name),
           models: vocab.reduce<Record<string, { name: string; manufacturer: string }[]>>((acc, v) => {
             if (v.kind === "model" && v.assetType) (acc[v.assetType] ??= []).push({ name: v.name, manufacturer: v.manufacturer });
             return acc;
           }, {}),
+          owners: [...new Set([...assetOwners.map((a) => a.owner), ...clients.map((c) => c.client)].filter(Boolean))].sort(),
         }))
       : viewed === "restore" ? restorationRestoreData(project)
       : viewed === "verify" ? restorationVerifyData(project)
@@ -155,10 +159,11 @@ export default async function RestorationPage({ params, searchParams }: {
               receive: Awaited<ReturnType<typeof restorationReceiveData>>;
               kinds: string[];
               models: Record<string, { name: string; manufacturer: string }[]>;
+              owners: string[];
             };
             return (
               <RestorationReceive projectId={project.id} data={rd.receive}
-                kinds={rd.kinds} models={rd.models}
+                kinds={rd.kinds} models={rd.models} owners={rd.owners}
                 defaultOwner={defaultOwner}
                 canEdit={canEdit && project.stage === "receive"} />
             );
@@ -211,10 +216,6 @@ export default async function RestorationPage({ params, searchParams }: {
                 <li key={l.key}>{l.label} <Pill tone={l.tone}>{l.value}</Pill></li>
               ))}
             </ul>
-            <div className="prov-note">
-              Every gap is a question the next buyer will ask. Computed from the
-              record, never stored - it moves the moment the record does.
-            </div>
           </section>
           <section className="card">
             <h2 className="card-title">Session</h2>

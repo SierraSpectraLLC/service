@@ -4,16 +4,17 @@ import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
-  addRestorationPhotos, answerProvenance, logRestorationFinding,
+  addRestorationPhotos, answerProvenance, attachProvenanceDocs, logRestorationFinding,
   receiveRestorationComponents, removeReceivedComponent,
   revealHandoffCredential, saveHandoffKit, setComponentCondition,
 } from "@/app/actions";
+import PickOrAdd from "@/components/PickOrAdd";
 import CatalogSelect from "@/components/CatalogSelect";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import {
-  ARRIVAL_PHOTO_MIN, CONDITION_GRADES, LICENSE_STATES, LICENSE_LABEL, PROVENANCE_QUESTIONS,
+  ARRIVAL_PHOTO_MIN, CONDITION_GRADES, LICENSE_STATES, PROVENANCE_QUESTIONS,
 } from "@/lib/restoration";
 import type { ReceiveData } from "@/lib/restorationData";
 
@@ -27,13 +28,15 @@ import type { ReceiveData } from "@/lib/restorationData";
  */
 export type CatalogModels = Record<string, { name: string; manufacturer: string }[]>;
 
-export default function RestorationReceive({ projectId, data, kinds, models, defaultOwner, canEdit }: {
+export default function RestorationReceive({ projectId, data, kinds, models, owners, defaultOwner, canEdit }: {
   projectId: number;
   data: ReceiveData;
   /** The equipment catalog's module types - same source as the add-asset form. */
   kinds: string[];
   /** Each type's models, maker riding along for the auto-fill. */
   models: CatalogModels;
+  /** Everyone who already owns something here - the registry's owner list. */
+  owners: string[];
   /** Whose company is intaking - the owner field's default, theirs to change. */
   defaultOwner: string;
   canEdit: boolean;
@@ -52,7 +55,7 @@ export default function RestorationReceive({ projectId, data, kinds, models, def
   return (
     <>
       <ComponentsCard projectId={projectId} data={data} kinds={kinds} models={models}
-        defaultOwner={defaultOwner} canEdit={canEdit} act={act} pending={pending} />
+        owners={owners} defaultOwner={defaultOwner} canEdit={canEdit} act={act} pending={pending} />
       <FindingsCard projectId={projectId} data={data} canEdit={canEdit} />
       <PhotosCard projectId={projectId} count={data.photoCount} canEdit={canEdit} />
       <InterviewCard projectId={projectId} data={data} canEdit={canEdit} act={act} pending={pending} />
@@ -65,9 +68,9 @@ type Act = (fn: () => Promise<{ error?: string } | void>, done?: string) => void
 
 type DraftRow = { key: number; kind: string; model: string; manufacturer: string; serial: string; error: string };
 
-function ComponentsCard({ projectId, data, kinds, models, defaultOwner, canEdit, act, pending }: {
+function ComponentsCard({ projectId, data, kinds, models, owners, defaultOwner, canEdit, act, pending }: {
   projectId: number; data: ReceiveData; kinds: string[]; models: CatalogModels;
-  defaultOwner: string; canEdit: boolean; act: Act; pending: boolean;
+  owners: string[]; defaultOwner: string; canEdit: boolean; act: Act; pending: boolean;
 }) {
   const router = useRouter();
   const blank = (key: number): DraftRow => ({ key, kind: "", model: "", manufacturer: "", serial: "", error: "" });
@@ -189,8 +192,11 @@ function ComponentsCard({ projectId, data, kinds, models, defaultOwner, canEdit,
               </button>
               <label className="row al-center sp-1" style={{ margin: 0, fontWeight: 400 }}>
                 <span className="mut t-small">Owner</span>
-                <input value={owner} aria-label="Owner" style={{ maxWidth: 160 }}
-                  onChange={(e) => setOwner(e.target.value)} />
+                <span style={{ minWidth: 160 }}>
+                  <PickOrAdd value={owner} options={[...new Set([defaultOwner, ...owners])]}
+                    newLabel="+ New owner..." placeholder="Owner"
+                    onChange={setOwner} />
+                </span>
               </label>
               <span className="mut t-small">
                 A row needs a model or a serial; a typed serial still matches shelf spares.
@@ -227,7 +233,7 @@ function FindingsCard({ projectId, data, canEdit }: { projectId: number; data: R
 
   return (
     <section className="card">
-      <h2 className="card-title">Findings <span className="eyebrow">become Restore tasks</span></h2>
+      <h2 className="card-title">Findings</h2>
       {data.findingList.map((f) => (
         <div className="finding" key={f.id}>
           <span className={`fdot ${f.severity === "bad" ? "bad" : "warn"}`} />
@@ -245,7 +251,7 @@ function FindingsCard({ projectId, data, canEdit }: { projectId: number; data: R
         </div>
       ))}
       {data.findingList.length === 0 && !canEdit && <div className="mut t-body">Nothing was flagged at receiving.</div>}
-      {canEdit && <button className="addrow" onClick={() => { setError(""); setOpen(true); }}>+ Log a finding — component, severity, notes</button>}
+      {canEdit && <button className="addrow" onClick={() => { setError(""); setOpen(true); }}>+ Log a finding</button>}
       <Dialog open={open} onClose={() => setOpen(false)} title="Log a finding"
         context="Every finding queues a restore task - nothing observed gets dropped."
         footer={
@@ -315,14 +321,13 @@ function PhotosCard({ projectId, count, canEdit }: { projectId: number; count: n
       <h2 className="card-title">Arrival photos <span className="eyebrow">as it came off the truck</span></h2>
       <div className="row al-center sp-2 t-body">
         <Pill tone={count >= ARRIVAL_PHOTO_MIN ? "good" : "warn"}>{count} of {ARRIVAL_PHOTO_MIN} minimum</Pill>
-        <span className="mut">They land on the system&apos;s photo panel too - one pipeline, counted by the gate.</span>
       </div>
       {canEdit && (
         <>
           <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple hidden
             onChange={(e) => send(e.target.files)} />
           <button className="addrow" disabled={!!busy} onClick={() => fileRef.current?.click()}>
-            {busy ? `Uploading ${busy}…` : "+ Add photos — camera or files"}
+            {busy ? `Uploading ${busy}…` : "+ Add photos"}
           </button>
           {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 4 }}>{error}</div>}
         </>
@@ -333,15 +338,38 @@ function PhotosCard({ projectId, count, canEdit }: { projectId: number; count: n
 
 const SEG_LABELS: Record<string, Record<string, string>> = {
   operational_at_deinstall: { running: "Running", down: "Down", unknown: "Nobody knows" },
-  pm_docs: { docs: "Docs on file", none: "No docs", unknown: "Unknown" },
+  pm_docs: { none: "No docs", unknown: "Unknown" },
   contract_history: { yes: "Yes", no: "No", unknown: "Unknown" },
 };
 
 function InterviewCard({ projectId, data, canEdit, act, pending }: {
   projectId: number; data: ReceiveData; canEdit: boolean; act: Act; pending: boolean;
 }) {
+  const router = useRouter();
   const [pmDate, setPmDate] = useState(data.answers.last_pm_date?.detail ?? "");
+  const docsRef = useRef<HTMLInputElement>(null);
+  const [docsBusy, setDocsBusy] = useState(false);
   const answerOf = (key: string) => data.answers[key]?.answer ?? "";
+
+  // "Docs on file" is a claim with a file behind it: tapping it opens the
+  // picker, and the answer lands together with the attachment.
+  const sendDocs = async (list: FileList | null) => {
+    const f = list?.[0];
+    if (!f) return;
+    setDocsBusy(true);
+    try {
+      const blob = await upload(f.name, f, { access: "public", handleUploadUrl: "/api/upload" });
+      const res = await attachProvenanceDocs(projectId, { fileName: f.name, url: blob.url, size: f.size });
+      if (res?.error) throw new Error(res.error);
+      toast({ message: "Maintenance records attached" });
+      router.refresh();
+    } catch (e) {
+      toast({ message: (e as Error).message, tone: "bad" });
+    } finally {
+      setDocsBusy(false);
+      if (docsRef.current) docsRef.current.value = "";
+    }
+  };
 
   return (
     <section className="card">
@@ -351,22 +379,46 @@ function InterviewCard({ projectId, data, canEdit, act, pending }: {
           <div className="q">{q.question}</div>
           <div className="iv-row">
             {q.key === "last_pm_date" && (
-              <input type="text" value={pmDate} onChange={(e) => setPmDate(e.target.value)}
-                onBlur={() => { if (pmDate.trim()) act(() => answerProvenance(projectId, q.key, "date", pmDate)); }}
-                disabled={!canEdit || pending}
-                placeholder="Last PM date — leave blank if unknown" style={{ maxWidth: 260 }} />
+              <input type="date" value={pmDate} aria-label="Last PM date"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setPmDate(v);
+                  if (v) act(() => answerProvenance(projectId, q.key, "date", v));
+                }}
+                disabled={!canEdit || pending} style={{ maxWidth: 200 }} />
             )}
-            <div className="seg">
-              {q.answers.filter((a) => q.key !== "last_pm_date" || a === "unknown").map((a) => (
-                <button key={a} type="button" aria-pressed={answerOf(q.key) === a}
-                  disabled={!canEdit || pending}
-                  onClick={() => { if (q.key === "last_pm_date") setPmDate(""); act(() => answerProvenance(projectId, q.key, a, "")); }}>
-                  {SEG_LABELS[q.key]?.[a] ?? (a === "unknown" ? "Unknown" : a)}
-                </button>
-              ))}
-            </div>
-            {q.key === "contract_history" && (
-              <span className="mut t-small">Honest gaps beat invented answers.</span>
+            {q.key === "pm_docs" && (
+              <>
+                <input ref={docsRef} type="file" hidden onChange={(e) => sendDocs(e.target.files)} />
+                <div className="seg">
+                  <button type="button" aria-pressed={answerOf(q.key) === "docs"}
+                    disabled={!canEdit || pending || docsBusy}
+                    onClick={() => docsRef.current?.click()}>
+                    {docsBusy ? "Uploading\u2026" : "Docs on file"}
+                  </button>
+                  {q.answers.filter((a) => a !== "docs").map((a) => (
+                    <button key={a} type="button" aria-pressed={answerOf(q.key) === a}
+                      disabled={!canEdit || pending}
+                      onClick={() => act(() => answerProvenance(projectId, q.key, a, ""))}>
+                      {SEG_LABELS[q.key]?.[a] ?? a}
+                    </button>
+                  ))}
+                </div>
+                {answerOf(q.key) === "docs" && data.answers.pm_docs?.detail && (
+                  <span className="mut t-small mono">{data.answers.pm_docs.detail}</span>
+                )}
+              </>
+            )}
+            {q.key !== "pm_docs" && (
+              <div className="seg">
+                {q.answers.filter((a) => q.key !== "last_pm_date" || a === "unknown").map((a) => (
+                  <button key={a} type="button" aria-pressed={answerOf(q.key) === a}
+                    disabled={!canEdit || pending}
+                    onClick={() => { if (q.key === "last_pm_date") setPmDate(""); act(() => answerProvenance(projectId, q.key, a, "")); }}>
+                    {SEG_LABELS[q.key]?.[a] ?? (a === "unknown" ? "Unknown" : a)}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -374,6 +426,9 @@ function InterviewCard({ projectId, data, canEdit, act, pending }: {
     </section>
   );
 }
+
+// One word per choice so four fit on a phone; N/A is the honest default.
+const LICENSE_SHORT: Record<string, string> = { "": "N/A", active: "Active", required: "Required", none: "None" };
 
 function HandoffCard({ projectId, kit, canEdit }: {
   projectId: number; kit: ReceiveData["kit"]; canEdit: boolean;
@@ -422,9 +477,7 @@ function HandoffCard({ projectId, kit, canEdit }: {
           <button className="btn sm" onClick={reveal} disabled={saving}>{shown !== null ? "Hide" : "Reveal"}</button>
         )}
       </div>
-      <div className="cred-note">
-        <b>Vaulted.</b> Encrypted at rest, every reveal named on the ledger, shared on transfer.
-      </div>
+      <div className="cred-note"><b>Vaulted.</b></div>
       <div style={{ marginTop: 12 }}>
         <label>Acquisition software</label>
         <input value={draft.softwareNotes} disabled={!canEdit}
@@ -434,10 +487,10 @@ function HandoffCard({ projectId, kit, canEdit }: {
       <div style={{ marginTop: 8 }}>
         <label>License status</label>
         <div className="seg">
-          {LICENSE_STATES.filter((s) => s !== "").map((s) => (
-            <button key={s} type="button" aria-pressed={draft.licenseStatus === s} disabled={!canEdit}
-              onClick={() => setDraft({ ...draft, licenseStatus: draft.licenseStatus === s ? "" : s })}>
-              {LICENSE_LABEL[s]}
+          {LICENSE_STATES.map((s) => (
+            <button key={s || "na"} type="button" aria-pressed={draft.licenseStatus === s} disabled={!canEdit}
+              onClick={() => setDraft({ ...draft, licenseStatus: s })}>
+              {LICENSE_SHORT[s]}
             </button>
           ))}
         </div>

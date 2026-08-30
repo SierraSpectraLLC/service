@@ -53,7 +53,7 @@ export default function RestorationGateCard({ projectId, items, advanceLabel }: 
 
   return (
     <section className="card">
-      <h2 className="card-title">Ready to advance? <span className="eyebrow">computed, not pinky-sworn</span></h2>
+      <h2 className="card-title">Ready to advance?</h2>
       {shown.map((i) =>
         i.kind === "system" ? (
           <div className="gate-item" key={i.key}>
@@ -75,9 +75,7 @@ export default function RestorationGateCard({ projectId, items, advanceLabel }: 
         <button className="btn accent" onClick={advance} disabled={pending || !ready}>
           {pending ? "Working..." : advanceLabel}
         </button>
-        {error
-          ? <span className="t-small" style={{ color: "var(--t-bad-fg)" }}>{error}</span>
-          : !ready && <span className="mut t-small">Every item above passes before this unlocks.</span>}
+        {error && <span className="t-small" style={{ color: "var(--t-bad-fg)" }}>{error}</span>}
       </div>
     </section>
   );

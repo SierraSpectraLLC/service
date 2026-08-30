@@ -18746,6 +18746,37 @@ export async function answerProvenance(
 }
 
 /**
+ * The maintenance paper behind a "docs on file" answer - picked from the
+ * phone's camera roll or files, attached to the project, and the interview
+ * answer set in the same stroke so the claim and its evidence cannot drift.
+ */
+export async function attachProvenanceDocs(
+  projectId: number, file: { fileName: string; url: string; size: number },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const p = await restorationFor(u, projectId);
+  if (!p) return { error: "Not found" };
+  await db.insert(attachments).values({
+    tenantOrgId: p.tenantOrgId, instrumentId: p.instrumentId, restorationProjectId: projectId,
+    fileName: file.fileName.slice(0, 200), kind: "Report", url: file.url, size: file.size,
+    uploadedBy: u.name, description: "Prior maintenance records",
+  });
+  await db.insert(provenanceAnswers)
+    .values({ projectId, questionKey: "pm_docs", answer: "docs", detail: file.fileName.slice(0, 120), answeredBy: u.email, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [provenanceAnswers.projectId, provenanceAnswers.questionKey],
+      set: { answer: "docs", detail: file.fileName.slice(0, 120), answeredBy: u.email, updatedAt: new Date() },
+    });
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
+    tenantOrgId: p.tenantOrgId, field: "pm_docs", newValue: "docs",
+    action: "attached prior maintenance records to the provenance interview",
+  });
+  revRestoration(projectId);
+  return {};
+}
+
+/**
  * The handoff kit. The credential secret is sealed before it touches the row
  * (AES-GCM via lib/secretBox) - a blank incoming secret means "leave what is
  * vaulted alone", so re-saving the card never wipes the vault.
