@@ -2392,3 +2392,19 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 }
 .transfer h3 { margin: 0 0 4px; font-size: var(--fs-hero); font-weight: 800; color: var(--navy); letter-spacing: -0.2px; }
 .transfer p { margin: 0 0 12px; font-size: var(--fs-small); color: var(--mut); }
+
+/* Receive: the open multi-row intake. A saved component is a stacked row
+   (reads top-to-bottom on a phone, no sideways table); a draft row is a
+   dashed box being filled in, cut with its ✕ until the batch is received. */
+.recv-item { display: flex; gap: 8px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--bg); }
+.recv-item:last-child { border-bottom: none; }
+.recv-item .rbody { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.recv-item .rname { font-size: var(--fs-body); font-weight: 600; }
+.recv-item .rname .mut { font-weight: 400; }
+.recv-item .rmeta { font-size: var(--fs-small); color: var(--mut); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.recv-row {
+  border: 1px dashed var(--line); border-radius: var(--radius);
+  padding: 12px; margin-bottom: 8px; position: relative;
+}
+.recv-row .rcut { position: absolute; top: 4px; right: 4px; }
+.recv-row-err { font-size: var(--fs-small); color: var(--t-bad-fg); margin-top: 4px; }
