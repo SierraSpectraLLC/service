@@ -98,7 +98,10 @@ describe("the pile becomes modules", () => {
     // The sequence is the procedure's own numbering: the pump's two jobs are
     // 1 and 2 of the pump, not 1 and 2 of the whole stack.
     const { container } = await draw();
-    const seqs = [...container.querySelectorAll('[class*="row-hover"]')].map((r) => r.textContent?.[0]);
+    // The box sits beside the scan line, not inside it - it is a control in a
+    // run, and a control may not live inside another one.
+    const seqs = [...container.querySelectorAll('[class*="row-hover"]')]
+      .map((r) => r.parentElement?.textContent?.[0]);
     // Two modules restart at 1.
     expect(seqs.filter((c) => c === "1").length).toBeGreaterThanOrEqual(2);
   });
@@ -120,16 +123,34 @@ describe("the pile becomes modules", () => {
 });
 
 describe("the PM run", () => {
-  it("makes a tap mean done", async () => {
+  it("makes a tap on the box mean done", async () => {
     await draw();
     fireEvent.click(screen.getByText("Start PM run"));
-    fireEvent.click(screen.getByText("Verify vacuum"));
+    fireEvent.click(screen.getByLabelText("Complete Verify vacuum"));
     await waitFor(() => expect(completePmNow).toHaveBeenCalledWith(4));
   });
 
-  it("outside a run, a tap only opens the row", async () => {
-    // The dangerous gesture is opt-in. Browsing must never complete work.
+  it("still opens the record during a run, and opening never completes it", async () => {
+    /*
+     * The gesture an engineer needs FIRST. Before the wrench comes the spec,
+     * the part number and the note - so the row must open mid-run, and opening
+     * it must not file the job as done. One gesture for both was the mockup's
+     * defect: it made the only way to read a step the act of finishing it.
+     */
     await draw();
+    fireEvent.click(screen.getByText("Start PM run"));
+    fireEvent.click(screen.getByText("Replace mist filter"));
+    expect(completePmNow).not.toHaveBeenCalled();
+    // The detail, all of it: the part it takes and the verbs behind the row.
+    expect(screen.getByText(/63762-68201/)).toBeTruthy();
+    expect(screen.getByText("Complete now")).toBeTruthy();
+  });
+
+  it("outside a run, nothing on the row can complete anything", async () => {
+    // The dangerous gesture is opt-in. Browsing must never complete work, and
+    // with the run off the box is not a control at all.
+    await draw();
+    expect(screen.queryByLabelText("Complete Verify vacuum")).toBeNull();
     fireEvent.click(screen.getByText("Verify vacuum"));
     expect(completePmNow).not.toHaveBeenCalled();
     expect(screen.getByText("Complete now")).toBeTruthy();
@@ -156,14 +177,35 @@ describe("the PM run", () => {
   it("never taps a paused step done - a run skips them", async () => {
     await draw([row(1, { paused: true }), row(2)]);
     fireEvent.click(screen.getByText("Start PM run"));
+    // No control on a skipped step at all; the row still opens to be read.
+    expect(screen.queryByLabelText("Complete Job 1")).toBeNull();
     fireEvent.click(screen.getByText("Job 1"));
     expect(completePmNow).not.toHaveBeenCalled();
+  });
+
+  it("takes a slipped tap back from the box that made it", async () => {
+    // A thumb on a phone in a fume hood misses. The same box undoes it, so
+    // the fix costs one tap and never leaves the run.
+    const { rerender } = await draw([row(4, { title: "Verify vacuum" })]);
+    fireEvent.click(screen.getByText("Start PM run"));
+    fireEvent.click(screen.getByLabelText("Complete Verify vacuum"));
+    await waitFor(() => expect(completePmNow).toHaveBeenCalledWith(4));
+    // The server moved on; jsdom holds no refresh, so hand the panel the row
+    // as it now stands. The undo handle survives - it is this screen's.
+    const Panel = (await import("@/components/MaintenancePanel")).default;
+    rerender(
+      <Panel target={{ instrumentId: 5, assetId: null }}
+        schedules={[row(4, { title: "Verify vacuum", lastDone: TODAY })]}
+        people={[]} today={TODAY} canEdit />,
+    );
+    fireEvent.click(screen.getByLabelText("Undo completion of Verify vacuum"));
+    await waitFor(() => expect(undoPmComplete).toHaveBeenCalled());
   });
 
   it("offers undo for a completion this screen just made", async () => {
     await draw();
     fireEvent.click(screen.getByText("Start PM run"));
-    fireEvent.click(screen.getByText("Verify vacuum"));
+    fireEvent.click(screen.getByLabelText("Complete Verify vacuum"));
     await waitFor(() => expect(completePmNow).toHaveBeenCalled());
     // The screen still shows old props (no refresh in jsdom), so re-render
     // with the row done and open it: the undo handle is held for this session.

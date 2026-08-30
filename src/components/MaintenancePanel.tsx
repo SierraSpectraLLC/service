@@ -57,9 +57,12 @@ const doneToday = (s: PmRow, today: string) => !s.paused && s.lastDone === today
  * module is creation order, which for procedure-stamped schedules is the
  * procedure's own step order - the sequence an engineer actually works.
  *
- * A PM RUN is the visit as a gesture: start it, and tapping a step completes
- * it on the spot - record filed, calendar advanced (completePmNow) - with the
- * next step highlighted and progress on the bar. "Done" during a run is not
+ * A PM RUN is the visit as a gesture: start it, and the sequence box turns
+ * into a thumb-sized control - tap it and the step is done on the spot, record
+ * filed, calendar advanced (completePmNow); tap it again to take that back.
+ * The row itself keeps opening the detail, in a run as outside one, so the
+ * spec can always be read before the work. Next step highlighted, progress on
+ * the bar. "Done" during a run is not
  * UI state: it is lastDone === today, read off the same rows, so a phone that
  * dies mid-PM picks the run back up exactly where the work stands.
  */
@@ -221,60 +224,76 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   /**
    * One row: the scan line, and everything else behind it.
    *
-   * The row is a button. Ordinarily it opens the detail; in a run it IS the
-   * work - tap means done, which is the mockup's gesture and the reason a
-   * 29-step annual stops being twenty-nine trips through three panels.
+   * TWO gestures, never one. The BOX is the work - it completes the step, or
+   * takes the tap back - and only during a run, so browsing can never complete
+   * anything. The ROW always opens the detail, in a run exactly as outside one,
+   * because the parts, the spec and the notes are what an engineer reads BEFORE
+   * the wrench; a run that hides them to protect its own gesture is a run
+   * nobody can work from. (The mockup had one gesture and this defect with it.)
    */
   const renderTask = (s: PmRow, seq: number) => {
     const e = editing[s.id];
     const isOpen = !!taskOpen[s.id];
     const done = doneToday(s, today);
     const isNext = runMode && nextRun?.id === s.id;
+    /* A paused step is skipped by a run, and a completion this screen did not
+       make has no honest undo - so neither offers a tap. */
+    const tappable = runMode && canEdit && !s.paused && (!done || !!undoable[s.id]);
+    /* Thumb-sized while it is a control, quiet marginalia the rest of the time. */
+    const big = runMode && canEdit;
+    const boxStyle = {
+      flex: "none", width: big ? 34 : 22, height: big ? 34 : 22, borderRadius: big ? 10 : 7,
+      border: `1px ${s.paused ? "dashed" : "solid"} ${done ? "var(--t-good-fg)" : "var(--line)"}`,
+      background: done ? "var(--t-good-fg)" : "transparent",
+      color: done ? "#fff" : "var(--mut)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: 0, fontSize: 11, fontWeight: 700,
+      cursor: tappable ? "pointer" : "default",
+    } as const;
     return (
       <div key={s.id} style={{
         borderTop: "1px solid var(--line)",
         background: isNext ? "#EEF3F9" : undefined,
         boxShadow: isNext ? "inset 3px 0 0 var(--navy)" : undefined,
       }}>
-        <div role="button" tabIndex={0} aria-expanded={isOpen}
-          aria-label={`${s.title}${done ? ", done today" : ""}`}
-          className="row-hover"
-          onClick={() => {
-            if (runMode && canEdit && !s.paused && !done) { complete(s); return; }
-            setTaskOpen((m) => ({ ...m, [s.id]: !isOpen }));
-          }}
-          onKeyDown={(ev) => {
-            if (ev.key !== "Enter" && ev.key !== " ") return;
-            ev.preventDefault();
-            if (runMode && canEdit && !s.paused && !done) { complete(s); return; }
-            setTaskOpen((m) => ({ ...m, [s.id]: !isOpen }));
-          }}
-          style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 2px", cursor: "pointer", opacity: s.paused ? 0.55 : 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 2px", opacity: s.paused ? 0.55 : 1 }}>
           {/* The sequence box: the procedure's own numbering, ✓ once today's
               cycle is in. Numbered even when paused - the step exists, it is
               simply skipped - dashed so a run reads past it. */}
-          <span aria-hidden style={{
-            flex: "none", width: 22, height: 22, borderRadius: 7,
-            border: `1px ${s.paused ? "dashed" : "solid"} ${done ? "var(--t-good-fg)" : "var(--line)"}`,
-            background: done ? "var(--t-good-fg)" : "transparent",
-            color: done ? "#fff" : "var(--mut)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 11, fontWeight: 700,
-          }}>{done ? "✓" : seq}</span>
-          <span style={{ flex: 1, minWidth: 0 }}>
-            <span className="t-body" style={{
-              display: "block", fontWeight: 600,
-              color: done ? "var(--mut)" : undefined,
-              textDecoration: done ? "line-through" : undefined,
-            }}>{s.title}</span>
-            <span className="mut t-meta" style={{ display: "block" }}>{metaFor(s)}</span>
-          </span>
-          <span className="pill neutral" style={{ flex: "none" }}>{cadenceLabel(s.everyDays)}</span>
-          <span aria-hidden style={{ flex: "none", width: 8, height: 8, borderRadius: 99, background: dotFor(s) }} />
+          {tappable ? (
+            <button type="button" disabled={pending} style={boxStyle}
+              aria-label={done ? `Undo completion of ${s.title}` : `Complete ${s.title}`}
+              onClick={() => (done ? undoComplete(s) : complete(s))}>
+              {done ? "✓" : seq}
+            </button>
+          ) : (
+            <span aria-hidden style={boxStyle}>{done ? "✓" : seq}</span>
+          )}
+          <div role="button" tabIndex={0} aria-expanded={isOpen}
+            aria-label={`${s.title}${done ? ", done today" : ""}`}
+            className="row-hover"
+            onClick={() => setTaskOpen((m) => ({ ...m, [s.id]: !isOpen }))}
+            onKeyDown={(ev) => {
+              if (ev.key !== "Enter" && ev.key !== " ") return;
+              ev.preventDefault();
+              setTaskOpen((m) => ({ ...m, [s.id]: !isOpen }));
+            }}
+            style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span className="t-body" style={{
+                display: "block", fontWeight: 600,
+                color: done ? "var(--mut)" : undefined,
+                textDecoration: done ? "line-through" : undefined,
+              }}>{s.title}</span>
+              <span className="mut t-meta" style={{ display: "block" }}>{metaFor(s)}</span>
+            </span>
+            <span className="pill neutral" style={{ flex: "none" }}>{cadenceLabel(s.everyDays)}</span>
+            <span aria-hidden style={{ flex: "none", width: 8, height: 8, borderRadius: 99, background: dotFor(s) }} />
+          </div>
         </div>
 
         {isOpen && (
-          <div style={{ padding: "0 2px 10px 34px" }}>
+          <div style={{ padding: `0 2px 10px ${big ? 44 : 34}px` }}>
             {s.body && <div className="mut t-small" style={{ whiteSpace: "pre-wrap", marginBottom: 4 }}>{s.body}</div>}
             <div className="mut t-meta" style={{ marginBottom: 6 }}>
               {cadenceLabel(s.everyDays)}
@@ -555,7 +574,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           <span className="mut t-small" style={{ flex: "1 1 180px" }}>
             {runMode
               ? nextRun
-                ? "Tap a step to complete it - record filed, next cycle booked."
+                ? "Tap the box to complete a step - record filed, next cycle booked. Tap the name to read it first."
                 : "Every step is in. End the run and file the visit report from Tasks."
               : doneCount > 0
                 ? `${doneCount} completed today.`
