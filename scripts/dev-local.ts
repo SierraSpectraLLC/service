@@ -861,6 +861,21 @@ const FIXTURE = `
       (SELECT id FROM remote_devices WHERE node_id = 'node//devfixture000000000000003'),
       'prominent', 'Property of Sierra Spectra. Account past due - call 555-0100.',
       '${OWNER}', '${OWNER}', now() - interval '1 day');
+
+  -- Two leases, so /remote shows the lease guard in its ordinary states: one
+  -- warning-only and renewing normally, one whose renewal an owner suspended.
+  INSERT INTO device_leases (tenant_org_id, device_id, instrument_id, armed, force, lease_days, grace_days, expires_at, counter, last_renewed_at, armed_by, created_at) VALUES
+    ((SELECT id FROM orgs WHERE name = 'Sierra Spectra'),
+      (SELECT id FROM remote_devices WHERE node_id = 'node//devfixture000000000000001'),
+      (SELECT id FROM instruments WHERE external_id = 'LZ-002'),
+      true, 'notify', 7, 3, now() + interval '5 days', 6, now() - interval '2 days', '${OWNER}',
+      now() - interval '44 days');
+  INSERT INTO device_leases (tenant_org_id, device_id, instrument_id, armed, force, lease_days, grace_days, expires_at, counter, last_renewed_at, armed_by, suspended_at, suspended_by, suspend_reason, created_at) VALUES
+    ((SELECT id FROM orgs WHERE name = 'Sierra Spectra'),
+      (SELECT id FROM remote_devices WHERE node_id = 'node//devfixture000000000000002'),
+      NULL, true, 'lock', 7, 3, now() + interval '2 days', 11, now() - interval '5 days', '${OWNER}',
+      now() - interval '1 day', '${OWNER}', 'Terms not met on the March delivery; hold pending contract review.',
+      now() - interval '30 days');
 `;
 
 async function seed() {

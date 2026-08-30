@@ -9,6 +9,7 @@ import { linkRemoteDevice, removeRemoteDevice, renameRemoteDevice, setRemoteCons
 import { deviceLabel, deviceSubLabel, needsNickname } from "@/lib/deviceName";
 import DeviceNoticeControls, { type OpenHold, type OpenNotice } from "@/components/DeviceNoticeControls";
 import DeviceLockoutControls, { type OpenLockout } from "@/components/DeviceLockoutControls";
+import DeviceLeaseControls, { type OpenLease } from "@/components/DeviceLeaseControls";
 
 export type RemoteDevice = {
   id: number;
@@ -41,6 +42,8 @@ export type RemoteDevice = {
   /** The open theft lockout, if the machine is under one. */
   lockout: OpenLockout | null;
   canLock: boolean;
+  lease: OpenLease | null;
+  canManageLease: boolean;
 };
 
 /**
@@ -215,6 +218,13 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
               label={deviceLabel(d.nickname, d.name)}
               lockout={d.lockout}
               canLock={d.canLock}
+            />
+
+            <DeviceLeaseControls
+              deviceId={d.id}
+              label={deviceLabel(d.nickname, d.name)}
+              lease={d.lease}
+              canManageLease={d.canManageLease}
             />
           </div>
         ))}

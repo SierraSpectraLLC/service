@@ -21,11 +21,13 @@ import {
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, stipends, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
   dunningEvents, creditOverrides, quotes, quoteLines, payroll, perks, bugReports,
-  deviceNotices, safetyHolds, deviceLockouts,
+  deviceNotices, safetyHolds, deviceLockouts, deviceLeases,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import { syncDeviceNotices } from "@/lib/fleetNoticeData";
 import { enforceDeviceLockout } from "@/lib/deviceLockoutData";
+import { clampGraceDays, clampLeaseDays } from "@/lib/leaseGuard";
+import { leaseConfig, LEASE_NOT_CONFIGURED, offlineCodeFor, openLease } from "@/lib/leaseGuardData";
 import {
   allNumbers, catalogEntry, catalogName, cleanAliases, currentNumber, MAX_PART_PHOTOS,
   numberClash, PART_KINDS, PART_KIND_LABEL, type PartAlias,
@@ -18582,4 +18584,153 @@ export async function releaseDevice(deviceId: number, reason: string): Promise<{
   await syncDeviceNotices(deviceId).catch(() => ({}));
   revalidatePath("/remote");
   return {};
+}
+
+// ---------------- Lease guard ----------------
+// The offline sibling of the theft lockout. lib/leaseGuard holds the decisions
+// and is pure; lib/leaseGuardData holds the key. These are the owner-only,
+// audited acts that arm a lease, pull the leverage lever, and release for good.
+//
+// Read lib/leaseGuard before touching these, particularly why suspension - not
+// the invoice table - is what stops renewal. The lease exists for the window
+// before final payment, on a system whose title we still hold; the money that
+// would end it is a decision a person makes here, with a name and a reason.
+
+/** Arm a lease on a machine. Owner-only, warning-only by default. */
+export async function armDeviceLease(
+  deviceId: number,
+  input: { force?: "notify" | "lock"; leaseDays?: number; graceDays?: number },
+): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const { remote: moduleOn } = await getModules();
+  if (!leaseConfig()) return { error: LEASE_NOT_CONFIGURED };
+  const row = await deviceWithOrg(deviceId, readTenant(u));
+  if (!row) return { error: "Not found" };
+  const { device } = row;
+  if (!mayEnroll(u, { moduleOn }, { tenantOrgId: device.tenantOrgId })) return { error: "Not found" };
+
+  const existing = await openLease(deviceId);
+  if (existing?.armed) return { error: "This machine already carries a lease. Change or release it first." };
+
+  const force = input.force ?? "notify";
+  const leaseDays = clampLeaseDays(input.leaseDays ?? 7);
+  const graceDays = clampGraceDays(input.graceDays ?? 3);
+
+  if (existing) {
+    await db.update(deviceLeases).set({
+      armed: true, force, leaseDays, graceDays, armedBy: u.email,
+      suspendedAt: null, suspendedBy: "", suspendReason: "",
+    }).where(eq(deviceLeases.id, existing.id));
+  } else {
+    await db.insert(deviceLeases).values({
+      tenantOrgId: device.tenantOrgId, deviceId, instrumentId: device.instrumentId,
+      armed: true, force, leaseDays, graceDays, armedBy: u.email,
+    });
+  }
+  await audit({
+    actor: u.email, instrumentId: device.instrumentId, entityType: "device_lease", entityId: deviceId,
+    action: `armed a ${force} lease on ${device.nickname || device.name || "a machine"}`
+      + ` (${leaseDays}-day lease, ${graceDays}-day grace)`,
+    tenantOrgId: device.tenantOrgId,
+  });
+  revalidatePath("/remote");
+  return {};
+}
+
+/**
+ * Suspend renewal - the lever. This is what "stop letting this system run"
+ * looks like, and it is deliberately a person's act with a reason on it, never
+ * a query against what they owe. A suspended lease lapses on its own schedule.
+ */
+export async function suspendDeviceLease(deviceId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const row = await deviceWithOrg(deviceId, readTenant(u));
+  if (!row) return { error: "Not found" };
+  const said = reason.trim();
+  if (!said) return { error: "Say why renewal is being stopped. It is kept on the record." };
+
+  const lease = await openLease(deviceId);
+  if (!lease?.armed) return { error: "No armed lease to suspend." };
+
+  await db.update(deviceLeases)
+    .set({ suspendedAt: new Date(), suspendedBy: u.email, suspendReason: said })
+    .where(eq(deviceLeases.id, lease.id));
+  await audit({
+    actor: u.email, instrumentId: row.device.instrumentId, entityType: "device_lease", entityId: deviceId,
+    action: `suspended lease renewal on ${row.device.nickname || row.device.name || "a machine"}: ${said}`,
+    tenantOrgId: row.device.tenantOrgId,
+  });
+  revalidatePath("/remote");
+  return {};
+}
+
+/** Resume renewal after a suspension. */
+export async function resumeDeviceLease(deviceId: number): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const row = await deviceWithOrg(deviceId, readTenant(u));
+  if (!row) return { error: "Not found" };
+  const lease = await openLease(deviceId);
+  if (!lease) return { error: "No lease to resume." };
+  await db.update(deviceLeases)
+    .set({ suspendedAt: null, suspendedBy: "", suspendReason: "" })
+    .where(eq(deviceLeases.id, lease.id));
+  await audit({
+    actor: u.email, instrumentId: row.device.instrumentId, entityType: "device_lease", entityId: deviceId,
+    action: `resumed lease renewal on ${row.device.nickname || row.device.name || "a machine"}`,
+    tenantOrgId: row.device.tenantOrgId,
+  });
+  revalidatePath("/remote");
+  return {};
+}
+
+/**
+ * Release the lease for good - the sign-off act, at final payment. Terminal:
+ * there is no re-arm of a released lease, because at this point title has passed
+ * and the system is the customer's. The reason is required and should name the
+ * payment and sign-off it confirms.
+ */
+export async function releaseDeviceLease(deviceId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const row = await deviceWithOrg(deviceId, readTenant(u));
+  if (!row) return { error: "Not found" };
+  const said = reason.trim();
+  if (!said) return { error: "Say what this confirms - the payment and sign-off it releases against." };
+
+  const lease = await openLease(deviceId);
+  if (!lease) return { error: "No lease to release." };
+  await db.update(deviceLeases)
+    .set({ armed: false, releasedAt: new Date(), releasedBy: u.email, releaseReason: said })
+    .where(eq(deviceLeases.id, lease.id));
+  await audit({
+    actor: u.email, instrumentId: row.device.instrumentId, entityType: "device_lease", entityId: deviceId,
+    action: `released the lease on ${row.device.nickname || row.device.name || "a machine"} for good: ${said}`,
+    tenantOrgId: row.device.tenantOrgId,
+  });
+  revalidatePath("/remote");
+  return {};
+}
+
+/**
+ * Compute the offline unlock code for a machine with no network. The engineer
+ * on site reads the guard's counter aloud; this returns the code to read back.
+ * Owner-only and audited, because reading it out is granting an extension.
+ */
+export async function offlineLeaseCode(
+  deviceId: number, guardCounter: number,
+): Promise<{ code?: string; error?: string }> {
+  const u = await requireOwner();
+  const cfg = leaseConfig();
+  if (!cfg) return { error: LEASE_NOT_CONFIGURED };
+  const row = await deviceWithOrg(deviceId, readTenant(u));
+  if (!row) return { error: "Not found" };
+  if (!row.device.nodeId) return { error: "That machine has no node id yet." };
+  if (!Number.isInteger(guardCounter) || guardCounter < 0) return { error: "Read the counter the guard is showing." };
+
+  const code = offlineCodeFor(row.device.nodeId, guardCounter, cfg);
+  await audit({
+    actor: u.email, instrumentId: row.device.instrumentId, entityType: "device_lease", entityId: deviceId,
+    action: `issued an offline lease extension code for ${row.device.nickname || row.device.name || "a machine"}`,
+    tenantOrgId: row.device.tenantOrgId,
+  });
+  return { code };
 }
