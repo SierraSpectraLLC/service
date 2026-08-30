@@ -806,6 +806,49 @@ const FIXTURE = `
       discussion: [{ author: "Rita Alvarez", body: "Confirming the unit is off the books.", createdAt: "2026-06-21T19:00:00Z" }],
       activity: [{ actor: "Dev Owner", action: "archived", field: "", newValue: "", createdAt: "2026-06-22T09:00:00Z" }],
     })}'::jsonb);
+
+  -- Three lab PCs, so /remote is a list rather than an empty state, and the
+  -- notice controls have something to sit under. Between them they cover the
+  -- three things that panel renders: a machine that is quiet, one carrying a
+  -- repossession notice, and one carrying both a hold and a notice at once.
+  INSERT INTO remote_devices (tenant_org_id, org_id, instrument_id, node_id, name, nickname, platform, consent_override, last_seen_at, enrolled_by) VALUES
+    ((SELECT id FROM orgs WHERE name = 'Sierra Spectra'), (SELECT id FROM orgs WHERE name = 'Lab Zen'),
+      (SELECT id FROM instruments WHERE external_id = 'LZ-002'),
+      'node//devfixture000000000000001', 'DESKTOP-7QF3K1', 'Altis PC', 'Windows 10 Pro', NULL,
+      now() - interval '40 seconds', 'the agent installer'),
+    ((SELECT id FROM orgs WHERE name = 'Sierra Spectra'), (SELECT id FROM orgs WHERE name = 'Lab Zen'),
+      NULL, 'node//devfixture000000000000002', 'DESKTOP-K22X9', 'Bench 3 PC', 'Windows 11 Pro', NULL,
+      now() - interval '6 minutes', 'the agent installer'),
+    -- Consent forced on, so the panel has a machine whose lock rung visibly
+    -- degrades to advice - the state that is otherwise only reachable by
+    -- shipping a system.
+    ((SELECT id FROM orgs WHERE name = 'Sierra Spectra'), (SELECT id FROM orgs WHERE name = 'Coastal Analytical'),
+      (SELECT id FROM instruments WHERE external_id = 'CA-003'),
+      'node//devfixture000000000000003', 'CA-QC-02', 'Coastal QC PC', 'Windows 10 Pro', true,
+      now() - interval '3 hours', 'the agent installer');
+
+  -- A hold nobody has cleared, on the machine driving the GC-MS.
+  INSERT INTO safety_holds (tenant_org_id, device_id, instrument_id, reason, fault_source, effect, contact, decided_by, dispatched_to, created_at) VALUES
+    ((SELECT id FROM orgs WHERE name = 'Sierra Spectra'),
+      (SELECT id FROM remote_devices WHERE node_id = 'node//devfixture000000000000001'),
+      (SELECT id FROM instruments WHERE external_id = 'LZ-002'),
+      'Source heater overshooting setpoint; thermal fault suspected.',
+      'engineer assessment', 'hold', 'Sierra Spectra 555-0100', 'bill@sierraspectra.test', 'Rita Alvarez',
+      now() - interval '5 hours'),
+    -- The sharpest rung, on the machine that has left our shop: posted as
+    -- 'lock' and rendered as advice, which is the whole point of permitted().
+    ((SELECT id FROM orgs WHERE name = 'Sierra Spectra'),
+      (SELECT id FROM remote_devices WHERE node_id = 'node//devfixture000000000000003'),
+      (SELECT id FROM instruments WHERE external_id = 'CA-003'),
+      'Rotary pump exhaust blocked - oil mist detected at the bench.',
+      'engineer assessment', 'lock', 'Sierra Spectra 555-0100', 'bill@sierraspectra.test', '',
+      now() - interval '2 days');
+
+  INSERT INTO device_notices (tenant_org_id, device_id, rung, body, approved_by, posted_by, created_at) VALUES
+    ((SELECT id FROM orgs WHERE name = 'Sierra Spectra'),
+      (SELECT id FROM remote_devices WHERE node_id = 'node//devfixture000000000000003'),
+      'prominent', 'Property of Sierra Spectra. Account past due - call 555-0100.',
+      '${OWNER}', '${OWNER}', now() - interval '1 day');
 `;
 
 async function seed() {

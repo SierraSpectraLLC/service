@@ -21,8 +21,10 @@ import {
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, stipends, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
   dunningEvents, creditOverrides, quotes, quoteLines, payroll, perks, bugReports,
+  deviceNotices, safetyHolds,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
+import { syncDeviceNotices } from "@/lib/fleetNoticeData";
 import {
   allNumbers, catalogEntry, catalogName, cleanAliases, currentNumber, MAX_PART_PHOTOS,
   numberClash, PART_KINDS, PART_KIND_LABEL, type PartAlias,
@@ -18350,5 +18352,149 @@ export async function withdrawLead(leadId: number): Promise<{ error?: string }> 
     action: "withdrew a lead before anybody took it",
   });
   revalidatePath("/network");
+  return {};
+}
+
+// ---------------- Device notices and safety holds ----------------
+// What a lab PC says on its own screen. lib/fleetNotice holds the decisions and
+// is pure; this is the half that needs a database and an audit trail.
+//
+// Read that file before changing anything here, particularly the reason there
+// is no action below that locks a machine for money. Short version: lib/credit
+// already withholds our labour, which is the sharper lever and the defensible
+// one, and reaching into a customer's instrument controller over an invoice is
+// neither.
+
+/** Post a repossession notice. Owner-only, and the approver is named in the row. */
+export async function postDeviceNotice(
+  deviceId: number,
+  input: { body: string; invoiceId?: number | null; rung?: "notice" | "prominent" | "at_login" },
+): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const { remote: moduleOn } = await getModules();
+  const row = await deviceWithOrg(deviceId, readTenant(u));
+  if (!row) return { error: "Not found" };
+  const { device } = row;
+  if (!mayEnroll(u, { moduleOn }, { tenantOrgId: device.tenantOrgId })) return { error: "Not found" };
+
+  const body = input.body.trim();
+  if (!body) return { error: "Say what the notice should say." };
+
+  // One open notice per device. A second would stack two landlords' voices on
+  // one screen; clear the first if the wording has to change.
+  const [open] = await db.select({ id: deviceNotices.id }).from(deviceNotices)
+    .where(and(eq(deviceNotices.deviceId, deviceId), isNull(deviceNotices.clearedAt)));
+  if (open) return { error: "This machine already carries a notice. Clear it first." };
+
+  await db.insert(deviceNotices).values({
+    tenantOrgId: device.tenantOrgId, deviceId,
+    invoiceId: input.invoiceId ?? null, rung: input.rung ?? "notice",
+    body, approvedBy: u.email, postedBy: u.email,
+  });
+  await audit({
+    actor: u.email, instrumentId: device.instrumentId, entityType: "device_notice", entityId: deviceId,
+    action: `posted a repossession notice to ${device.nickname || device.name || "a machine"}`
+      + ` at ${row.orgName ?? "an unassigned organization"} (approved by ${u.email})`,
+    tenantOrgId: device.tenantOrgId,
+  });
+  // Deliver now so the person who just acted sees it land. Best-effort by
+  // contract: the row above is the record, and api/cron/notices re-asserts on
+  // the hour, so a machine that is switched off or a host that is down must
+  // not fail a write that has already happened.
+  await syncDeviceNotices(deviceId).catch(() => ({}));
+  revalidatePath("/remote");
+  return {};
+}
+
+export async function clearDeviceNotice(deviceId: number): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const row = await deviceWithOrg(deviceId, readTenant(u));
+  if (!row) return { error: "Not found" };
+  await db.update(deviceNotices).set({ clearedAt: new Date(), clearedBy: u.email })
+    .where(and(eq(deviceNotices.deviceId, deviceId), isNull(deviceNotices.clearedAt)));
+  await audit({
+    actor: u.email, instrumentId: row.device.instrumentId, entityType: "device_notice", entityId: deviceId,
+    action: `cleared the repossession notice on ${row.device.nickname || row.device.name || "a machine"}`,
+    tenantOrgId: row.device.tenantOrgId,
+  });
+  // Deliver now so the person who just acted sees it land. Best-effort by
+  // contract: the row above is the record, and api/cron/notices re-asserts on
+  // the hour, so a machine that is switched off or a host that is down must
+  // not fail a write that has already happened.
+  await syncDeviceNotices(deviceId).catch(() => ({}));
+  revalidatePath("/remote");
+  return {};
+}
+
+/**
+ * Raise an engineering hold. Staff, not owner: the person who finds the fault is
+ * the person who should be able to say so, and waiting for an owner to wake up
+ * is how a thermal fault runs all night.
+ *
+ * Takes no invoice, no balance, no account status, and must not learn to.
+ */
+export async function raiseSafetyHold(
+  deviceId: number,
+  input: {
+    reason: string; effect?: "advise" | "hold" | "lock";
+    faultSource?: string; contact?: string; dispatchedTo?: string;
+  },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const { remote: moduleOn } = await getModules();
+  const row = await deviceWithOrg(deviceId, readTenant(u));
+  if (!row) return { error: "Not found" };
+  const { device } = row;
+  if (!mayEnroll(u, { moduleOn }, { tenantOrgId: device.tenantOrgId })) return { error: "Not found" };
+
+  const reason = input.reason.trim();
+  if (!reason) return { error: "Say what the fault is - a hold with no fault is not one." };
+
+  const [open] = await db.select({ id: safetyHolds.id }).from(safetyHolds)
+    .where(and(eq(safetyHolds.deviceId, deviceId), isNull(safetyHolds.clearedAt)));
+  if (open) return { error: "This machine is already held. Clear it first." };
+
+  const effect = input.effect ?? "advise";
+  await db.insert(safetyHolds).values({
+    tenantOrgId: device.tenantOrgId, deviceId, instrumentId: device.instrumentId,
+    reason, faultSource: input.faultSource?.trim() || "engineer assessment",
+    effect, contact: input.contact?.trim() ?? "",
+    decidedBy: u.email, dispatchedTo: input.dispatchedTo?.trim() ?? "",
+  });
+  await audit({
+    actor: u.email, instrumentId: device.instrumentId, entityType: "safety_hold", entityId: deviceId,
+    action: `raised a ${effect} safety hold on ${device.nickname || device.name || "a machine"}: ${reason}`,
+    tenantOrgId: device.tenantOrgId,
+  });
+  // Deliver now so the person who just acted sees it land. Best-effort by
+  // contract: the row above is the record, and api/cron/notices re-asserts on
+  // the hour, so a machine that is switched off or a host that is down must
+  // not fail a write that has already happened.
+  await syncDeviceNotices(deviceId).catch(() => ({}));
+  revalidatePath("/remote");
+  return {};
+}
+
+/** Clear a hold. The resolution is required: what was wrong and what fixed it. */
+export async function clearSafetyHold(deviceId: number, resolution: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const row = await deviceWithOrg(deviceId, readTenant(u));
+  if (!row) return { error: "Not found" };
+  const said = resolution.trim();
+  if (!said) return { error: "Say what resolved it." };
+  await db.update(safetyHolds)
+    .set({ clearedAt: new Date(), clearedBy: u.email, resolution: said })
+    .where(and(eq(safetyHolds.deviceId, deviceId), isNull(safetyHolds.clearedAt)));
+  await audit({
+    actor: u.email, instrumentId: row.device.instrumentId, entityType: "safety_hold", entityId: deviceId,
+    action: `cleared the safety hold on ${row.device.nickname || row.device.name || "a machine"}: ${said}`,
+    tenantOrgId: row.device.tenantOrgId,
+  });
+  // Deliver now so the person who just acted sees it land. Best-effort by
+  // contract: the row above is the record, and api/cron/notices re-asserts on
+  // the hour, so a machine that is switched off or a host that is down must
+  // not fail a write that has already happened.
+  await syncDeviceNotices(deviceId).catch(() => ({}));
+  revalidatePath("/remote");
   return {};
 }

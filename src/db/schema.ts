@@ -3858,3 +3858,58 @@ export const remoteDevices = pgTable("remote_devices", {
   index("remote_devices_org_idx").on(t.orgId),
   index("remote_devices_instrument_idx").on(t.instrumentId),
 ]);
+
+/**
+ * A repossession notice posted to a machine. Commercial, non-blocking, signed.
+ *
+ * A row exists only because somebody decided one should - there is no threshold
+ * anywhere that creates one. See lib/fleetNotice for why that is deliberate.
+ * The invoice is recorded because the notice is *about* it, not because a
+ * balance produced the notice.
+ */
+export const deviceNotices = pgTable("device_notices", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  deviceId: integer("device_id").notNull().references(() => remoteDevices.id, { onDelete: "cascade" }),
+  invoiceId: integer("invoice_id").references((): AnyPgColumn => invoices.id, { onDelete: "set null" }),
+  /** notice | prominent | at_login - all non-blocking. */
+  rung: text("rung").notNull().default("notice"),
+  body: text("body").notNull().default(""),
+  /** The name on the decision. lib/fleetNotice refuses to render without it. */
+  approvedBy: text("approved_by").notNull().default(""),
+  postedBy: text("posted_by").notNull().default(""),
+  clearedAt: timestamp("cleared_at"),
+  clearedBy: text("cleared_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("device_notices_device_idx").on(t.deviceId)]);
+
+/**
+ * An engineering hold on a machine. No money column, and none may be added -
+ * tests/fleetNotice pins the safety decision as invariant under credit standing.
+ *
+ * `effect` 'lock' is the only rung that may stop somebody using a machine, and
+ * even then the agent locks only when it can confirm the machine is idle. On a
+ * system that has shipped or changed hands it degrades to advice
+ * (lib/fleetNotice.permitted).
+ */
+export const safetyHolds = pgTable("safety_holds", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  deviceId: integer("device_id").notNull().references(() => remoteDevices.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }),
+  /** What is wrong, in engineering terms. Required: a hold with no fault is not one. */
+  reason: text("reason").notNull().default(""),
+  /** Where the fault came from - a signal name, or "engineer assessment". */
+  faultSource: text("fault_source").notNull().default("engineer assessment"),
+  /** advise | hold | lock */
+  effect: text("effect").notNull().default("advise"),
+  /** Who to call, carried to the far end with the advice. */
+  contact: text("contact").notNull().default(""),
+  decidedBy: text("decided_by").notNull().default(""),
+  /** The engineer sent to look at it, when one has been. */
+  dispatchedTo: text("dispatched_to").notNull().default(""),
+  resolution: text("resolution").notNull().default(""),
+  clearedAt: timestamp("cleared_at"),
+  clearedBy: text("cleared_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("safety_holds_device_idx").on(t.deviceId)]);
