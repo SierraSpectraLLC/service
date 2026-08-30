@@ -147,7 +147,10 @@ import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { parseMoney, centsToInput, formatCents } from "@/lib/money";
 import { bestPrice, normalizePn } from "@/lib/priceBook";
 import { NOTIFY_KINDS, isNotifyKind, mayReceiveKind } from "@/lib/inbox";
-import { KIND_LABEL, STOCK_KINDS, canIssue, stockAccess } from "@/lib/stock";
+import {
+  ITEM_KIND_LABEL, KIND_LABEL, STOCK_ITEM_KINDS, STOCK_KINDS, canIssue, checkStockItem, stockAccess,
+  stockKey, stockLabel,
+} from "@/lib/stock";
 import { PO_LABEL, poEditable, poReceivable, poTotals, statusAfterReceipt } from "@/lib/po";
 import { canKick } from "@/lib/queue";
 import { assetDupeKey, duplicateIds, importPlanner } from "@/lib/assetDupe";
@@ -11561,8 +11564,33 @@ const revStock = (id?: number) => {
   if (id) revalidatePath(`/stock/${id}`);
 };
 
+/**
+ * The person a kit belongs to, checked against the roster rather than trusted.
+ *
+ * An address off the wire is not a colleague. Resolving it here means the
+ * keeper on a van is somebody who actually works here, in THIS workspace -
+ * the name is taken from the roster row rather than from whatever the form
+ * sent, so the two cannot disagree - and an empty address is the real answer
+ * "nobody in particular", which a shop shelf always gives.
+ */
+async function keeperOf(
+  u: SessionUser, email: string | undefined,
+): Promise<{ email: string; name: string } | { error: string }> {
+  const e = (email ?? "").trim().toLowerCase();
+  if (!e) return { email: "", name: "" };
+  const [member] = await db.select().from(houseMembers).where(and(
+    eq(houseMembers.email, e),
+    forTenant(houseMembers.orgId, readTenant(u)),
+    ne(houseMembers.role, "none"),
+  ));
+  if (!member) return { error: "That person is not on this workspace's roster" };
+  return { email: member.email, name: member.name };
+}
+
 export async function createStockroom(data: {
   name: string; kind: string; orgId: number | null; keeper?: string; location?: string; note?: string;
+  /** The roster address whose kit this is. Empty = nobody in particular. */
+  keeperEmail?: string;
 }): Promise<{ error?: string; id?: number }> {
   const u = await requireEditor();
   const name = data.name.trim().slice(0, 80);
@@ -11576,22 +11604,28 @@ export async function createStockroom(data: {
     const [org] = await db.select({ id: orgs.id }).from(orgs).where(eq(orgs.id, orgId));
     if (!org) return { error: "Unknown organization" };
   }
+  const keeper = await keeperOf(u, data.keeperEmail);
+  if ("error" in keeper) return keeper;
+  /* The picked colleague's name wins over anything typed, and a room with
+     nobody picked keeps whatever name was typed - which is how a kit kept by a
+     subcontractor, or a van that is nobody's in particular, still reads. */
+  const keeperName = keeper.email ? keeper.name : (data.keeper ?? "").trim().slice(0, 60);
   const [room] = await db.insert(stockrooms).values({
     tenantOrgId: myTenantOrgId(u),
-    name, kind, orgId, keeper: (data.keeper ?? "").trim().slice(0, 60),
+    name, kind, orgId, keeper: keeperName, keeperEmail: keeper.email,
     location: (data.location ?? "").trim().slice(0, 120), note: (data.note ?? "").trim().slice(0, 300),
     createdBy: u.email,
   }).returning();
   await audit({
     actor: u.email, entityType: "stockroom", entityId: room.id,
-    action: `created ${KIND_LABEL[kind].toLowerCase()} "${name}"`,
+    action: `created ${KIND_LABEL[kind].toLowerCase()} "${name}"${keeperName ? `, kept by ${keeperName}` : ""}`,
   });
   revStock();
   return { id: room.id };
 }
 
 export async function updateStockroom(id: number, data: {
-  name: string; keeper?: string; location?: string; note?: string;
+  name: string; keeper?: string; location?: string; note?: string; keeperEmail?: string;
 }): Promise<{ error?: string }> {
   const u = await requireEditor();
   const acc = await roomAccess(u, id);
@@ -11599,14 +11633,29 @@ export async function updateStockroom(id: number, data: {
   if (!acc.manage) return { error: acc.see ? "You can't change someone else's stockroom" : "Not found" };
   const name = data.name.trim().slice(0, 80);
   if (!name) return { error: "Name required" };
+  const keeper = await keeperOf(u, data.keeperEmail);
+  if ("error" in keeper) return keeper;
+  const keeperName = keeper.email ? keeper.name : (data.keeper ?? "").trim().slice(0, 60);
   await db.update(stockrooms).set({
-    name, keeper: (data.keeper ?? "").trim().slice(0, 60),
+    name, keeper: keeperName, keeperEmail: keeper.email,
     location: (data.location ?? "").trim().slice(0, 120), note: (data.note ?? "").trim().slice(0, 300),
   }).where(eq(stockrooms.id, id));
   if (name !== acc.room.name) {
     await audit({
       actor: u.email, entityType: "stockroom", entityId: id,
       action: `renamed stockroom "${acc.room.name}" to "${name}"`, field: "name", oldValue: acc.room.name, newValue: name,
+    });
+  }
+  /* Handing a van to somebody else is the fact people come back looking for -
+     "who had it in March" - so it is its own line rather than folded into a
+     rename nobody made. */
+  if (keeper.email !== acc.room.keeperEmail || keeperName !== acc.room.keeper) {
+    await audit({
+      actor: u.email, entityType: "stockroom", entityId: id,
+      action: keeperName
+        ? `"${name}" is now kept by ${keeperName}`
+        : `"${name}" is no longer kept by ${acc.room.keeper || "anybody in particular"}`,
+      field: "keeper", oldValue: acc.room.keeper, newValue: keeperName,
     });
   }
   revStock(id);
@@ -11671,17 +11720,30 @@ export async function removeStockroomShare(stockroomId: number, orgId: number): 
   return {};
 }
 
-/** Find (or create) the on-hand line for a part number in a room. */
-async function stockLineFor(stockroomId: number, partNumber: string, seed?: { name?: string }) {
-  const pn = partNumber.trim().slice(0, 80);
-  if (!pn) return null;
+/**
+ * Find (or create) the on-hand line for one thing in a room.
+ *
+ * Keyed on lib/stock.stockKey - the number when the thing has one, the name
+ * when it does not - which is the same expression the unique index enforces,
+ * so this cannot land a second row the database would refuse. It is looked up
+ * in SQL rather than by reading the room and filtering, because a room is not
+ * a small list and a race here is a duplicate line.
+ */
+async function stockLineFor(
+  stockroomId: number, want: { partNumber: string; name?: string; kind?: string },
+) {
+  const pn = want.partNumber.trim().slice(0, 80);
+  const name = (want.name ?? "").trim().slice(0, 120);
+  const key = stockKey({ partNumber: pn, name });
+  if (!key) return null;
+  const kind = want.kind === "tool" ? "tool" : "part";
   const [existing] = await db.select().from(stockItems).where(and(
     eq(stockItems.stockroomId, stockroomId),
-    sql`lower(${stockItems.partNumber}) = ${pn.toLowerCase()}`,
+    sql`lower(coalesce(nullif(${stockItems.partNumber}, ''), ${stockItems.name})) = ${key}`,
   ));
   if (existing) return existing;
   const [made] = await db.insert(stockItems)
-    .values({ stockroomId, partNumber: pn, name: (seed?.name ?? "").trim().slice(0, 120), qty: 0 })
+    .values({ stockroomId, partNumber: pn, name, kind, qty: 0 })
     .returning();
   return made;
 }
@@ -11702,7 +11764,11 @@ async function moveStock(opts: {
     .where(eq(stockItems.id, opts.item.id));
 }
 
-export type StockItemInput = { partNumber: string; name?: string; qty?: string; minQty?: string; bin?: string; note?: string };
+export type StockItemInput = {
+  partNumber: string; name?: string; qty?: string; minQty?: string; bin?: string; note?: string;
+  /** part | tool. Absent means part, which is what every row was before tools. */
+  kind?: string;
+};
 
 const whole = (s: string | undefined, fallback = 0) => {
   const n = parseInt((s ?? "").trim(), 10);
@@ -11712,8 +11778,15 @@ const whole = (s: string | undefined, fallback = 0) => {
 /**
  * Spreadsheet entry for a room's shelf, same shape as the catalog grids. An
  * opening quantity counts as a receive so the ledger explains where the first
- * count came from; a part number already on the shelf has its floor and bin
- * updated instead of being duplicated.
+ * count came from; a line already on the shelf has its floor and bin updated
+ * instead of being duplicated.
+ *
+ * Parts and TOOLS come in through the same door, because they land on the same
+ * shelf and are counted by the same ledger. What differs is the identity: a
+ * part is refused without a number, a tool is refused without a name and keeps
+ * its number optional - the shop's OEM alignment tool has one and the 4 mm hex
+ * key never will. lib/stock.checkStockItem is that rule, shared with the grid
+ * so the greying-out and the refusal cannot drift apart.
  */
 export async function addStockItems(
   stockroomId: number, rows: StockItemInput[],
@@ -11722,23 +11795,35 @@ export async function addStockItems(
   const acc = await roomAccess(u, stockroomId);
   if (!acc.room) return { error: "Not found" };
   if (!acc.manage) return { error: acc.see ? "You can't stock someone else's room" : "Not found" };
-  const usable = rows.filter((r) => r.partNumber.trim());
-  if (!usable.length) return { error: "Nothing to save - every row needs a part number" };
+  // A row is worth saving if it carries either identity; which one it NEEDED
+  // is checked per row below, so a tool typed into the part column gets told
+  // what is wrong with it instead of vanishing.
+  const usable = rows.filter((r) => r.partNumber.trim() || (r.name ?? "").trim());
+  if (!usable.length) return { error: "Nothing to save - a part needs a number, a tool needs a name" };
   if (usable.length > 300) return { error: "Save 300 rows at a time" };
   const failures: { row: number; name: string; error: string }[] = [];
   let created = 0, updated = 0;
   for (let i = 0; i < usable.length; i++) {
     const r = usable[i];
     const pn = r.partNumber.trim();
+    const nm = (r.name ?? "").trim();
+    const kind = (STOCK_ITEM_KINDS as readonly string[]).includes(r.kind ?? "") ? r.kind! : "part";
+    const label = pn || nm;
+    const wrong = checkStockItem({ kind, partNumber: pn, name: nm });
+    if (wrong) { failures.push({ row: i + 1, name: label, error: wrong }); continue; }
+    const key = stockKey({ partNumber: pn, name: nm });
     const [before] = await db.select().from(stockItems).where(and(
       eq(stockItems.stockroomId, stockroomId),
-      sql`lower(${stockItems.partNumber}) = ${pn.toLowerCase()}`,
+      sql`lower(coalesce(nullif(${stockItems.partNumber}, ''), ${stockItems.name})) = ${key}`,
     ));
-    const line = await stockLineFor(stockroomId, pn, { name: r.name });
-    if (!line) { failures.push({ row: i + 1, name: pn, error: "Part number required" }); continue; }
+    const line = await stockLineFor(stockroomId, { partNumber: pn, name: nm, kind });
+    if (!line) { failures.push({ row: i + 1, name: label, error: wrong ?? "Nothing to identify it by" }); continue; }
     const openingQty = whole(r.qty);
     await db.update(stockItems).set({
-      name: (r.name ?? line.name).trim().slice(0, 120),
+      // Never blanked back to nothing: a tool IS its name, and a re-pasted
+      // count sheet with that column empty must not erase what it is.
+      name: nm || line.name,
+      kind,
       minQty: whole(r.minQty, line.minQty),
       bin: (r.bin ?? line.bin).trim().slice(0, 40),
       note: (r.note ?? line.note).trim().slice(0, 200),
@@ -11780,7 +11865,7 @@ export async function recountStock(itemId: number, countedQty: number, reason: s
   await moveStock({ item, delta, kind: "adjust", actor: u.email, reason: why });
   await audit({
     actor: u.email, entityType: "stock", entityId: item.id,
-    action: `recounted PN ${item.partNumber} in "${acc.room.name}": ${item.qty} -> ${countedQty} - reason: ${why}`,
+    action: `recounted ${stockLabel(item)} in "${acc.room.name}": ${item.qty} -> ${countedQty} - reason: ${why}`,
     field: "qty", oldValue: String(item.qty), newValue: String(countedQty),
   });
   revStock(item.stockroomId);
@@ -11815,7 +11900,7 @@ export async function issueStock(
     .where(forTenant(partPrices.tenantOrgId, acc.room.tenantOrgId));
   const best = bestPrice(book, item.partNumber);
   const unitCents = item.unitCostCents ?? best?.priceCents ?? null;
-  const name = item.name || `PN ${item.partNumber}`;
+  const name = item.name || stockLabel(item);
   const status = opts?.install ? "Installed" : "Received";
   const stamps = partStamps({ status: "", receivedAt: "", installedAt: "", removedAt: "" }, status);
   const [p] = await db.insert(parts).values({
@@ -11856,7 +11941,13 @@ export async function transferStock(itemId: number, toStockroomId: number, qty: 
   if (!to.issue) return { error: to.see ? `You can't add stock to "${to.room.name}"` : "Not found" };
   const check = canIssue(item.qty, qty);
   if (!check.ok) return { error: check.error };
-  const dest = await stockLineFor(toStockroomId, item.partNumber, { name: item.name });
+  /* The destination line, by the same identity rule the source has: a tool
+     with no number lands on the destination's line of that NAME, or opens one.
+     Keyed on the part number alone this returned null for every tool, and a
+     van restock refused with "Not found". */
+  const dest = await stockLineFor(toStockroomId, {
+    partNumber: item.partNumber, name: item.name, kind: item.kind,
+  });
   if (!dest) return { error: "Not found" };
   const why = (note ?? "").trim();
   await moveStock({ item, delta: -qty, kind: "transfer_out", actor: u.email, reason: why, counterpartyId: toStockroomId });
@@ -11868,7 +11959,7 @@ export async function transferStock(itemId: number, toStockroomId: number, qty: 
   }
   await audit({
     actor: u.email, entityType: "stock", entityId: item.id,
-    action: `transferred ${qty} × PN ${item.partNumber} from "${from.room.name}" to "${to.room.name}"${why ? ` - ${why}` : ""}`,
+    action: `transferred ${qty} × ${stockLabel(item)} from "${from.room.name}" to "${to.room.name}"${why ? ` - ${why}` : ""}`,
   });
   revStock(item.stockroomId);
   revStock(toStockroomId);
@@ -11887,7 +11978,7 @@ export async function receiveStock(itemId: number, qty: number, note?: string): 
   await moveStock({ item, delta: qty, kind: "receive", actor: u.email, reason: (note ?? "").trim() });
   await audit({
     actor: u.email, entityType: "stock", entityId: item.id,
-    action: `received ${qty} × PN ${item.partNumber} into "${acc.room.name}"${(note ?? "").trim() ? ` - ${note!.trim()}` : ""}`,
+    action: `received ${qty} × ${stockLabel(item)} into "${acc.room.name}"${(note ?? "").trim() ? ` - ${note!.trim()}` : ""}`,
   });
   revStock(item.stockroomId);
   return {};
@@ -12141,7 +12232,7 @@ export async function receivePoLine(lineId: number, qty: number, note?: string):
     await db.update(poLines).set({ qtyReceived: line.qtyReceived + qty }).where(eq(poLines.id, lineId));
   } else {
     if (po.stockroomId === null) return { error: "This order's stockroom is gone - receive it into a room instead" };
-    const item = await stockLineFor(po.stockroomId, line.partNumber, { name: line.name });
+    const item = await stockLineFor(po.stockroomId, { partNumber: line.partNumber, name: line.name });
     if (!item) return { error: "Not found" };
 
     await db.update(poLines).set({ qtyReceived: line.qtyReceived + qty }).where(eq(poLines.id, lineId));

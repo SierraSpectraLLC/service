@@ -7,7 +7,7 @@ import { useState } from "react";
 import { setHouseHr } from "@/app/actions";
 import { formatCents } from "@/lib/money";
 import { DataTable, Panel, Pill } from "@/components/ui";
-import PersonFile, { type PersonProfile } from "@/components/PersonFile";
+import PersonFile, { type KitRow, type PersonProfile } from "@/components/PersonFile";
 import type { PayRow } from "@/lib/payroll";
 import type { PerkRow } from "@/lib/perks";
 import { toast } from "@/components/ui/Toast";
@@ -22,6 +22,8 @@ export type RosterRow = {
   /** Null when the reader may not see pay - the figure never reaches the page. */
   pay: PayRow | null;
   perks: PerkRow[];
+  /** The vans and field kits this person keeps, with what is counted in each. */
+  kits: KitRow[];
   /** Whether they have a name at all - see the page, and the note on the row. */
   nameable: boolean;
   unclaimedCents: number;
@@ -80,7 +82,7 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
       {openRow && (
         <PersonFile
           email={openRow.email} name={openRow.name} role={openRow.role}
-          profile={openRow.profile} pay={openRow.pay} perks={openRow.perks}
+          profile={openRow.profile} pay={openRow.pay} perks={openRow.perks} kits={openRow.kits}
           seesPay={seesPay} orgId={orgId} today={today}
           onClose={() => setOpen(null)} />
       )}

@@ -2749,8 +2749,26 @@ export const stockrooms = pgTable("stockrooms", {
   kind: text("kind").notNull().default("shop"), // shop | client | mobile
   // Whose stock this is. Null = the house's own.
   orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
-  // mobile only: whose van or kit, so a tech's own stock is findable by name.
+  /**
+   * mobile only: whose van or kit, so a tech's own stock is findable by name.
+   *
+   * Kept alongside keeperEmail rather than derived from it, because plenty of
+   * kits are kept by somebody who has never signed in - a subcontractor, a
+   * van - and every room created before the roster link existed has this and
+   * nothing else. It is what gets DISPLAYED either way, so a renamed member
+   * is a name that follows the roster only if somebody re-picks them; that is
+   * the same bargain expense_reports.person makes.
+   */
   keeper: text("keeper").notNull().default(""),
+  /**
+   * The person on the roster whose kit this is, when it is somebody's.
+   *
+   * An address rather than a name, because a name is not an identity - the
+   * shop can employ two Steve Joneses, and lib/hr already learned that. This
+   * is what makes "what is Bill carrying" answerable on Bill's own file
+   * instead of by reading every room's keeper field and hoping.
+   */
+  keeperEmail: text("keeper_email").notNull().default(""),
   location: text("location").notNull().default(""),
   note: text("note").notNull().default(""),
   archived: boolean("archived").notNull().default(false),
@@ -2773,16 +2791,31 @@ export const stockroomShares = pgTable("stockroom_shares", {
   index("stockroom_shares_org_idx").on(t.orgId),
 ]);
 
-// On-hand of one part number in one room. Keyed on the part number as text,
-// like the price book, and matched case-insensitively through the same
-// normalizePn - inventory and pricing must agree on what "the same part" is.
-// Case-insensitive uniqueness on (stockroom_id, part_number) is an expression
-// index in drizzle/schema-sync.sql; the ORM can't declare lower().
+// On-hand of one thing in one room. Keyed on the part number as text, like the
+// price book, and matched case-insensitively through the same normalizePn -
+// inventory and pricing must agree on what "the same part" is. A tool usually
+// has no number, so the NAME identifies it instead; lib/stock.stockKey is that
+// rule and the expression index in drizzle/schema-sync.sql is its enforcement
+// (the ORM can't declare lower(coalesce(...))), on
+// (stockroom_id, lower(part_number or name)).
 export const stockItems = pgTable("stock_items", {
   id: serial("id").primaryKey(),
   stockroomId: integer("stockroom_id").notNull().references(() => stockrooms.id, { onDelete: "cascade" }),
+  /**
+   * The number, when the thing has one. Empty for most TOOLS - a 4 mm hex key
+   * has no number anybody would order it by - and required for a part, which
+   * is a rule lib/stock.checkStockItem owns rather than the column.
+   */
   partNumber: text("part_number").notNull(),
   name: text("name").notNull().default(""),
+  /**
+   * part | tool. A part is consumed into a system and reordered by number; a
+   * tool is bought once, carried, and counted so somebody knows whether the
+   * van still has two of them. Same shelf, same ledger, same transfers - what
+   * differs is which field identifies it (see lib/stock.stockKey) and whether
+   * a number is required.
+   */
+  kind: text("kind").notNull().default("part"),
   qty: integer("qty").notNull().default(0),
   // Reorder point. 0 = never suggest reordering this, which is the honest
   // default for a part nobody has decided a floor for yet.

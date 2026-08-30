@@ -32,7 +32,10 @@ export type PersonProfile = {
  * the register runs on, and a reader without it gets the profile half only -
  * HR facts, no figures.
  */
-export default function PersonFile({ email, name, role, profile, pay, perks, seesPay, orgId, today, onClose }: {
+/** One of their kits, and what is counted in it. */
+export type KitRow = { id: number; name: string; lines: number; units: number; short: number };
+
+export default function PersonFile({ email, name, role, profile, pay, perks, kits, seesPay, orgId, today, onClose }: {
   email: string;
   name: string;
   role: string;
@@ -40,6 +43,8 @@ export default function PersonFile({ email, name, role, profile, pay, perks, see
   /** The pay row in force today, when the reader may see it. */
   pay: PayRow | null;
   perks: PerkRow[];
+  /** The vans and field kits this person keeps. Empty for most people. */
+  kits: KitRow[];
   seesPay: boolean;
   /** The employing workspace - where a pay change is filed. Null hides the editors. */
   orgId: number | null;
@@ -118,6 +123,29 @@ export default function PersonFile({ email, name, role, profile, pay, perks, see
             onChange={(e) => setP({ ...p, emergencyPhone: e.target.value })} />
         </div>
       </div>
+
+      {/*
+        What they are carrying.
+        
+        Here rather than only on the inventory page because this is where
+        somebody asks it: a tech is out for a fortnight, or leaving, and the
+        question is what of the shop's is in their van. The counts link to the
+        room itself, which is where anything is actually done about it.
+      */}
+      {kits.length > 0 && (
+        <>
+          <div className="dialog-section" style={{ marginTop: 14 }}>What they carry</div>
+          {kits.map((k) => (
+            <div key={k.id} style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "4px 0" }}>
+              <a href={`/stock/${k.id}`} className="t-body" style={{ fontWeight: 600 }}>{k.name}</a>
+              <span className="mut t-small">
+                {k.lines} line{k.lines === 1 ? "" : "s"} · {k.units} unit{k.units === 1 ? "" : "s"}
+              </span>
+              {k.short > 0 && <span className="pill bad">{k.short} short</span>}
+            </div>
+          ))}
+        </>
+      )}
 
       {seesPay && (
         <>

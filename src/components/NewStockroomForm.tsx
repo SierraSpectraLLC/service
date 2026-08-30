@@ -5,16 +5,21 @@ import { useState, useTransition } from "react";
 import { createStockroom } from "@/app/actions";
 import { KIND_LABEL, STOCK_KINDS } from "@/lib/stock";
 import Dialog from "@/components/ui/Dialog";
+import KeeperPicker from "@/components/KeeperPicker";
 import { toast } from "@/components/ui/Toast";
 
-export default function NewStockroomForm({ orgOptions, isHouse, myOrgName }: {
+const BLANK = { name: "", kind: "shop", orgId: 0, keeper: "", keeperEmail: "", location: "" };
+
+export default function NewStockroomForm({ orgOptions, isHouse, myOrgName, roster }: {
   orgOptions: { id: number; name: string }[];
   isHouse: boolean;
   myOrgName: string;
+  /** This workspace's people, so a van can be handed to one of them by name. */
+  roster: { email: string; name: string }[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState({ name: "", kind: "shop", orgId: 0, keeper: "", location: "" });
+  const [draft, setDraft] = useState(BLANK);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -33,7 +38,7 @@ export default function NewStockroomForm({ orgOptions, isHouse, myOrgName }: {
                 const res = await createStockroom({ ...draft, orgId: draft.orgId || null });
                 if (res?.error) { setError(res.error); return; }
                 setOpen(false);
-                setDraft({ name: "", kind: "shop", orgId: 0, keeper: "", location: "" });
+                setDraft(BLANK);
                 toast({ message: `Created ${draft.name.trim()}` });
                 if (res.id) router.push(`/stock/${res.id}`);
               })}>{pending ? "Creating..." : "Create stockroom"}</button>
@@ -65,11 +70,12 @@ export default function NewStockroomForm({ orgOptions, isHouse, myOrgName }: {
                 <input value={myOrgName} readOnly style={{ background: "#F4F6F9" }} />
               </div>
             )}
+            {/* Only a van or field kit is somebody's. A shop shelf belongs to
+                the shop, and a client's cage to the client. */}
             {draft.kind === "mobile" && (
-              <div>
-                <label>Kept by</label>
-                <input value={draft.keeper} onChange={(e) => setDraft({ ...draft, keeper: e.target.value })} placeholder="Whose van" />
-              </div>
+              <KeeperPicker roster={roster} disabled={pending}
+                value={{ keeper: draft.keeper, keeperEmail: draft.keeperEmail }}
+                onChange={(k) => setDraft({ ...draft, ...k })} />
             )}
             <div>
               <label>Location</label>

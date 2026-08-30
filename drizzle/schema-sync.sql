@@ -926,9 +926,16 @@ CREATE INDEX IF NOT EXISTS "stockroom_shares_org_idx" ON "stockroom_shares" ("or
 CREATE INDEX IF NOT EXISTS "stock_items_room_idx" ON "stock_items" ("stockroom_id");
 CREATE INDEX IF NOT EXISTS "stock_moves_room_idx" ON "stock_moves" ("stockroom_id");
 CREATE INDEX IF NOT EXISTS "stock_moves_at_idx" ON "stock_moves" ("at");
--- One on-hand line per part number per room, however it was capitalized. Same
--- reasoning (and same ORM limitation) as part_prices_pn_vendor.
-CREATE UNIQUE INDEX IF NOT EXISTS "stock_items_room_pn" ON "stock_items" ("stockroom_id", lower("part_number"));
+-- One line per THING in a room, however it was capitalized: the number when it
+-- has one, the name when it does not. Same reasoning (and same ORM limitation)
+-- as part_prices_pn_vendor. This replaced an index on lower(part_number) alone,
+-- which is right for parts and wrong the moment tools arrived - every
+-- numberless tool in a room collided on lower('') with every other, so a van
+-- could hold exactly one. Identical to the old key for every row that has a
+-- number, which is every row written before tools existed. The same rule lives
+-- in TS as lib/stock.stockKey.
+CREATE UNIQUE INDEX IF NOT EXISTS "stock_items_room_key"
+  ON "stock_items" ("stockroom_id", lower(coalesce(nullif("part_number", ''), "name")));
 -- One price per (PN, vendor) pair regardless of how either was capitalized.
 -- Lives here alone: drizzle's pgTable can't declare expression indexes, so the
 -- app enforces the same rule with a select-then-write (see addPartPrices) and
@@ -4154,3 +4161,8 @@ CREATE INDEX IF NOT EXISTS "device_leases_device_idx" ON "device_leases" ("devic
 ALTER TABLE "device_leases" ADD COLUMN IF NOT EXISTS "suspended_at" timestamp;
 ALTER TABLE "device_leases" ADD COLUMN IF NOT EXISTS "suspended_by" text NOT NULL DEFAULT '';
 ALTER TABLE "device_leases" ADD COLUMN IF NOT EXISTS "suspend_reason" text NOT NULL DEFAULT '';
+
+ALTER TABLE "stock_items" ADD COLUMN IF NOT EXISTS "kind" text NOT NULL DEFAULT 'part';
+-- Superseded by stock_items_room_key above.
+DROP INDEX IF EXISTS "stock_items_room_pn";
+ALTER TABLE "stockrooms" ADD COLUMN IF NOT EXISTS "keeper_email" text NOT NULL DEFAULT '';
