@@ -16,14 +16,14 @@ import { buildNav, navIndex, sectionTone, isActive, type NavContext, type NavTre
  * label.
  */
 const BASE: NavContext = {
-  signedIn: true, isStaff: false, isOwner: false, resells: false, isClientOrg: false, hasOrg: false,
+  signedIn: true, isStaff: false, resells: false, isClientOrg: false, hasOrg: false,
   modules: { eod: false, remote: false, sheetSync: false },
   hasStock: false, orgRemoteOn: false, seesBooks: false, seesPayroll: false,
   seesOwnMoney: true, adminsPeople: false, openDiffs: 0, settingsHref: null,
 };
 
 const OWNER: NavContext = {
-  ...BASE, isStaff: true, isOwner: true, hasStock: true, seesBooks: true, seesPayroll: true,
+  ...BASE, isStaff: true, hasStock: true, seesBooks: true, seesPayroll: true,
   adminsPeople: true, openDiffs: 3, settingsHref: "/settings",
   modules: { eod: true, remote: true, sheetSync: true },
 };
@@ -235,47 +235,42 @@ describe("who gets which room", () => {
       .not.toContain("/stock");
   });
 
-  it("gives the owner a door onto the client list, from Operations", () => {
+  it("gives every staff member the client roster, under Operations", () => {
     /*
-     * "Who are our clients, and add this new one" is a daily question, and the
-     * room that answers it was three taps into Settings. It still LIVES there -
-     * that is where a client's logins and sharing are set up - so this is a
-     * door rather than a second page, the same move the equipment catalog got.
-     */
-    const ops = buildNav(OWNER).sections.find((s) => s.key === "ops")!;
-    expect(ops.items.map((i) => i.href)).toContain("/settings/organizations");
-  });
-
-  it("shows it to nobody who would only be redirected", () => {
-    /*
-     * The page is requireOwner - it carries the client sign-in master switch
-     * and the personnel directory - so nobody else may be offered it. A menu
-     * word that leads to a redirect is worse than no word, which is the rule
-     * every other gate in this file follows.
+     * "Who is this client and what else of theirs do we look after" is a daily
+     * question in a service company, and the only room that answered it was
+     * owner-only Settings - so an engineer could spend a week on a client's
+     * system without being able to look the company up.
      *
-     * The last one is the case that matters, and it is why the gate is isOwner
-     * and not adminsPeople: somebody the owner has MADE HR administers people
-     * without being the owner, so gating on the fact /people uses would have
-     * put this in their menu and sent them to a redirect. The stock HR persona
-     * here is about the payroll register rather than the roster, so that
-     * context is built explicitly instead of assumed.
+     * The engineer is the assertion that matters. The owner having it was
+     * never in doubt.
      */
-    const HOUSE_HR: NavContext = { ...HR, adminsPeople: true };
-    expect(buildNav(HOUSE_HR).sections.flatMap((s) => s.items.map((i) => i.href)))
-      .toContain("/people"); // ...they really do administer people
-    for (const ctx of [ENGINEER, HR, HOUSE_HR, CLIENT_LAB, CLIENT_RESELLER]) {
-      const hrefs = buildNav(ctx).sections.flatMap((s) => s.items.map((i) => i.href));
-      expect(hrefs).not.toContain("/settings/organizations");
+    for (const ctx of [OWNER, ENGINEER, HR]) {
+      const ops = buildNav(ctx).sections.find((s) => s.key === "ops")!;
+      expect(ops.items.map((i) => i.href)).toContain("/clients");
     }
   });
 
-  it("calls it what the Settings sidebar calls it", () => {
-    /* One page, one name. The whole reason this file exists is that /documents
-       once went by three words across three surfaces. */
-    const ops = buildNav(OWNER).sections.find((s) => s.key === "ops")!;
-    const room = ops.items.find((i) => i.href === "/settings/organizations")!;
-    const sidebar = readFileSync("src/lib/settingsNav.ts", "utf8");
-    expect(sidebar).toContain(`{ href: "/settings/organizations", label: "${room.label}"`);
+  it("keeps it out of a client's own nav", () => {
+    // Staff, not "signed in": the roster is who the shop works for, which is
+    // not a list any one of them is shown.
+    for (const ctx of [CLIENT_LAB, CLIENT_RESELLER]) {
+      const hrefs = buildNav(ctx).sections.flatMap((s) => s.items.map((i) => i.href));
+      expect(hrefs).not.toContain("/clients");
+    }
+  });
+
+  it("leaves the Settings room out of the nav rather than naming it twice", () => {
+    /*
+     * The roster and Settings > Clients & orgs are two questions - who they
+     * are, and who may sign in - so they are two rooms. What must not happen
+     * is BOTH in one menu: two words a reader has to tell apart, for what
+     * reads like one subject. The Settings sidebar is where the other one
+     * lives, and lib/settingsNav still carries it.
+     */
+    const hrefs = buildNav(OWNER).sections.flatMap((s) => s.items.map((i) => i.href));
+    expect(hrefs).not.toContain("/settings/organizations");
+    expect(readFileSync("src/lib/settingsNav.ts", "utf8")).toContain('"/settings/organizations"');
   });
 
   it("names an organization settings room only for whoever administers one", () => {

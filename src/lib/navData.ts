@@ -39,7 +39,7 @@ export type NavFacts = NavContext & {
 
 /** An empty context, for a signed-out request. buildNav returns nothing from it. */
 export const NO_NAV: NavFacts = {
-  signedIn: false, isStaff: false, isOwner: false, resells: false, isClientOrg: false, hasOrg: false,
+  signedIn: false, isStaff: false, resells: false, isClientOrg: false, hasOrg: false,
   modules: { eod: false, remote: false, sheetSync: false },
   hasStock: false, orgRemoteOn: false, seesBooks: false, seesPayroll: false,
   seesOwnMoney: false, adminsPeople: false, openDiffs: 0, settingsHref: null,
@@ -154,7 +154,6 @@ export async function navFactsFor(
   return {
     signedIn: true,
     isStaff,
-    isOwner: user.role === "owner",
     resells: view === "reseller",
     isClientOrg: !isStaff && ownOrg?.kind === "client",
     hasOrg: user.orgId != null,
