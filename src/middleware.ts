@@ -69,5 +69,12 @@ export const config = {
   // through the gate above; `/` decides for itself who it is talking to (see
   // app/(dashboard)/page.tsx), because the dashboard and the landing page are
   // the same address wearing two faces.
-  matcher: ["/((?!api/auth|api/cron|api/stripe|api/upload|api/files|api/drop|api/share|api/catalog|login|listing|drop|share|handoff|equipment|opengraph-image|sitemap.xml|robots.txt|_next/static|_next/image|favicon.ico).+)"],
+  //
+  // api/remote/lease is the newest of the signature-authenticated kind, and the
+  // sharpest: a shipped system's guard renews its lease here with no session,
+  // authenticated by an HMAC it proves with its own per-machine secret (see the
+  // route). A session wall in front of it would lock out the one caller it is
+  // for - an unattended machine - so it sits with api/stripe rather than behind
+  // the gate, and its own proof check is the credential.
+  matcher: ["/((?!api/auth|api/cron|api/stripe|api/remote/lease|api/upload|api/files|api/drop|api/share|api/catalog|login|listing|drop|share|handoff|equipment|opengraph-image|sitemap.xml|robots.txt|_next/static|_next/image|favicon.ico).+)"],
 };

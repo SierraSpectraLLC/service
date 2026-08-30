@@ -124,6 +124,39 @@ const REVIEWED: Record<string, string> = {
     + "workspace, and the address the account is created for is read off the "
     + "ROW rather than taken from the caller, so a stolen link can only ever "
     + "post keys to the inbox the sender chose.",
+  "issueRenewal":
+    "The guard renewal path in lib/leaseGuardData, reached only by "
+    + "api/remote/lease - which is public precisely because its caller is an "
+    + "unattended machine with no session. It is not gated by tenant because it "
+    + "cannot be: the authorization is the machine SECRET, which the endpoint "
+    + "verifies (verifyGuardProof) before this runs, and which only a guard "
+    + "provisioned for that exact node holds. The write advances the lease "
+    + "counter, expiry and last-renewed time on the single row whose device the "
+    + "proven nodeId names - no caller-supplied id, no money, no tenant data. "
+    + "The decision to grant is lib/leaseGuard.renewalDecision, which takes only "
+    + "standing and is pinned money-invariant.",
+  "syncDeviceNotices":
+    "Delivery bookkeeping in lib/fleetNoticeData, and not a server action - "
+    + "nothing reaches it over the network. Its deviceId comes from its "
+    + "callers, never from a request: the four notice and hold actions, each "
+    + "of which has already resolved the device through deviceWithOrg(id, "
+    + "readTenant(u)) and mayEnroll before calling, and api/cron/notices, "
+    + "which is instance-wide by design and sits behind cronAuthorized. The "
+    + "three columns it writes - notice_state, notice_pushed_at, notice_error "
+    + "- are a record of whether the engine accepted a push, hold no tenant "
+    + "data, and take no caller-supplied value. The scanner cannot see the "
+    + "gating because it lives one frame up, in every caller.",
+  "enforceDeviceLockout":
+    "The twin of syncDeviceNotices, in lib/deviceLockoutData, and the same "
+    + "shape: not a server action, no network reaches it, and its deviceId "
+    + "comes from a caller that has already established whose machine it is. "
+    + "Those callers are lockDevice, which is requireOwner plus deviceWithOrg("
+    + "id, readTenant(u)) plus mayEnroll, and api/cron/notices, which reads "
+    + "the ids out of the lockout rows it just selected and sits behind "
+    + "cronAuthorized. The write sets last_enforced_at and enforce_error on "
+    + "the open lockout for that device and nothing else - a record of whether "
+    + "the engine accepted the command, holding no tenant data and no "
+    + "caller-supplied value.",
   "markHandoffOpened":
     "Same public token, and it sets one timestamp once - the WHERE carries the "
     + "token AND opened_at IS NULL. Nothing about a workspace is reachable "

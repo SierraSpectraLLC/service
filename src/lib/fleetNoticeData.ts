@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { deviceNotices, instruments, remoteDevices, safetyHolds } from "@/db/schema";
 import { consentModeFor } from "@/lib/remoteAccess";
 import { noticesFor, permitted, type Notice } from "@/lib/fleetNotice";
-import { pushNoticesTo } from "@/lib/remote";
+import { noticeFingerprint, pushNoticesTo } from "@/lib/remote";
 
 /**
  * The database half of lib/fleetNotice: read what a machine should be saying,
@@ -17,7 +17,9 @@ import { pushNoticesTo } from "@/lib/remote";
  */
 
 /** Exactly what this machine should be showing, or [] for "say nothing". */
-export async function noticesForDevice(deviceId: number): Promise<{ nodeId: string; notices: Notice[] } | null> {
+export async function noticesForDevice(
+  deviceId: number,
+): Promise<{ nodeId: string; notices: Notice[]; lastState: string } | null> {
   const [device] = await db.select().from(remoteDevices).where(eq(remoteDevices.id, deviceId)).catch(() => []);
   if (!device || !device.nodeId) return null;
 
@@ -38,6 +40,7 @@ export async function noticesForDevice(deviceId: number): Promise<{ nodeId: stri
 
   return {
     nodeId: device.nodeId,
+    lastState: device.noticeState,
     notices: permitted(
       noticesFor(
         notice ? {
@@ -55,13 +58,32 @@ export async function noticesForDevice(deviceId: number): Promise<{ nodeId: stri
 }
 
 /**
- * Push one machine to its current state. Best-effort by contract: the rows are
- * the record, this is one attempt at delivery, and api/cron/notices is what
- * makes a failed attempt not matter. Callers on a mutation path should ignore
- * the result rather than fail a write that has already happened.
+ * Push one machine to its current state, and write down what happened.
+ *
+ * Still best-effort for the CALLER - a mutation that has already been written
+ * must not fail because a laptop is asleep - but no longer silent. The first
+ * version of this returned into `.catch(() => ({}))` at every call site, so a
+ * notice that reached nobody and a notice that landed looked identical on the
+ * page, which is exactly how it came to be shipped with a delivery path that
+ * displayed nothing at all.
+ *
+ * The fingerprint decides whether this is news: a changed notice set earns a
+ * toast the person actually sees, an unchanged one is re-asserted quietly.
  */
 export async function syncDeviceNotices(deviceId: number): Promise<{ error?: string }> {
   const state = await noticesForDevice(deviceId);
   if (!state) return { error: "That machine is not enrolled." };
-  return pushNoticesTo(state.nodeId, state.notices);
+
+  const fingerprint = noticeFingerprint(state.notices);
+  const res = await pushNoticesTo(state.nodeId, state.notices, fingerprint !== state.lastState);
+
+  await db.update(remoteDevices).set({
+    // Only a delivered state is remembered. A failed push must not mark the
+    // machine as already told, or the retry would go out without the toast and
+    // the person would never see the thing that failed the first time.
+    ...(res.error ? {} : { noticeState: fingerprint, noticePushedAt: new Date() }),
+    noticeError: res.error ?? "",
+  }).where(eq(remoteDevices.id, deviceId)).catch(() => {});
+
+  return res;
 }

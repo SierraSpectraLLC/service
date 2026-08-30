@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentMessageCommands, consoleSafe } from "@/lib/remote";
+import { agentMessageCommands, consoleSafe, noticeFingerprint } from "@/lib/remote";
 import { noticesFor, permitted } from "@/lib/fleetNotice";
 
 /**
@@ -75,5 +75,46 @@ describe("the commands that leave a machine saying the right thing", () => {
     // The whole notice arrives as ONE argument - the point of the sanitising.
     expect(args[2]).toBe("Ring 'the office' now or else");
     expect(args).toHaveLength(4);
+  });
+});
+
+/**
+ * The display finding, pinned.
+ *
+ * agentmsg persists but renders only where a MeshCentral Assistant has
+ * registered over the agent's IPC socket - on a service-only agent it shows
+ * nobody anything. toast reaches the screen with no companion app. Shipping
+ * only the first is what put a notice on a laptop that displayed nothing, so
+ * the pairing is a test rather than a comment.
+ */
+describe("something a person can actually see", () => {
+  const safety = { reason: "Rotary pump exhaust blocked.", decidedBy: "bill@x.com", contact: "555-0100", effect: "hold" as const };
+
+  it("announces a new notice with a toast, not only a tray entry", () => {
+    const cmds = agentMessageCommands(permitted(noticesFor(null, safety), "unattended"), true);
+    expect(cmds.some((c) => c.startsWith("agentmsg add "))).toBe(true);
+    expect(cmds.some((c) => c.startsWith("toast "))).toBe(true);
+  });
+
+  it("stays quiet on re-assertion, so an hourly cron is not an hourly popup", () => {
+    const cmds = agentMessageCommands(permitted(noticesFor(null, safety), "unattended"), false);
+    expect(cmds.some((c) => c.startsWith("agentmsg add "))).toBe(true);
+    expect(cmds.some((c) => c.startsWith("toast "))).toBe(false);
+  });
+
+  it("sanitises the toast the same way, since it is the same console parser", () => {
+    const nasty = { ...safety, reason: 'Ring "the office"\nnow' };
+    const toast = agentMessageCommands(permitted(noticesFor(null, nasty), "unattended"), true)
+      .find((c) => c.startsWith("toast "))!;
+    expect(toast).not.toContain('\n');
+    expect(toast.split('"').length - 1).toBe(2);
+  });
+
+  it("fingerprints by what is said, so re-posting the same words is not news", () => {
+    const a = permitted(noticesFor(null, safety), "unattended");
+    const b = permitted(noticesFor(null, { ...safety }), "unattended");
+    expect(noticeFingerprint(a)).toBe(noticeFingerprint(b));
+    expect(noticeFingerprint(a)).not.toBe(
+      noticeFingerprint(permitted(noticesFor(null, { ...safety, reason: "Something else." }), "unattended")));
   });
 });
