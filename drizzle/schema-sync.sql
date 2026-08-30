@@ -4031,3 +4031,41 @@ FROM "checklist_templates" t,
   ) AS v("text","sort_order")
 WHERE t."tenant_org_id" IS NULL AND t."stage" = 'ship_prep' AND t."name" = 'GC/MS ship prep'
   AND NOT EXISTS (SELECT 1 FROM "checklist_template_items" i WHERE i."template_id" = t."id");
+
+-- Seeds: the GC/MS bench-setup (verify) and generic on-site (commission)
+-- templates, same guard pattern as the ship-prep seed above.
+INSERT INTO "checklist_templates" ("tenant_org_id","category","stage","name")
+SELECT NULL, 'GC/MS', 'verify_setup', 'GC/MS bench setup'
+WHERE NOT EXISTS (
+  SELECT 1 FROM "checklist_templates" WHERE "tenant_org_id" IS NULL AND "stage" = 'verify_setup' AND "name" = 'GC/MS bench setup'
+);
+INSERT INTO "checklist_template_items" ("template_id","text","heading","sort_order")
+SELECT t."id", v."text", false, v."sort_order"
+FROM "checklist_templates" t,
+  (VALUES
+    ('Gas lines connected & leak-checked', 0),
+    ('Power connected — correct receptacle confirmed', 1),
+    ('Software installed & communicates with all modules', 2),
+    ('Vacuum pulled — base pressure in range', 3),
+    ('Sample pathway leak-free at temperature', 4)
+  ) AS v("text","sort_order")
+WHERE t."tenant_org_id" IS NULL AND t."stage" = 'verify_setup' AND t."name" = 'GC/MS bench setup'
+  AND NOT EXISTS (SELECT 1 FROM "checklist_template_items" i WHERE i."template_id" = t."id");
+
+INSERT INTO "checklist_templates" ("tenant_org_id","category","stage","name")
+SELECT NULL, '', 'commission_onsite', 'On-site commissioning'
+WHERE NOT EXISTS (
+  SELECT 1 FROM "checklist_templates" WHERE "tenant_org_id" IS NULL AND "stage" = 'commission_onsite' AND "name" = 'On-site commissioning'
+);
+INSERT INTO "checklist_template_items" ("template_id","text","heading","sort_order")
+SELECT t."id", v."text", false, v."sort_order"
+FROM "checklist_templates" t,
+  (VALUES
+    ('Crates received — packing list verified, no damage', 0),
+    ('Uncrated & positioned, utilities connected', 1),
+    ('Pump-down — base vacuum in range', 2),
+    ('On-site checkout — record the verdict', 3),
+    ('Buyer method run on-site (if contracted)', 4)
+  ) AS v("text","sort_order")
+WHERE t."tenant_org_id" IS NULL AND t."stage" = 'commission_onsite' AND t."name" = 'On-site commissioning'
+  AND NOT EXISTS (SELECT 1 FROM "checklist_template_items" i WHERE i."template_id" = t."id");

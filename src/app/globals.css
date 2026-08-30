@@ -2359,3 +2359,36 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 .cred input { font-family: var(--mono); }
 .cred-note { font-size: var(--fs-meta); color: var(--mut); margin-top: 4px; }
 .cred-note b { color: var(--t-good-fg); font-weight: 700; }
+
+/* Verify/Ship/Commission surfaces: checklist rows with a named tick, the
+   verdict banner, its metric tiles, and the transfer hero. */
+.chk {
+  display: flex; align-items: center; gap: 8px; padding: 8px 0;
+  border-bottom: 1px solid var(--bg); font-size: var(--fs-body); cursor: pointer;
+}
+.chk:last-child { border-bottom: none; }
+.chk input { accent-color: var(--navy); width: 15px; height: 15px; flex: none; }
+.chk.heading { cursor: default; font-weight: 700; color: var(--navy); }
+.chk .who { margin-left: auto; font-family: var(--mono); font-size: var(--fs-micro); color: var(--mut); font-weight: 700; }
+
+.verdict {
+  display: flex; align-items: center; gap: 12px; padding: 12px;
+  border: 1px solid var(--t-good-bd); background: var(--t-good-bg);
+  border-radius: var(--radius); margin-bottom: var(--sp-3);
+}
+.verdict .v { font-size: var(--fs-hero); font-weight: 800; color: var(--t-good-fg); }
+.verdict .vd { font-size: var(--fs-small); color: var(--t-good-fg); min-width: 0; }
+.verdict.fail { border-color: var(--t-bad-bd); background: var(--t-bad-bg); }
+.verdict.fail .v, .verdict.fail .vd { color: var(--t-bad-fg); }
+
+.metric { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; }
+.metric .mn { font-size: var(--fs-meta); font-weight: 700; color: var(--mut); }
+.metric .mv { font-family: var(--mono); font-size: var(--fs-body); font-weight: 700; margin-top: 2px; }
+.metric .mv .pill { margin-left: 4px; }
+
+.transfer {
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 16px;
+  background: linear-gradient(180deg, var(--card) 0%, var(--bg) 100%); text-align: center;
+}
+.transfer h3 { margin: 0 0 4px; font-size: var(--fs-hero); font-weight: 800; color: var(--navy); letter-spacing: -0.2px; }
+.transfer p { margin: 0 0 12px; font-size: var(--fs-small); color: var(--mut); }

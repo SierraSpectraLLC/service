@@ -2,50 +2,56 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { auditLog, instruments, orgs, restorationProjects } from "@/db/schema";
-import { requireStaff } from "@/lib/authz";
+import { acceptances, auditLog, instruments, orgs, restorationProjects, shipments } from "@/db/schema";
+import { requireStaff, requireUser, type SessionUser } from "@/lib/authz";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import { fmtWhen } from "@/lib/when";
 import {
   RESTORATION_SOURCE_LABEL, RESTORATION_STAGES, RESTORATION_STAGE_LABEL,
   daysInStage, nextStage, queueStageTone, stageIndex, type RestorationStage,
 } from "@/lib/restoration";
-import { evaluateRestorationGate, provenanceForProjects, restorationReceiveData } from "@/lib/restorationData";
+import {
+  evaluateRestorationGate, provenanceForProjects, restorationCommissionData,
+  restorationReceiveData, restorationRestoreData, restorationShipData, restorationVerifyData,
+} from "@/lib/restorationData";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { PageHead, Pill } from "@/components/ui";
 import ActivityFeed from "@/components/ActivityFeed";
+import BuyerAcceptanceCard from "@/components/BuyerAcceptanceCard";
+import RestorationCommission from "@/components/RestorationCommission";
 import RestorationGateCard from "@/components/RestorationGateCard";
 import RestorationReceive from "@/components/RestorationReceive";
+import RestorationRestore from "@/components/RestorationRestore";
+import RestorationShip from "@/components/RestorationShip";
+import RestorationVerify from "@/components/RestorationVerify";
 
 export const dynamic = "force-dynamic";
 
-/** What each stage's working surface will hold, until its phase lands. */
-const STAGE_PREVIEW: Record<string, string> = {
-  receive: "Serial-first component intake, condition grades, findings, the provenance interview, and the handoff kit land here next.",
-  restore: "The task list from findings, parts used, and outside work land here next.",
-  verify: "Bench setup, the checkout verdict, the application check, and data hygiene land here next.",
-  ship: "Destination, prep checklist, crates and manifest, and carrier cover land here next.",
-  commission: "Install dispatch, the on-site checklist, and buyer acceptance land here next.",
-  complete: "This restoration is complete - the record has transferred with the serial.",
-};
-
 /**
- * One restoration project: the pipeline across the top, the viewed stage's
- * cards in the main column, and the computed provenance beside it. Earlier
- * stages stay viewable; only the current stage is workable.
+ * One restoration project. Two audiences share the URL: the shop gets the
+ * full working surface; a member of the BUYING organization gets the portal
+ * view - shipment status while it ships, the acceptance signature when it
+ * commissions. Both are authenticated sessions; there is no share-token path
+ * to this page on purpose.
  */
 export default async function RestorationPage({ params, searchParams }: {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ s?: string }>;
 }) {
-  let user;
-  try { user = await requireStaff(); } catch { redirect("/"); }
   const { id: idRaw } = await params;
   const id = parseInt(idRaw);
   if (!Number.isFinite(id)) notFound();
 
+  let staff: SessionUser | null = null;
+  let user: SessionUser;
+  try { user = staff = await requireStaff(); } catch {
+    try { user = await requireUser(); } catch { redirect("/login"); }
+  }
+
+  if (!staff) return BuyerView({ user, projectId: id });
+
   const [project] = await db.select().from(restorationProjects)
-    .where(and(eq(restorationProjects.id, id), forTenant(restorationProjects.tenantOrgId, readTenant(user))));
+    .where(and(eq(restorationProjects.id, id), forTenant(restorationProjects.tenantOrgId, readTenant(staff))));
   if (!project) notFound();
 
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, project.instrumentId));
@@ -55,12 +61,11 @@ export default async function RestorationPage({ params, searchParams }: {
 
   const currentIdx = stageIndex(project.stage);
   const { s } = await searchParams;
-  // Which stage is on screen: the current one, or an earlier one read-only.
-  // A stage the project has not reached has nothing to show yet.
   const viewed = s && stageIndex(s) >= 0 && stageIndex(s) <= currentIdx ? (s as RestorationStage) : (project.stage as RestorationStage);
   const viewingCurrent = viewed === project.stage;
+  const canEdit = viewingCurrent;
 
-  const [gate, provenance, buyer, ledger, receive] = await Promise.all([
+  const [gate, provenance, buyer, ledger, stageData] = await Promise.all([
     viewingCurrent && project.stage !== "complete" ? evaluateRestorationGate(project) : Promise.resolve(null),
     provenanceForProjects([project]).then((m) => m.get(project.id)!),
     project.buyerOrgId !== null
@@ -69,7 +74,12 @@ export default async function RestorationPage({ params, searchParams }: {
     db.select().from(auditLog)
       .where(and(eq(auditLog.entityType, "restoration"), eq(auditLog.entityId, String(project.id))))
       .orderBy(desc(auditLog.createdAt)).limit(100),
-    viewed === "receive" ? restorationReceiveData(project) : Promise.resolve(null),
+    viewed === "receive" ? restorationReceiveData(project)
+      : viewed === "restore" ? restorationRestoreData(project)
+      : viewed === "verify" ? restorationVerifyData(project)
+      : viewed === "ship" ? restorationShipData(project, staff)
+      : viewed === "commission" ? restorationCommissionData(project)
+      : Promise.resolve(null),
   ]);
 
   const next = nextStage(project.stage);
@@ -78,9 +88,6 @@ export default async function RestorationPage({ params, searchParams }: {
     : next ? `Advance to ${next.charAt(0).toUpperCase()}${next.slice(1)}` : "";
   const now = new Date();
   const days = daysInStage(project.stageSince, now);
-
-  // The pipeline shows the five working stages; "complete" is the state after
-  // the last of them, worn by the pill rather than a sixth box.
   const pipeline = RESTORATION_STAGES.slice(0, 5) as readonly RestorationStage[];
 
   return (
@@ -111,7 +118,6 @@ export default async function RestorationPage({ params, searchParams }: {
               <span className="nm">{st.charAt(0).toUpperCase() + st.slice(1)}</span>
             </>
           );
-          // Reached stages link; the road ahead is visible but not a door.
           return i <= currentIdx || project.stage === "complete"
             ? <Link key={st} className={cls} href={`/restorations/${project.id}?s=${st}`} aria-current={st === viewed ? "page" : undefined}>{body}</Link>
             : <span key={st} className={cls}>{body}</span>;
@@ -120,21 +126,38 @@ export default async function RestorationPage({ params, searchParams }: {
 
       <div className="proj-grid">
         <main>
-          {receive ? (
-            <RestorationReceive projectId={project.id} data={receive}
-              canEdit={viewingCurrent && project.stage === "receive"} />
-          ) : (
+          {!viewingCurrent && viewed !== "complete" && (
+            <div className="crumb" style={{ marginBottom: 8 }}>
+              Viewing the {RESTORATION_STAGE_LABEL[viewed]} record read-only ·{" "}
+              <Link href={`/restorations/${project.id}`}>back to {RESTORATION_STAGE_LABEL[project.stage as RestorationStage]}</Link>
+            </div>
+          )}
+          {viewed === "receive" && stageData && (
+            <RestorationReceive projectId={project.id} data={stageData as Awaited<ReturnType<typeof restorationReceiveData>>}
+              canEdit={canEdit && project.stage === "receive"} />
+          )}
+          {viewed === "restore" && stageData && (
+            <RestorationRestore projectId={project.id} data={stageData as Awaited<ReturnType<typeof restorationRestoreData>>}
+              canEdit={canEdit && project.stage === "restore"} />
+          )}
+          {viewed === "verify" && stageData && (
+            <RestorationVerify projectId={project.id} data={stageData as Awaited<ReturnType<typeof restorationVerifyData>>}
+              canEdit={canEdit && project.stage === "verify"} />
+          )}
+          {viewed === "ship" && stageData && (
+            <RestorationShip projectId={project.id} data={stageData as Awaited<ReturnType<typeof restorationShipData>>}
+              canEdit={canEdit && project.stage === "ship"} />
+          )}
+          {viewed === "commission" && stageData && (
+            <RestorationCommission projectId={project.id} data={stageData as Awaited<ReturnType<typeof restorationCommissionData>>}
+              canEdit={canEdit && project.stage === "commission"} externalId={inst.externalId} />
+          )}
+          {viewed === "complete" && (
             <section className="card">
-              <h2 className="card-title">
-                {RESTORATION_STAGE_LABEL[viewed]}
-                {!viewingCurrent && <span className="eyebrow">read-only - an earlier stage</span>}
-              </h2>
+              <h2 className="card-title">Complete <span className="eyebrow">the record transferred with the serial</span></h2>
               <div className="empty">
-                <b>{viewingCurrent ? "The working surface for this stage is on its way" : "This stage is on the record"}</b>
-                {STAGE_PREVIEW[viewed]}
-                {!viewingCurrent && <div className="empty-act">
-                  <Link className="btn sm" href={`/restorations/${project.id}`}>Back to {RESTORATION_STAGE_LABEL[project.stage as RestorationStage]}</Link>
-                </div>}
+                <b>This restoration is done</b>
+                The full history moved to {buyer?.name ?? "the buyer"}; this workspace keeps a frozen provider copy.
               </div>
             </section>
           )}
@@ -189,6 +212,85 @@ export default async function RestorationPage({ params, searchParams }: {
           </section>
         </aside>
       </div>
+    </div>
+  );
+}
+
+/**
+ * What the buying organization sees: where their system is, and - once
+ * commissioning proves out - the acceptance signature. Their own session is
+ * the credential; a session from any other org gets "not found".
+ */
+async function BuyerView({ user, projectId }: { user: SessionUser; projectId: number }) {
+  const [project] = await db.select().from(restorationProjects).where(eq(restorationProjects.id, projectId));
+  if (!project || project.buyerOrgId === null || user.orgId !== project.buyerOrgId) notFound();
+
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, project.instrumentId));
+  if (!inst) notFound();
+  const labels = await getSystemLabels([inst]);
+  const [shipment] = await db.select().from(shipments).where(eq(shipments.projectId, projectId));
+  const [acc] = await db.select().from(acceptances).where(eq(acceptances.projectId, projectId));
+  const stage = project.stage as RestorationStage;
+  const shippedOn = stageIndex(stage) >= stageIndex("ship");
+
+  return (
+    <div className="container page">
+      <PageHead
+        title={labels.get(inst.id) || inst.model || inst.externalId}
+        crumb={<b>Your incoming system</b>}
+        status={<Pill tone={queueStageTone(project.stage, project.stageSince, new Date())}>{RESTORATION_STAGE_LABEL[stage]}</Pill>}
+      />
+      <section className="card">
+        <h2 className="card-title">Where it is</h2>
+        {shippedOn && shipment ? (
+          <>
+            {shipment.carrier && (
+              <div className="row al-baseline sp-2 t-body" style={{ justifyContent: "space-between" }}>
+                <span className="mut">Carrier</span><span>{shipment.carrier}</span>
+              </div>
+            )}
+            {shipment.trackingNumber && (
+              <div className="row al-baseline sp-2 t-body" style={{ justifyContent: "space-between" }}>
+                <span className="mut">Tracking</span><span className="mono">{shipment.trackingNumber}</span>
+              </div>
+            )}
+            {shipment.pickupOn && (
+              <div className="row al-baseline sp-2 t-body" style={{ justifyContent: "space-between" }}>
+                <span className="mut">Pickup</span><span>{shipment.pickupOn}{shipment.pickupNote ? ` · ${shipment.pickupNote}` : ""}</span>
+              </div>
+            )}
+            {!shipment.carrier && !shipment.trackingNumber && (
+              <div className="mut t-body">Being prepared for shipment - carrier and tracking appear here.</div>
+            )}
+          </>
+        ) : (
+          <div className="mut t-body">
+            Being restored and verified. It ships when every gate passes - you
+            will see carrier and tracking here the moment it does.
+          </div>
+        )}
+      </section>
+      {stage === "commission" && acc?.requestedAt && (
+        <section className="card">
+          <h2 className="card-title">Acceptance</h2>
+          {acc.signedAt ? (
+            <div className="gate-item">
+              <span className="gate-mark ok">✓</span>
+              Signed by {acc.signedBy} · {fmtWhen(acc.signedAt)}
+            </div>
+          ) : (
+            <BuyerAcceptanceCard projectId={project.id} />
+          )}
+        </section>
+      )}
+      {stage === "complete" && (
+        <section className="card">
+          <div className="empty">
+            <b>Commissioned and yours</b>
+            The full service record transferred with the system - find it under your equipment.
+          </div>
+        </section>
+      )}
     </div>
   );
 }
