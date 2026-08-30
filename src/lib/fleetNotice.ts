@@ -79,7 +79,13 @@ export type SafetyFacts = {
  */
 export type Notice = {
   kind: "repo" | "safety";
-  /** Held to a rendering the agent cannot make modal. See `blocking`. */
+  /**
+   * Held to a rendering the agent cannot make modal - and on MeshCentral 1.2.4
+   * that is structural rather than a convention the renderer has to keep: the
+   * agent's two modal displays, messagebox and alertbox, have no case in the
+   * server's control API at all, so nothing we can send makes one appear.
+   * lib/remote carries the reading.
+   */
   text: string;
   contact: string;
   /**
@@ -113,6 +119,15 @@ export function repoNotice(f: RepoFacts): Notice | null {
  * engineer chose the `lock` rung, and the agent must then confirm idle itself.
  * When the agent cannot tell, it does not lock - deferring costs a morning,
  * locking mid-run costs a sequence.
+ *
+ * On the engine we actually ship against, the third door never opens, so the
+ * flag is permission that is never taken up. MeshCentral's only idle signal is
+ * `idletime`: Windows-only, and seconds since keyboard or mouse input - which
+ * reads an unattended overnight acquisition as maximally idle and would fire
+ * the lock hardest during exactly the run this is most anxious to protect.
+ * Keeping the rung costs nothing and keeps the decision recorded; acting on it
+ * would need an idle signal that knows what the instrument is doing, and no
+ * such signal reaches us. See lib/remote.pushNoticesTo.
  */
 export function safetyNotice(f: SafetyFacts): Notice | null {
   if (!f.reason.trim() || !f.decidedBy.trim()) return null;

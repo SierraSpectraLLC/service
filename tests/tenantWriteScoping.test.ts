@@ -125,13 +125,6 @@ const REVIEWED: Record<string, string> = {
     + "token AND opened_at IS NULL. Nothing about a workspace is reachable "
     + "through it; the worst a stolen link can do is report that somebody "
     + "looked, which is what the link is for.",
-  "noteCheckIn":
-    "The device check-in on the notice route (api/remote/notice). No session "
-    + "and no tenant in hand: the caller is an agent on a lab PC, and the "
-    + "nodeId it presents is the authorization, the hand-off doctrine again. "
-    + "The write sets one timestamp on the single row that nodeId fetched, "
-    + "keyed by that row's own id - a guessed nodeId can only refresh the "
-    + "last-seen time of the machine it names.",
 };
 
 describe("writes to a tenant-stamped table", () => {
