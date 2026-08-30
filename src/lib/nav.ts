@@ -68,6 +68,12 @@ export type NavContext = {
   /** Signed in at all. A signed-out request gets an empty tree. */
   signedIn: boolean;
   isStaff: boolean;
+  /**
+   * The workspace owner. Distinct from adminsPeople, which is the owner AND
+   * whoever they made HR: a room gated on requireOwner needs the narrower
+   * fact, or the menu offers HR a door that redirects.
+   */
+  isOwner: boolean;
   /** A client who works the reselling half of their company. See lib/viewMode. */
   resells: boolean;
   /** Their organization is a client rather than another provider. */
@@ -253,9 +259,21 @@ function staffSections(ctx: NavContext): NavSection[] {
       /* The reseller pipeline: systems moving Receive → Commission. Something
          the shop DOES, so it sits with the other doing. */
       { href: "/restorations", label: "Restoration queue" },
-      /* The other service companies: who is out there, who we work with, and
-         the clients moving between us. Staff, because taking on work that has
-         been offered is a shop decision - see lib/clientShare. */
+      /* Who the shop works FOR, next to who it works WITH - the two "which
+         company" rooms, in that order, because ours come before theirs.
+         It lives at a Settings URL and stays there: that is where a client's
+         logins, sharing and look are set up. But "who are our clients, and add
+         this new one" is a daily question, and three taps into Settings is
+         where a daily question goes to feel like configuration. Same move the
+         equipment catalog got, for the same reason - the page is unchanged,
+         this is the short way in.
+         Called what the Settings sidebar calls it. One page with two names
+         across two surfaces is the drift this file exists to stop, and the
+         room really does hold the providers as well as the clients.
+         Owner-gated because the PAGE is - it carries the client sign-in master
+         switch and the personnel directory - so anybody else would get a card
+         onto a redirect. */
+      ...(ctx.isOwner ? [{ href: "/settings/organizations", label: "Clients & orgs" }] : []),
       { href: "/network", label: "Service companies" },
       ...(ctx.adminsPeople ? [{ href: "/people", label: "People" }] : []),
       /* Purchasing and Reimbursements, for the readers who have no Financial

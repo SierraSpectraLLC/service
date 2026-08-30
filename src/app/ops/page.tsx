@@ -27,6 +27,7 @@ const BLURB: Record<string, string> = {
   "/eod": "The day's work, filed per client",
   "/calendar": "Every dated fact the app keeps",
   "/maintenance": "What is owed, and when",
+  "/settings/organizations": "The companies we work for, and who can sign in",
   "/network": "The other service companies, and work moving between us",
   "/people": "The roster: pay, hours, what people are owed",
   "/money/purchasing": "Purchase orders you raised",

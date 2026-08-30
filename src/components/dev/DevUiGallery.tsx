@@ -249,7 +249,7 @@ export default function DevUiGallery() {
               a drawer the app does not ship. See lib/nav. */}
           <MobileNav
             nav={buildNav({
-              signedIn: true, isStaff: true, resells: false, isClientOrg: false, hasOrg: false,
+              signedIn: true, isStaff: true, isOwner: true, resells: false, isClientOrg: false, hasOrg: false,
               modules: { eod: true, remote: true, sheetSync: true },
               hasStock: true, orgRemoteOn: false, seesBooks: true, seesPayroll: true,
               seesOwnMoney: true, adminsPeople: true, openDiffs: 3, settingsHref: "/settings",

@@ -16,14 +16,14 @@ import { buildNav, navIndex, sectionTone, isActive, type NavContext, type NavTre
  * label.
  */
 const BASE: NavContext = {
-  signedIn: true, isStaff: false, resells: false, isClientOrg: false, hasOrg: false,
+  signedIn: true, isStaff: false, isOwner: false, resells: false, isClientOrg: false, hasOrg: false,
   modules: { eod: false, remote: false, sheetSync: false },
   hasStock: false, orgRemoteOn: false, seesBooks: false, seesPayroll: false,
   seesOwnMoney: true, adminsPeople: false, openDiffs: 0, settingsHref: null,
 };
 
 const OWNER: NavContext = {
-  ...BASE, isStaff: true, hasStock: true, seesBooks: true, seesPayroll: true,
+  ...BASE, isStaff: true, isOwner: true, hasStock: true, seesBooks: true, seesPayroll: true,
   adminsPeople: true, openDiffs: 3, settingsHref: "/settings",
   modules: { eod: true, remote: true, sheetSync: true },
 };
@@ -233,6 +233,49 @@ describe("who gets which room", () => {
   it("drops Inventory for somebody with no stockroom", () => {
     expect(buildNav({ ...OWNER, hasStock: false }).primary.map((l) => l.href))
       .not.toContain("/stock");
+  });
+
+  it("gives the owner a door onto the client list, from Operations", () => {
+    /*
+     * "Who are our clients, and add this new one" is a daily question, and the
+     * room that answers it was three taps into Settings. It still LIVES there -
+     * that is where a client's logins and sharing are set up - so this is a
+     * door rather than a second page, the same move the equipment catalog got.
+     */
+    const ops = buildNav(OWNER).sections.find((s) => s.key === "ops")!;
+    expect(ops.items.map((i) => i.href)).toContain("/settings/organizations");
+  });
+
+  it("shows it to nobody who would only be redirected", () => {
+    /*
+     * The page is requireOwner - it carries the client sign-in master switch
+     * and the personnel directory - so nobody else may be offered it. A menu
+     * word that leads to a redirect is worse than no word, which is the rule
+     * every other gate in this file follows.
+     *
+     * The last one is the case that matters, and it is why the gate is isOwner
+     * and not adminsPeople: somebody the owner has MADE HR administers people
+     * without being the owner, so gating on the fact /people uses would have
+     * put this in their menu and sent them to a redirect. The stock HR persona
+     * here is about the payroll register rather than the roster, so that
+     * context is built explicitly instead of assumed.
+     */
+    const HOUSE_HR: NavContext = { ...HR, adminsPeople: true };
+    expect(buildNav(HOUSE_HR).sections.flatMap((s) => s.items.map((i) => i.href)))
+      .toContain("/people"); // ...they really do administer people
+    for (const ctx of [ENGINEER, HR, HOUSE_HR, CLIENT_LAB, CLIENT_RESELLER]) {
+      const hrefs = buildNav(ctx).sections.flatMap((s) => s.items.map((i) => i.href));
+      expect(hrefs).not.toContain("/settings/organizations");
+    }
+  });
+
+  it("calls it what the Settings sidebar calls it", () => {
+    /* One page, one name. The whole reason this file exists is that /documents
+       once went by three words across three surfaces. */
+    const ops = buildNav(OWNER).sections.find((s) => s.key === "ops")!;
+    const room = ops.items.find((i) => i.href === "/settings/organizations")!;
+    const sidebar = readFileSync("src/lib/settingsNav.ts", "utf8");
+    expect(sidebar).toContain(`{ href: "/settings/organizations", label: "${room.label}"`);
   });
 
   it("names an organization settings room only for whoever administers one", () => {
