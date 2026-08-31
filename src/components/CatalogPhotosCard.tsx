@@ -11,6 +11,8 @@ import { fmtBytes } from "@/lib/storage";
 import PhotoThumb from "./PhotoThumb";
 import PhotoFramer from "./PhotoFramer";
 import { matchesQuery } from "@/lib/search";
+import { pageOf } from "@/lib/paging";
+import { Pager } from "@/components/ui";
 
 export type CatalogEntry = {
   id: number;
@@ -21,6 +23,9 @@ export type CatalogEntry = {
   hasPhoto: boolean;
   photoFraming: string;
 };
+
+/** Tiles per section. Small squares, so more of them fit than cards do. */
+const TILES_PER_PAGE = 60;
 
 const SECTIONS: { kind: string; title: string; blurb: string }[] = [
   { kind: "model", title: "Models", blurb: "The most useful ones: a photo of an SPD-20A tells somebody which box that is." },
@@ -62,6 +67,27 @@ export default function CatalogPhotosCard({ entries }: { entries: CatalogEntry[]
     });
   }, [entries, filter, only]);
 
+  /*
+   * A page per section. This card drew a tile for EVERY catalog entry, which
+   * on a real book of 1,100 models is 22,000px of dashed rectangles under a
+   * grid that had already been paged - the page stayed astronomically long and
+   * the fix looked like it had not worked.
+   *
+   * Per section rather than over the flat list, because the sections are the
+   * card's whole shape: Models, Module types, System types. One page number
+   * spanning them would cut Models in half and hide the other two behind it.
+   */
+  const [pages, setPages] = useState<Record<string, number>>({});
+  const pageFor = (kind: string) => pages[kind] ?? 1;
+  const goTo = (kind: string, n: number) => setPages((p) => ({ ...p, [kind]: n }));
+  /* Every filter change starts each section at the top again. pageOf clamps
+     too, but landing on page 9 of a fresh filter is not what anybody meant. */
+  const refilter = (next: { filter?: string; only?: "all" | "missing" }) => {
+    if (next.filter !== undefined) setFilter(next.filter);
+    if (next.only !== undefined) setOnly(next.only);
+    setPages({});
+  };
+
   const pick = (id: number) => { target.current = id; input.current?.click(); };
 
   const send = async (file: File | undefined) => {
@@ -100,11 +126,11 @@ export default function CatalogPhotosCard({ entries }: { entries: CatalogEntry[]
 
       {entries.length > 8 && (
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-          <input value={filter} onChange={(e) => setFilter(e.target.value)}
+          <input value={filter} onChange={(e) => refilter({ filter: e.target.value })}
             placeholder="Filter by model, type or maker" className="t-small" style={{ flex: "1 1 180px" }} />
           <span className="seg">
             {(["all", "missing"] as const).map((w) => (
-              <button key={w} aria-pressed={only === w} onClick={() => setOnly(w)}>
+              <button key={w} aria-pressed={only === w} onClick={() => refilter({ only: w })}>
                 {w === "all" ? "All" : "Without a photo"}
               </button>
             ))}
@@ -121,12 +147,15 @@ export default function CatalogPhotosCard({ entries }: { entries: CatalogEntry[]
       {SECTIONS.map((s) => {
         const mine = shown.filter((e) => e.kind === s.kind);
         if (!mine.length) return null;
+        const page = pageOf(mine, pageFor(s.kind), TILES_PER_PAGE);
         return (
           <div key={s.kind} style={{ borderTop: "1px solid var(--line)", paddingTop: 10, marginTop: 10 }}>
             <div className="t-body" style={{ fontWeight: 700 }}>{s.title}</div>
             <div className="mut t-meta" style={{ marginBottom: 8 }}>{s.blurb}</div>
+            <Pager page={page} onPage={(n) => goTo(s.kind, n)}
+              noun={s.title.toLowerCase()} label={`${s.title} photos`} />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(124px, 1fr))", gap: 10 }}>
-              {mine.map((e) => (
+              {page.rows.map((e) => (
                 <div key={e.id} style={{ minWidth: 0 }}>
                   {e.hasPhoto ? (
                     <PhotoThumb src={stockSrc(e.id)} framing={e.photoFraming} alt={label(e)}

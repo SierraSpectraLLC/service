@@ -3,11 +3,16 @@
 import { useState, useTransition } from "react";
 import { addVocabTerm, addVocabTerms, deleteVocabTerm, setVocabCategories, setVocabManufacturer } from "@/app/actions";
 import CatalogGrid from "./CatalogGrid";
-import { CardGrid, EntityCard, FacetStrip, PageHead, Panel, Pill, RowActions, Toolbar } from "@/components/ui";
+import { CardGrid, EntityCard, FacetStrip, PageHead, Pager, Panel, Pill, RowActions, Toolbar } from "@/components/ui";
+import { pageOf } from "@/lib/paging";
 import { stockSrc } from "@/lib/photos";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { confirmDialog, inputDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
+
+/** How many cards a page draws. Twelve rows at the grid's widest, four at its
+    narrowest - enough to scan, short enough to reach the bottom of. */
+const PAGE_SIZE = 48;
 
 type Model = { id: number; assetType: string; name: string; categories: string[]; manufacturer: string; inUse: number; hasPhoto: boolean };
 type Category = { id: number | null; name: string; systems: number };
@@ -37,6 +42,17 @@ export default function CatalogForm({ categories, models, types, makers }: {
   // untagged sentinel, or "nomaker". Replaces the per-category sections.
   const [facet, setFacet] = useState<string>("all");
   const [q, setQ] = useState("");
+  /*
+   * A page of the grid. 1,118 models drawn as cards made a page nobody could
+   * reach the bottom of - the shop's words were "astronomically long" - and
+   * the list is already in memory, so what had to shrink was the DOM, not the
+   * query.
+   *
+   * Reset by every filter change below, because landing on page 12 of a search
+   * that just started is not what anybody meant. pageOf clamps as well, which
+   * covers the paths that forget.
+   */
+  const [page, setPage] = useState(1);
   const [draft, setDraft] = useState<Record<string, { assetType: string; name: string; manufacturer: string }>>({});
   const [catDraft, setCatDraft] = useState("");
   const [typeDraft, setTypeDraft] = useState("");
@@ -47,6 +63,16 @@ export default function CatalogForm({ categories, models, types, makers }: {
   const [justAdded, setJustAdded] = useState(""); // last model saved while the dialog stayed open
   const [pending, startTransition] = useTransition();
   const assetTypes = types.map((t) => t.name);
+
+  /* One door for both filters, so neither can change without the page going
+     back to the top. Two setStates at each call site is the version of this
+     that works until somebody adds a third filter. */
+  const filterTo = (next: { facet?: string; q?: string }) => {
+    if (next.facet !== undefined) setFacet(next.facet);
+    if (next.q !== undefined) setQ(next.q);
+    setPage(1);
+  };
+
 
   /**
    * One name per line, or comma-separated - so a list pasted out of a document
@@ -93,7 +119,7 @@ export default function CatalogForm({ categories, models, types, makers }: {
   };
 
   const addCategory = () => addMany("category", catDraft, () => {
-    setFacet(splitNames(catDraft)[0] ?? "all");
+    filterTo({ facet: splitNames(catDraft)[0] ?? "all" });
     setCatDraft("");
   }, setError);
 
@@ -133,6 +159,12 @@ export default function CatalogForm({ categories, models, types, makers }: {
   ).filter((m) => !needle || `${m.name} ${m.manufacturer} ${m.assetType} ${m.categories.join(" ")}`.toLowerCase().includes(needle))
     .slice()
     .sort((a, b) => (a.manufacturer || "~").localeCompare(b.manufacturer || "~") || a.name.localeCompare(b.name));
+
+  /* What is drawn. shownModels stays the whole filtered set, and everything
+     that counts or acts on "what is listed" keeps reading it - a bulk action
+     that quietly meant "this page" would be a different action wearing the
+     same words. */
+  const shown = pageOf(shownModels, page, PAGE_SIZE);
 
   /** Shared models get untagged from the open category; ones that live only
       here are removed outright, with the fleet consequence spelled out. */
@@ -201,7 +233,7 @@ export default function CatalogForm({ categories, models, types, makers }: {
 
       <Toolbar
         search={
-          <input value={q} onChange={(e) => setQ(e.target.value)}
+          <input value={q} onChange={(e) => filterTo({ q: e.target.value })}
             placeholder="Model, maker or type" aria-label="Search the catalog" />
         }
         /* Beside the search box, not in a card under the grid. Adding a model
@@ -230,7 +262,7 @@ export default function CatalogForm({ categories, models, types, makers }: {
               { key: UNIVERSAL, label: "Any system type", count: modelsIn(null).length || undefined, on: facet === UNIVERSAL },
               { key: "nomaker", label: "Maker not set", count: models.filter((m) => !m.manufacturer).length || undefined, on: facet === "nomaker" },
             ]}
-            onToggle={(k) => setFacet(facet === k ? "all" : k)}
+            onToggle={(k) => filterTo({ facet: facet === k ? "all" : k })}
           />
         }
       />
@@ -255,8 +287,12 @@ export default function CatalogForm({ categories, models, types, makers }: {
         </Panel>
       )}
 
+      {/* One page of them. Everything else on this screen - the counts, the
+          facets, the bulk maker action below - still speaks for the WHOLE
+          filtered set; this is the only thing that is a page. */}
+      <Pager page={shown} onPage={setPage} noun="models" label="catalog models" />
       <CardGrid>
-        {shownModels.map((m) => (
+        {shown.rows.map((m) => (
           <EntityCard key={m.id} mono
             image={m.hasPhoto ? stockSrc(m.id) : undefined}
             imageAlt={m.name}
@@ -277,6 +313,11 @@ export default function CatalogForm({ categories, models, types, makers }: {
           />
         ))}
       </CardGrid>
+      {/* Repeated under the grid: on a full page the top one has scrolled well
+          out of sight by the time somebody wants the next. */}
+      {shown.rows.length > 0 && (
+        <Pager page={shown} onPage={setPage} noun="models" label="catalog models" />
+      )}
       {shownModels.length === 0 && (
         <div className="empty" style={{ marginBottom: 12 }}>
           <b>{q || facet !== "all" ? "No models match" : "No models yet"}</b>
@@ -290,7 +331,10 @@ export default function CatalogForm({ categories, models, types, makers }: {
               const next = await inputDialog({
                 title: "Set maker for all shown", action: "Set maker",
                 label: "Manufacturer",
-                hint: `Applied to all ${shownModels.length} models listed.`,
+                /* "listed" used to be unambiguous because the list was all of
+                   them. It is a page now, so the sentence names the number and
+                   says the page is not the limit. */
+                hint: `Applied to all ${shownModels.length} models this filter matches, not just the page you can see.`,
               });
               if (next === null || !next) return;
               startTransition(async () => {
