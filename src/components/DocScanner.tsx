@@ -7,7 +7,12 @@ import {
   type Point, type Quad, type ScanMode,
 } from "@/lib/scanDoc";
 import { pagesToPdf, scanPdfName } from "@/lib/scanPdf";
+import { steadyLock } from "@/lib/scanLive";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
+
+/** What the live detector chews per frame. Smaller than a still's DETECT_EDGE:
+ *  this runs seven times a second on a phone, and edges this size are plenty. */
+const LIVE_EDGE = 480;
 
 /**
  * The scan step, between taking the photo and attaching it - for one receipt
@@ -30,15 +35,16 @@ import Dialog, { DialogStatus } from "@/components/ui/Dialog";
  * nothing new.
  */
 export default function DocScanner({ file, title = "Scan the document", onDone, onCancel }: {
-  /** The first photo, as the camera returned it. */
-  file: File;
+  /** A photo to start from. Absent = open the LIVE viewfinder instead, with
+      the phone's camera app as the fallback when getUserMedia will not play. */
+  file?: File;
   title?: string;
   /** One file however many pages: the JPEG of a single page, a PDF of several,
       or the untouched photo if that is what they chose. */
   onDone: (result: File) => void;
   onCancel: () => void;
 }) {
-  const [stage, setStage] = useState<"loading" | "ready" | "failed" | "between">("loading");
+  const [stage, setStage] = useState<"loading" | "ready" | "failed" | "between" | "camera" | "fallback">(file ? "loading" : "camera");
   const [error, setError] = useState("");
   const [mode, setMode] = useState<ScanMode>("document");
   const [quad, setQuad] = useState<Quad | null>(null);
@@ -62,13 +68,30 @@ export default function DocScanner({ file, title = "Scan the document", onDone, 
   const scaleRef = useRef(1);
   const dragging = useRef<number | null>(null);
   const moreRef = useRef<HTMLInputElement | null>(null);
-  const editingName = useRef(file.name);
+  /** The photo the editor holds - the source of "Use the photo as it is". */
+  const editingFile = useRef<File | null>(file ?? null);
+
+  /* The live viewfinder. A session that STARTED live goes back to the
+     viewfinder for each next page; one that started from a photo keeps using
+     the camera app. The stream and the detection loop live in refs because
+     they are machinery, not render state - only the lock is worth a render. */
+  const liveMode = useRef(!file);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const overlayRef = useRef<HTMLCanvasElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const detRef = useRef<HTMLCanvasElement | null>(null);
+  const rafRef = useRef(0);
+  const lastDetect = useRef(0);
+  const historyRef = useRef<(Quad | null)[]>([]);
+  const [locked, setLocked] = useState(false);
+  /** "" = the camera has no light to offer; otherwise the toggle's state. */
+  const [torch, setTorch] = useState<"" | "off" | "on">("");
 
   // ── Load, decode, detect - for the first photo and every added one ──────
   const begin = useCallback((photo: File) => {
     let dead = false;
     setStage("loading");
-    editingName.current = photo.name;
+    editingFile.current = photo;
     (async () => {
       try {
         const [box, big, small] = await Promise.all([
@@ -99,7 +122,157 @@ export default function DocScanner({ file, title = "Scan the document", onDone, 
     return () => { dead = true; };
   }, []);
 
-  useEffect(() => begin(file), [file, begin]);
+  // ── The live viewfinder ─────────────────────────────────────────────────
+
+  /**
+   * Which camera start is the CURRENT one. Starting is several awaits long,
+   * and a second start can begin before the first finishes - StrictMode's
+   * double mount does it on every dev load, and a fast "+ Page" after a
+   * fallback can do it in the field. Without this, the late continuation of a
+   * superseded start plays into the same <video> and both die of AbortError -
+   * which then reads as "no camera" and drops a working phone to the fallback.
+   */
+  const camSession = useRef(0);
+
+  const stopCamera = useCallback(() => {
+    camSession.current++;
+    cancelAnimationFrame(rafRef.current);
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setTorch("");
+    setLocked(false);
+  }, []);
+
+  /**
+   * Detection over the video, a few times a second, drawn straight onto the
+   * overlay. Every frame is judged alone; the LOCK (lib/scanLive) is the
+   * calmer second signal - the same quad several frames running - that turns
+   * the outline green and says the shot is worth taking. rAF-driven but gated
+   * to ~7 Hz: edge detection does not get better at 60 fps, phones just get
+   * hot, and the video underneath stays smooth either way.
+   */
+  const loop = useCallback(() => {
+    rafRef.current = requestAnimationFrame(loop);
+    const video = videoRef.current;
+    const overlay = overlayRef.current;
+    const cv = cvRef.current;
+    if (!video || !overlay || !cv || video.readyState < 2 || !video.videoWidth) return;
+    const now = performance.now();
+    if (now - lastDetect.current < 140) return;
+    lastDetect.current = now;
+
+    const scale = LIVE_EDGE / Math.max(video.videoWidth, video.videoHeight);
+    const w = Math.max(1, Math.round(video.videoWidth * scale));
+    const h = Math.max(1, Math.round(video.videoHeight * scale));
+    const det = (detRef.current ??= document.createElement("canvas"));
+    det.width = w; det.height = h;
+    det.getContext("2d")?.drawImage(video, 0, 0, w, h);
+
+    let hit: Quad | null = null;
+    try { hit = detectQuad(cv, det); } catch { hit = null; }
+    historyRef.current = [...historyRef.current.slice(-7), hit];
+    const lock = steadyLock(historyRef.current, w, h);
+    setLocked(lock !== null);
+
+    // The overlay shares the detection frame's coordinates and is stretched
+    // over the video by CSS, so the quad draws with no mapping at all.
+    overlay.width = w; overlay.height = h;
+    const ctx = overlay.getContext("2d");
+    if (!ctx) return;
+    if (hit) {
+      // Token-true color without a stylesheet: the canvas reads the same
+      // custom property every good-tone pill uses. Blue is the editor's own.
+      const good = getComputedStyle(document.documentElement).getPropertyValue("--t-good-fg").trim();
+      ctx.strokeStyle = lock ? (good || "#3B82F6") : "#3B82F6";
+      ctx.lineWidth = lock ? 4 : 2.5;
+      ctx.beginPath();
+      ctx.moveTo(hit[0].x, hit[0].y);
+      for (const p of hit.slice(1)) ctx.lineTo(p.x, p.y);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }, []);
+
+  const startCamera = useCallback(async () => {
+    const my = ++camSession.current;
+    setStage("camera");
+    setError("");
+    historyRef.current = [];
+    setLocked(false);
+    try {
+      const boxP = loadOpenCv();
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("no camera API here");
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 2560 }, height: { ideal: 1440 } },
+        audio: false,
+      });
+      const video = videoRef.current;
+      if (my !== camSession.current || !video) { stream.getTracks().forEach((t) => t.stop()); return; }
+      streamRef.current = stream;
+      // Imperatively, not (only) as JSX props: React does not reliably render
+      // the muted attribute, and an unmuted video will not autoplay - play()
+      // rejects and the whole viewfinder "fails" into the fallback for no
+      // reason a person can see.
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+      await video.play();
+      if (my !== camSession.current) return;
+      // A light, where the hardware has one - a receipt in a dim van again.
+      const caps = stream.getVideoTracks()[0]?.getCapabilities?.() as { torch?: boolean } | undefined;
+      setTorch(caps?.torch ? "off" : "");
+      cvRef.current = (await boxP).cv;
+      if (my !== camSession.current) return;
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(loop);
+    } catch (e) {
+      // A superseded start is not a failure - its replacement is running.
+      if (my !== camSession.current) return;
+      /* Denied, absent, or insecure context - all the same answer: the
+         phone's own camera app, which needs no permission from us. The
+         console keeps the real reason for whoever has to ask why. */
+      console.warn("Live viewfinder unavailable, falling back to the camera app:", e);
+      stopCamera();
+      // And stay fallen: a camera that refused once will refuse the next page
+      // too, and re-failing through it on every "+ Page" is a second's stall
+      // apiece for nothing.
+      liveMode.current = false;
+      setStage("fallback");
+    }
+  }, [loop, stopCamera]);
+
+  /** The shutter: the frame as the camera sees it, into the editor. */
+  const shutter = async () => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    const frame = document.createElement("canvas");
+    frame.width = video.videoWidth;
+    frame.height = video.videoHeight;
+    frame.getContext("2d")?.drawImage(video, 0, 0);
+    stopCamera();
+    const blob = await new Promise<Blob>((resolve, reject) =>
+      frame.toBlob((b) => b ? resolve(b) : reject(new Error("The frame could not be captured")), "image/jpeg", 0.92));
+    begin(new File([blob], `doc-${new Date().toISOString().slice(0, 10)}.jpg`, { type: "image/jpeg" }));
+  };
+
+  const flipTorch = async () => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+    const on = torch !== "on";
+    try {
+      await track.applyConstraints({ advanced: [{ torch: on } as MediaTrackConstraintSet] });
+      setTorch(on ? "on" : "off");
+    } catch { /* the toggle just does nothing - not worth an error */ }
+  };
+
+  useEffect(() => {
+    if (file) return begin(file);
+    void startCamera();
+  }, [file, begin, startCamera]);
+
+  // However the dialog closes, the camera light goes off.
+  useEffect(() => stopCamera, [stopCamera]);
 
   /* Not the whole frame: corners sitting exactly on the edge of the picture
      are impossible to grab on a phone, and a scan of the entire photograph is
@@ -225,7 +398,7 @@ export default function DocScanner({ file, title = "Scan the document", onDone, 
     if (!src) return false;
     const canvas = keepCanvas(src);
     setPages((p) => [...p, {
-      key: nextKey.current++, name: editingName.current, canvas, thumb: thumbOf(canvas),
+      key: nextKey.current++, name: editingFile.current?.name ?? "doc", canvas, thumb: thumbOf(canvas),
     }]);
     setStage("between");
     setQuad(null);
@@ -272,11 +445,17 @@ export default function DocScanner({ file, title = "Scan the document", onDone, 
   const keepAndDeliver = () => {
     const src = outRef.current;
     if (!src) return;
-    void deliver([...pages, { name: editingName.current, canvas: keepCanvas(src) }]);
+    void deliver([...pages, { name: editingFile.current?.name ?? "doc", canvas: keepCanvas(src) }]);
+  };
+
+  /** However this session takes its pictures, the next page comes the same way. */
+  const nextPage = () => {
+    if (liveMode.current) void startCamera();
+    else moreRef.current?.click();
   };
 
   const addAnother = () => {
-    if (keepPage()) moreRef.current?.click();
+    if (keepPage()) nextPage();
   };
 
   const n = pages.length;
@@ -285,6 +464,8 @@ export default function DocScanner({ file, title = "Scan the document", onDone, 
     <Dialog open onClose={onCancel} size="md" title={title}
       context={stage === "loading" ? "Starting the scanner..."
         : stage === "failed" ? "The scanner did not start"
+        : stage === "camera" ? (locked ? "Steady - take the shot" : "Point the camera at the paper")
+        : stage === "fallback" ? "Using the phone's own camera"
         : stage === "between" ? `${n} page${n === 1 ? "" : "s"} so far - add the next, or finish`
         : found ? "Drag a corner if it got the edges wrong"
         : "Could not find the edges - drag the corners onto them"}
@@ -292,17 +473,37 @@ export default function DocScanner({ file, title = "Scan the document", onDone, 
         <>
           <DialogStatus error={error} />
           <button className="btn" onClick={onCancel} disabled={busy}>Cancel</button>
-          {stage === "failed" && (
+          {stage === "camera" && (
+            <>
+              {torch !== "" && (
+                <button className="btn" onClick={() => void flipTorch()} disabled={busy}>
+                  {torch === "on" ? "Light off" : "Light"}
+                </button>
+              )}
+              <button className="btn" onClick={() => { stopCamera(); setStage("fallback"); }} disabled={busy}>
+                Use a photo
+              </button>
+              <button className="btn accent" onClick={() => void shutter()} disabled={busy}>
+                Capture
+              </button>
+            </>
+          )}
+          {stage === "fallback" && (
+            <button className="btn accent" onClick={() => moreRef.current?.click()} disabled={busy}>
+              Take or pick a photo
+            </button>
+          )}
+          {stage === "failed" && editingFile.current && (
             // The escape hatch when the scanner itself is what failed:
             // attaching the untouched photo can never be the wrong answer.
-            <button className="btn" onClick={() => onDone(file)} disabled={busy}>
+            <button className="btn" onClick={() => onDone(editingFile.current!)} disabled={busy}>
               Use the photo as it is
             </button>
           )}
           {stage === "ready" && (
             <>
-              {n === 0 && (
-                <button className="btn" onClick={() => onDone(file)} disabled={busy}>
+              {n === 0 && editingFile.current && (
+                <button className="btn" onClick={() => onDone(editingFile.current!)} disabled={busy}>
                   Use the photo as it is
                 </button>
               )}
@@ -317,7 +518,7 @@ export default function DocScanner({ file, title = "Scan the document", onDone, 
           )}
           {stage === "between" && (
             <>
-              <button className="btn" onClick={() => moreRef.current?.click()} disabled={busy}>
+              <button className="btn" onClick={nextPage} disabled={busy}>
                 + Page
               </button>
               <button className="btn accent" disabled={busy || n === 0}
@@ -331,10 +532,11 @@ export default function DocScanner({ file, title = "Scan the document", onDone, 
         </>
       }>
 
-      {/* The camera, for the pages after the first. A file input rather than a
-          live viewfinder on purpose: capture="environment" opens the phone's
-          own camera app, which has the flash, the focus and the steadying that
-          a getUserMedia view would have to reinvent badly. */}
+      {/* The camera-app path: the next page for photo-started sessions, and
+          the fallback whenever the live viewfinder cannot run - denied
+          permission, no camera, an insecure context. capture="environment"
+          opens the phone's own camera app, which needs no permission from us
+          and has the focus and steadying built in. */}
       <input ref={moreRef} type="file" accept="image/*" capture="environment"
         style={{ display: "none" }}
         onChange={(e) => {
@@ -364,6 +566,35 @@ export default function DocScanner({ file, title = "Scan the document", onDone, 
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* The viewfinder. The video element stays mounted whatever the stage,
+          because startCamera needs somewhere to put the stream before React
+          has re-rendered; CSS decides whether anybody sees it. The overlay
+          shares the detection frame's coordinate space and is stretched over
+          the video by CSS, so the quad draws with no mapping at all. */}
+      <div style={{ display: stage === "camera" ? "block" : "none" }}>
+        <div style={{ position: "relative" }}>
+          <video ref={videoRef} muted playsInline autoPlay
+            aria-label="The camera, looking for the paper"
+            style={{ width: "100%", display: "block", borderRadius: 8, background: "#000" }} />
+          <canvas ref={overlayRef} aria-hidden
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
+        </div>
+        <div className="mut t-meta" style={{ marginTop: 6 }}>
+          {locked
+            ? "Got it - hold steady and tap Capture. The corners can still be adjusted after."
+            : "Fill the frame with the page. The outline settles when the camera has it."}
+        </div>
+      </div>
+
+      {stage === "fallback" && (
+        <div className="t-small" style={{ padding: "12px 0" }}>
+          The live viewfinder could not start here, which is usually a camera
+          permission. The phone&apos;s own camera app does the job just as well -
+          take the photo there and it comes straight back to this screen for
+          cropping and cleanup.
         </div>
       )}
 

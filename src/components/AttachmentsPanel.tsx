@@ -190,8 +190,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
   const photos = attachments.length - docs.length;
 
   const fileRef = useRef<HTMLInputElement>(null);
-  const scanRef = useRef<HTMLInputElement>(null);
-  const [scanning, setScanning] = useState<File | null>(null);
+  const [scanning, setScanning] = useState(false);
   const [staged, setStaged] = useState<Staged[]>([]);
   const [uploading, setUploading] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
@@ -332,20 +331,14 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
               </button>
             )}
             {/* The phone gesture: point the camera at the paper and get a
-                document back - cropped, flattened, whitened, several pages
-                bound as one PDF (DocScanner). Beside "+ Add files" because a
-                work order's paper trail - a signed ticket, a packing slip, a
-                vendor cert - mostly still arrives as paper. */}
-            <button className="btn sm" onClick={() => scanRef.current?.click()} disabled={uploading}>
+                document back - edges tracked live on the viewfinder, cropped,
+                flattened, whitened, several pages bound as one PDF
+                (DocScanner). Beside "+ Add files" because a work order's paper
+                trail - a signed ticket, a packing slip, a vendor cert - mostly
+                still arrives as paper. */}
+            <button className="btn sm" onClick={() => setScanning(true)} disabled={uploading}>
               Scan
             </button>
-            <input ref={scanRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }}
-              onChange={(e) => {
-                const f = e.target.files?.[0] ?? null;
-                // Reset, or photographing the same page twice fires nothing.
-                e.target.value = "";
-                if (f) setScanning(f);
-              }} />
             <button className="btn sm primary" onClick={() => fileRef.current?.click()} disabled={uploading}>
               + Add files
             </button>
@@ -586,9 +579,9 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
       {scanning && (
         /* The scan lands STAGED, not uploaded: same as a picked file, so the
            kind can be set and the description written before anything moves. */
-        <DocScanner file={scanning}
-          onCancel={() => setScanning(null)}
-          onDone={(f) => { addFiles([f]); setScanning(null); }} />
+        <DocScanner
+          onCancel={() => setScanning(false)}
+          onDone={(f) => { addFiles([f]); setScanning(false); }} />
       )}
     </div>
   );
