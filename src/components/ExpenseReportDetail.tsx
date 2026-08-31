@@ -19,7 +19,7 @@ import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { Panel, Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
-import ReceiptScanner from "@/components/ReceiptScanner";
+import DocScanner from "@/components/DocScanner";
 
 /** A PDF receipt has no thumbnail to show; an image does. Name first - a blob
  *  url is a hash, and the name is what the person actually uploaded. */
@@ -804,7 +804,10 @@ export default function ExpenseReportDetail({
           decision, with its own way out, and burying a corner-dragging canvas
           inside a form makes both worse. */}
       {scanning && (
-        <ReceiptScanner file={scanning}
+        /* Multi-page on purpose, even for "a receipt": a hotel folio is three
+           pages, and the pages leave the scanner as one PDF - which the report
+           PDF already knows how to copy in whole (lib/reportPdf). */
+        <DocScanner file={scanning} title="Scan the receipt"
           onCancel={() => setScanning(null)}
           onDone={(f) => { setReceipt(f); setScanning(null); }} />
       )}
