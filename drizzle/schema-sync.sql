@@ -4191,3 +4191,12 @@ CREATE INDEX IF NOT EXISTS "calendar_notes_org_idx" ON "calendar_notes" ("org_id
 -- in its metrics and on its maintenance calendar. Additive and false, so every
 -- organization on file stays the client it already was.
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "prospect" boolean NOT NULL DEFAULT false;
+
+-- The report this one corrects. A settled claim is fixed on purpose - it has
+-- been approved, and in the paid case the money has already moved - so a
+-- receipt that turns up afterwards needs somewhere to go that is not "edit
+-- history". Before this it went onto a report opened by hand, with nothing
+-- tying it to the claim it was correcting. Null on delete: the amendment is a
+-- claim in its own right and outlives the paperwork it came from.
+ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "amends_id" integer;
+CREATE INDEX IF NOT EXISTS "expense_reports_amends_idx" ON "expense_reports" ("amends_id");

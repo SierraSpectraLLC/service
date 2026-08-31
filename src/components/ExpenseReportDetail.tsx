@@ -1,10 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
-  approveExpenseAllowance, attachPoolExpenses, deleteExpenseReport, editReportExpense, logMyExpense,
+  amendExpenseReport, approveExpenseAllowance, attachPoolExpenses, deleteExpenseReport,
+  editReportExpense, logMyExpense,
   nameExpenseReport, payExpenseReport, removeReportExpense, returnExpenseReport, setReportWorkOrder,
   submitDraftReport, withdrawExpenseReport,
 } from "@/app/actions";
@@ -67,6 +69,13 @@ export default function ExpenseReportDetail({
     /** The job this claim is for. Null is "no job - overhead", a real answer. */
     workOrderId: number | null;
     workOrderNumber: string;
+    /**
+     * The other half of a correction, read from either side so neither claim
+     * is ever read alone: the settled report this one amends, and the
+     * amendments opened against this one. See lib/expenseReports.
+     */
+    amends: { id: number; title: string; status: string } | null;
+    amendedBy: { id: number; title: string; status: string }[];
     /** Who filed it, shown only when that is somebody other than its claimant. */
     openedByName: string;
   };
@@ -292,8 +301,17 @@ export default function ExpenseReportDetail({
         ? await editReportExpense(opened.id, fields)
         : await logMyExpense({ ...fields, reportId: report.id });
       if (res?.error) { setAddErr(res.error); return; }
-      toast({ message: opened ? "Saved" : "Added to the report" });
       setEditing(null);
+      /* Aimed at a settled report, so the row went to its amendment. Said out
+         loud and followed, because a receipt that silently lands somewhere
+         else is a receipt somebody goes looking for. */
+      const moved = (res as { amendedTo?: number })?.amendedTo;
+      if (moved) {
+        toast({ message: "This report is settled - added to its amendment" });
+        router.push(`/money/reimbursements/${moved}`);
+        return;
+      }
+      toast({ message: opened ? "Saved" : "Added to the report" });
       router.refresh();
     });
 
@@ -380,6 +398,41 @@ export default function ExpenseReportDetail({
         )}
       </div>
 
+      {/* The thread between a settled claim and its correction, read from both
+          ends. A receipt that turns up after payout used to become a report
+          somebody opened by hand and renamed, leaving two claims for one trip
+          with nothing saying so - and the second one reading as a separate
+          expense nobody can reconcile against the first. */}
+      {report.amends && (
+        <div className="card" style={{ borderLeft: "3px solid var(--t-info-fg)", marginBottom: 12 }}>
+          <div className="t-small">
+            Amends{" "}
+            <Link href={`/money/reimbursements/${report.amends.id}`}>{report.amends.title}</Link>
+            {" "}({REPORT_LABEL[report.amends.status] ?? report.amends.status}).
+          </div>
+          <div className="mut t-small">
+            That one stays exactly as it was approved. This claims what it missed.
+          </div>
+        </div>
+      )}
+      {report.amendedBy.length > 0 && (
+        <div className="card" style={{ borderLeft: "3px solid var(--t-info-fg)", marginBottom: 12 }}>
+          <div className="t-small">
+            Amended by{" "}
+            {report.amendedBy.map((a, i) => (
+              <span key={a.id}>
+                {i > 0 ? ", " : ""}
+                <Link href={`/money/reimbursements/${a.id}`}>{a.title}</Link>
+                {" "}({REPORT_LABEL[a.status] ?? a.status})
+              </span>
+            ))}.
+          </div>
+          <div className="mut t-small">
+            This report is unchanged - a correction is its own claim and its own payout.
+          </div>
+        </div>
+      )}
+
       {report.status === "returned" && (
         <div className="card" style={{ borderLeft: "3px solid var(--t-bad-fg)", marginBottom: 12 }}>
           <div className="t-small" style={{ color: "var(--t-bad-fg)" }}>
@@ -390,7 +443,15 @@ export default function ExpenseReportDetail({
       )}
 
       <Panel title="Expenses" count={rows.length || undefined}
-        hint={editable ? "Each row is one receipt. Scan it as you add it - empty the pocket, then submit." : undefined}>
+        hint={editable
+          ? "Each row is one receipt. Scan it as you add it - empty the pocket, then submit."
+          /* There is no + on a settled report, and there should not be - the
+             rows are what was approved. Said here rather than left as a
+             missing button, because "where do I put this receipt" is exactly
+             the question that got answered by opening a report by hand. */
+          : mayWork
+            ? "Settled, so these rows are fixed. A receipt that turns up now goes on an amendment - open one below."
+            : undefined}>
         {editable && (
           <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
             <button className="btn sm primary" onClick={openAdd}>+ Expense</button>
@@ -530,6 +591,23 @@ export default function ExpenseReportDetail({
           <button className="btn" disabled={pending}
             onClick={() => act(() => withdrawExpenseReport(report.id), "Back to draft - edit away")}>
             Withdraw to draft
+          </button>
+        )}
+        {/* Where the road used to end. A settled claim cannot take the receipt
+            that turned up late, and the answer was to open a report by hand
+            and retype the trip. Idempotent, so pressing it twice - or having
+            already been sent here by filing a receipt against this report -
+            lands on the one amendment rather than opening a second. */}
+        {mayWork && !editable && (
+          <button className="btn accent" disabled={pending}
+            onClick={() => startTransition(async () => {
+              const res = await amendExpenseReport(report.id);
+              if (res?.error) { toast({ message: res.error }); return; }
+              toast({ message: res.existing ? "Its amendment was already open" : "Opened an amendment" });
+              if (res.id) router.push(`/money/reimbursements/${res.id}`);
+            })}>
+            {report.amendedBy.some((a) => a.status === "draft" || a.status === "returned")
+              ? "Open its amendment" : "Amend this report"}
           </button>
         )}
         {isOwner && report.status === "submitted" && (
@@ -818,8 +896,13 @@ export default function ExpenseReportDetail({
                 onClick={() => startTransition(async () => {
                   const res = await attachPoolExpenses(report.id, [...pulled]);
                   if (res?.error) { toast({ message: res.error }); return; }
-                  toast({ message: `Pulled ${pulled.size} onto the report` });
                   setPulling(false);
+                  if (res?.amendedTo) {
+                    toast({ message: `This report is settled - pulled ${pulled.size} onto its amendment` });
+                    router.push(`/money/reimbursements/${res.amendedTo}`);
+                    return;
+                  }
+                  toast({ message: `Pulled ${pulled.size} onto the report` });
                   router.refresh();
                 })}>
                 Pull {pulled.size || ""} in

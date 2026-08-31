@@ -57,7 +57,7 @@ const REPORT = {
   id: 3, person: "Steve Jones", status: "draft", submittedAt: "2026-08-01",
   paidOn: "", paidRef: "", returnedReason: "",
   title: "Reno install", purpose: "Commissioning the LC-MS",
-  workOrderId: 5, workOrderNumber: "WO-1001", openedByName: "",
+  workOrderId: 5, workOrderNumber: "WO-1001", openedByName: "", amends: null, amendedBy: [],
 };
 
 const POLICY = {
