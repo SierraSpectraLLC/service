@@ -100,7 +100,8 @@ describe("no client-facing surface reaches a workspace-wide money reader", () =>
     "src/lib/clientView.ts",
     "src/app/owner/ClientOwnerView.tsx",
   ];
-  const WORKSPACE_WIDE = ["allInvoices", "allQuotes", "collectionsBoard", "costingBoard", "unbilledJobs"];
+  const WORKSPACE_WIDE = ["allInvoices", "allQuotes", "collectionsBoard", "costingBoard",
+    "pmCostingBoard", "unbilledJobs"];
 
   for (const file of CLIENT_FACING) {
     it(`${file} names no workspace-wide reader`, () => {
