@@ -12,8 +12,9 @@
 // So everything that decides WHICH pixels survive is pure, and tested here.
 import { describe, expect, it } from "vitest";
 import {
-  MAX_SCAN_EDGE, clampPoint, orderCorners, outputSize, quadArea, quadIsPlausible,
-  scaleQuad, scanName, wholeFrame, type Point, type Quad,
+  MAX_SCAN_EDGE, candidateScore, clampPoint, extremeQuad, medianByte, orderCorners,
+  outputSize, quadArea, quadIsPlausible, rectangularity, scaleQuad, scanName,
+  wholeFrame, type Point, type Quad,
 } from "@/lib/scanDoc";
 
 /** A receipt filling most of a 1000x800 frame, photographed square on. */
@@ -194,5 +195,132 @@ describe("naming the result", () => {
 
   it("does not let a pathological name run away", () => {
     expect(scanName("x".repeat(400)).length).toBeLessThan(80);
+  });
+});
+
+/*
+ * ── The receipt on the beige floor ────────────────────────────────────────
+ *
+ * The first photograph a real engineer pointed this at, and it failed twice
+ * over: the live viewfinder never drew an outline, and the captured still fell
+ * back to a default rectangle nobody wanted. Both had one cause - detectQuad
+ * returned null - and none of the fixtures above could have caught it, because
+ * every one of them was white paper on a near-black car seat and the real one
+ * was white paper on a pale stone floor, in sun.
+ *
+ * What the pipeline was measured doing on that image, so the numbers here are
+ * observations rather than invention:
+ *
+ *   - Canny found NOTHING page-sized at any threshold: zero contours over 15%
+ *     of the frame. Not a wrong rectangle - no candidate at all. White on pale
+ *     stone is too weak a gradient to close a loop around, and a boundary with
+ *     gaps encloses no area to measure.
+ *   - Paper read S=12 V=204; the sunlit floor S=60 V=177. Twenty-seven units
+ *     darker and FIVE TIMES less saturated - so a grey threshold welded them
+ *     into one blob, and a saturation-aware one did not.
+ *   - Scored on size, the welded blob BEAT the true page, because it is bigger:
+ *     0.379 of frame against 0.324. Ranking on coverage rewards precisely the
+ *     over-inclusive mistake.
+ *
+ * The quads below are the two real candidates that came out of that image.
+ */
+describe("choosing between what the strategies saw on a real photograph", () => {
+  const W = 656, H = 1000;
+  /** What a saturation-aware mask found: the receipt, corners on the paper. */
+  const PAPER: Quad = [
+    { x: 139, y: 188 }, { x: 496, y: 164 }, { x: 516, y: 774 }, { x: 173, y: 789 },
+  ];
+  /** What a grey threshold found: the same receipt welded to a sunlit floor
+      patch, dragging one corner out to the frame's left edge. */
+  const WELDED: Quad = [
+    { x: 141, y: 188 }, { x: 496, y: 165 }, { x: 515, y: 774 }, { x: 0, y: 716 },
+  ];
+
+  it("prefers the page over the bigger blob that swallowed the floor", () => {
+    // Both are plausible shapes; the whole question is which one wins. The
+    // welded quad covers MORE of the frame, so any score led by coverage picks
+    // it - which is what shipped, and what put a corner at x=0 on a real scan.
+    expect(quadArea(WELDED)).toBeGreaterThan(quadArea(PAPER));
+    const paper = candidateScore(quadArea(PAPER) * 0.97, PAPER, W, H);
+    const welded = candidateScore(quadArea(WELDED) * 0.97, WELDED, W, H);
+    expect(paper).toBeGreaterThan(welded);
+  });
+
+  it("tells them apart by their sides, which is what a page has", () => {
+    // A page is a rectangle seen at an angle: opposite sides stay in
+    // proportion. Yanking one corner to the frame edge destroys that, and it
+    // is the only cheap signal that survives the two being nearly the same size.
+    expect(rectangularity(PAPER)).toBeGreaterThan(0.9);
+    expect(rectangularity(WELDED)).toBeLessThan(0.7);
+  });
+
+  it("refuses a rectangle that is really just the photograph", () => {
+    /*
+     * Also observed on that image: inverting the threshold made the FLOOR the
+     * blob - a flawless rectangle over 94% of the frame, which scores near
+     * perfectly on shape and beat the real page until this bound moved from
+     * 99.5% down. Past this much of the picture there is nothing left to crop.
+     */
+    const floor: Quad = [
+      { x: 0, y: 0 }, { x: 655, y: 0 }, { x: 655, y: 941 }, { x: 0, y: 941 },
+    ];
+    expect(quadArea(floor) / (W * H)).toBeGreaterThan(0.9);
+    expect(quadIsPlausible(floor, W, H)).toBe(false);
+  });
+
+  it("accepts a page that leaves a wide margin - a phone held back", () => {
+    // The other end of the same bound. The real receipt filled under a third
+    // of the frame, and the original 18% floor was close enough to that to be
+    // luck rather than judgement.
+    expect(quadArea(PAPER) / (W * H)).toBeLessThan(0.35);
+    expect(quadIsPlausible(PAPER, W, H)).toBe(true);
+  });
+});
+
+describe("reducing a crumpled outline to four corners", () => {
+  it("finds the corners through a wavy edge", () => {
+    /*
+     * Why approxPolyDP alone was not enough. A receipt that has been in a
+     * pocket has a folded edge: its outline simplifies to five, six or seven
+     * points and to four at no sensible tolerance, so demanding exactly four
+     * threw away every real receipt. Extremes ignore the wobble between the
+     * corners.
+     */
+    const wavy: Point[] = [
+      { x: 100, y: 100 }, { x: 300, y: 92 }, { x: 500, y: 104 },   // top, rippled
+      { x: 508, y: 400 }, { x: 494, y: 700 },                       // right, folded
+      { x: 300, y: 712 }, { x: 104, y: 706 },                       // bottom
+      { x: 92, y: 400 },                                            // left
+    ];
+    const q = extremeQuad(wavy);
+    expect(q).not.toBeNull();
+    expect(q![0]).toEqual({ x: 100, y: 100 });
+    expect(q![2]).toEqual({ x: 494, y: 700 });
+    expect(rectangularity(q!)).toBeGreaterThan(0.85);
+  });
+
+  it("refuses a thin diagonal, where two corners are the same point", () => {
+    // A degenerate "quad" warps to a smear. Better to report nothing.
+    expect(extremeQuad([
+      { x: 0, y: 0 }, { x: 100, y: 100 }, { x: 200, y: 200 }, { x: 300, y: 300 },
+    ])).toBeNull();
+  });
+
+  it("needs four points to work with", () => {
+    expect(extremeQuad([{ x: 0, y: 0 }, { x: 1, y: 1 }])).toBeNull();
+  });
+});
+
+describe("the median byte", () => {
+  it("agrees with a sort, which is what it replaced", () => {
+    // Swapped in because it runs on every viewfinder frame; it has to be the
+    // same answer, only cheaper.
+    const data = Uint8Array.from({ length: 5000 }, (_, i) => (i * 37 + 11) % 256);
+    const sorted = Uint8Array.from(data).sort();
+    expect(medianByte(data)).toBe(sorted[sorted.length >> 1]);
+  });
+
+  it("survives an empty image", () => {
+    expect(medianByte(new Uint8Array(0))).toBe(128);
   });
 });
