@@ -169,8 +169,11 @@ export default function DocScanner({ file, title = "Scan the document", onDone, 
     det.width = w; det.height = h;
     det.getContext("2d")?.drawImage(video, 0, 0, w, h);
 
+    // fast: the two cheap strategies only. This runs several times a second on
+    // a phone that is also decoding video, and the overlay only has to say
+    // "the camera can see it" - the shutter re-detects with everything.
     let hit: Quad | null = null;
-    try { hit = detectQuad(cv, det); } catch { hit = null; }
+    try { hit = detectQuad(cv, det, { fast: true }); } catch { hit = null; }
     historyRef.current = [...historyRef.current.slice(-7), hit];
     const lock = steadyLock(historyRef.current, w, h);
     setLocked(lock !== null);
