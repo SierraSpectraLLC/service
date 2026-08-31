@@ -315,6 +315,15 @@ const FIXTURE = `
     (2, 'Lodging', 'Hampton Inn, 2 nights', 31800, to_char(now() - interval '8 days', 'YYYY-MM-DD'), true, 'Bill Reyes', 'bill@sierraspectra.test', 1),
     (2, 'Per diem', 'Install week per diem', 9000, to_char(now() - interval '8 days', 'YYYY-MM-DD'), true, 'Bill Reyes', 'bill@sierraspectra.test', 1);
 
+  -- And one already PAID this month, so "Money out" has both reimbursement
+  -- figures to show: what left the account, and what is still waiting to.
+  INSERT INTO expense_reports (person, status, submitted_by, note, paid_on, paid_by, paid_ref) VALUES
+    ('Bill Reyes', 'paid', 'bill@sierraspectra.test', 'Fresno service call',
+     to_char(now() - interval '3 days', 'YYYY-MM-DD'), 'dev@local.test', 'CHK-2214');
+  INSERT INTO expenses (work_order_id, kind, description, amount_cents, incurred_on, billable, person, logged_by, report_id) VALUES
+    (2, 'Fuel', 'Fresno round trip', 6140, to_char(now() - interval '5 days', 'YYYY-MM-DD'), true, 'Bill Reyes', 'bill@sierraspectra.test', 2),
+    (2, 'Meals', 'Working lunch, client site', 3860, to_char(now() - interval '5 days', 'YYYY-MM-DD'), true, 'Bill Reyes', 'bill@sierraspectra.test', 2);
+
   -- Lab Zen pays on paper and has a live PO with room on it. Coastal has no PO
   -- at all and a punitive policy - short grace, a flat late fee, a hold that
   -- trips early - so the credit-hold and dunning paths have something to fire

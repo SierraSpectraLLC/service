@@ -51,6 +51,9 @@ export type FinanceFigures = {
     openPos: number;
     reimbursementsCents: number;
     reimbursementReports: number;
+    /** What actually left the account this period - see paidOutFigures. */
+    reimbursedCents: number;
+    reimbursedReports: number;
     /** Null when this reader may not read it - not zero, which would be a lie. */
     overheadCents: number | null;
     payrollCents: number | null;
@@ -117,6 +120,38 @@ export async function spendFigures(tenantOrgId: number | null): Promise<SpendFig
   };
 }
 
+/**
+ * What was actually paid out in reimbursements since `from`.
+ *
+ * The other half of the reimbursements figure, and the half "Money out" was
+ * missing. spendFigures counts what is SUBMITTED - a claim, still in the
+ * company's account, the payable half of the position - and the lane showed
+ * only that, so a shop that had reimbursed its engineers all month read as
+ * having paid nothing out. Cash basis on paidOn, the same rule "Paid this
+ * period" applies to money in with receivedOn: it counts when it moved, not
+ * when it was claimed.
+ */
+export async function paidOutFigures(
+  tenantOrgId: number | null, from: string,
+): Promise<{ reimbursedCents: number; reimbursedReports: number }> {
+  const paid = await db.select().from(expenseReports)
+    .where(and(
+      forTenant(expenseReports.tenantOrgId, tenantOrgId),
+      eq(expenseReports.status, "paid"),
+      gte(expenseReports.paidOn, from),
+    ));
+  if (!paid.length) return { reimbursedCents: 0, reimbursedReports: 0 };
+  const ids = new Set(paid.map((r) => r.id));
+  const rows = await db.select().from(expenses)
+    .where(forTenant(expenses.tenantOrgId, tenantOrgId));
+  return {
+    reimbursedCents: rows
+      .filter((e) => e.reportId !== null && ids.has(e.reportId))
+      .reduce((n, e) => n + e.amountCents, 0),
+    reimbursedReports: paid.length,
+  };
+}
+
 export async function financeFigures(
   user: SessionUser,
   today: string,
@@ -137,7 +172,7 @@ export async function financeFigures(
   const mine = opts.operatorOrgId;
   const mayReadPay = mine !== null && opts.seesPayroll;
 
-  const [invoiceRows, quoteRows, unbilled, paidRows, spend, overheadRows, contractRows, orgRows, payRows] =
+  const [invoiceRows, quoteRows, unbilled, paidRows, spend, paidOut, overheadRows, contractRows, orgRows, payRows] =
     await Promise.all([
       allInvoices(t),
       allQuotes(t),
@@ -145,6 +180,7 @@ export async function financeFigures(
       db.select().from(payments)
         .where(and(forTenant(payments.tenantOrgId, t), gte(payments.receivedOn, from))),
       spendFigures(t),
+      paidOutFigures(t, from),
       db.select().from(expenses)
         .where(and(
           isNull(expenses.workOrderId),
@@ -230,6 +266,8 @@ export async function financeFigures(
     moneyOut: {
       purchasingCents, openPos,
       reimbursementsCents, reimbursementReports,
+      reimbursedCents: paidOut.reimbursedCents,
+      reimbursedReports: paidOut.reimbursedReports,
       overheadCents, payrollCents,
     },
     contractsMonthlyCents,
