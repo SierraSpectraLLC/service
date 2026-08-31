@@ -241,7 +241,11 @@ import { cleanProvenance, isPublishable, PROVENANCE_LABEL } from "@/lib/provenan
 import { partsFlag, visitFlag } from "@/lib/entitlementFlags";
 import { parseModelSpecs, serializeModelSpecs } from "@/lib/modelSpecs";
 import { MAX_SUMMARY, modelSlug, publishBlockers, uniqueSlug } from "@/lib/publicCatalog";
-import { tenantCatalogIds } from "@/lib/makersData";
+import { makerNames, tenantCatalogIds } from "@/lib/makersData";
+import {
+  needsReading, planCatalogImport,
+  type CatalogImportRow, type Verdict,
+} from "@/lib/catalogImport";
 import {
   assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess, canEditSystem, forTenant, isHouse, readTenant, tenantOfOrg, tenantOfSystem, viewTenant, visibleOrgs, visibleSystemIds,
 } from "@/lib/tenancy";
@@ -10927,6 +10931,146 @@ export async function addVocabTerms(
     else created++;
   }
   return { created, failures };
+}
+
+/**
+ * A whole catalog sheet - modules and the OEMs that make them - in one go.
+ *
+ * Two thousand models is not two thousand trips through addVocabTerm: that
+ * function re-reads the whole vocabulary and revalidates four routes per call,
+ * which is why its batch sibling caps at 300. This reads the book ONCE, decides
+ * every line against it in lib/catalogImport, and writes in chunks.
+ *
+ * The deciding is the point, and it lives in that pure module so the preview a
+ * person approves and the writes that follow cannot disagree about what line
+ * 1500 means. Here there are only three things worth saying:
+ *
+ *   ONE UNIVERSE FOR THE LOOKUP AND THE INSERT. The plan merges against models
+ *   this workspace owns, because those are the only rows it may write to.
+ *
+ *   BUT vocab_term_unique is (kind, asset_type, name) with NO tenant column -
+ *   instance-wide. So a name another workspace already defined is invisible to
+ *   the plan and fatal to the insert. onConflictDoNothing turns that from a
+ *   thrown transaction that loses the whole sheet into one reported line.
+ *
+ *   NOTHING ON FILE IS OVERWRITTEN. Every update here widens a row the plan
+ *   marked "merge" - system types it did not carry, a maker where it had none.
+ *   A sheet that disagrees with what somebody set is reported, never applied.
+ */
+export async function importCatalog(rows: CatalogImportRow[]): Promise<{
+  error?: string;
+  models?: number; merged?: number; makers?: number;
+  moduleTypes?: number; systemTypes?: number;
+  skipped?: { line: number; model: string; problem: string }[];
+  counts?: Record<Verdict, number>;
+}> {
+  const u = await requireStaff();
+  if (!rows.length) return { error: "Nothing on that sheet to import" };
+  if (rows.length > 5000) return { error: "Import 5000 lines at a time" };
+  const tenant = myTenantOrgId(u);
+
+  const mine = await db.select().from(vocabTerms)
+    .where(forTenant(vocabTerms.tenantOrgId, tenant));
+  const plan = planCatalogImport(rows, {
+    models: mine.filter((t) => t.kind === "model").map((t) => ({
+      id: t.id, moduleType: t.assetType, name: t.name,
+      manufacturer: t.manufacturer, categories: t.categories,
+    })),
+    moduleTypes: mine.filter((t) => t.kind === "asset_type").map((t) => t.name),
+    systemTypes: mine.filter((t) => t.kind === "category").map((t) => t.name),
+    // The whole book - defined names AND every spelling already in use - so the
+    // sheet's makers settle onto what the shop writes rather than beside it.
+    makers: await makerNames(tenant),
+  });
+
+  const skipped = plan.rows
+    .filter((p) => needsReading(p.verdict))
+    .map((p) => ({ line: p.line, model: p.row.model || p.row.manufacturer, problem: p.note ?? p.verdict }));
+
+  /* Vocabulary first, models second: a model that lands before its module type
+     is defined is a model no picker can offer. */
+  // No tenant here on purpose: the stamp goes on at the insert, below, so there
+  // is exactly one line to read to know whose workspace a sheet lands in.
+  const term = (kind: string, name: string, extra: Partial<typeof vocabTerms.$inferInsert> = {}) => ({
+    kind, assetType: "", name, ...extra,
+  });
+  const vocab = [
+    ...plan.newModuleTypes.map((n) => term("asset_type", n)),
+    ...plan.newSystemTypes.map((n) => term("category", n)),
+    ...plan.newMakers.map((n) => term("maker", n)),
+  ];
+  const fresh = plan.rows.flatMap((p) =>
+    p.verdict === "new" && p.write?.model
+      ? [term("model", p.write.model.name, {
+          assetType: p.write.model.moduleType,
+          manufacturer: p.write.model.manufacturer,
+          categories: p.write.model.categories,
+        })]
+      : []);
+
+  /* Chunked, and onConflictDoNothing on every one: see the note above about the
+     unique constraint having no tenant column. What comes back is what actually
+     landed, so the counts reported are what is on file and not what was asked
+     for. */
+  const put = async (values: (typeof vocabTerms.$inferInsert)[]) => {
+    const landed: { id: number; kind: string; assetType: string; name: string }[] = [];
+    for (let i = 0; i < values.length; i += 200) {
+      // The stamp is applied HERE rather than trusted from the rows built
+      // above: one workspace per import, said at the only line that writes.
+      landed.push(...await db.insert(vocabTerms)
+        .values(values.slice(i, i + 200).map((v) => ({ ...v, tenantOrgId: tenant })))
+        .onConflictDoNothing()
+        .returning({ id: vocabTerms.id, kind: vocabTerms.kind, assetType: vocabTerms.assetType, name: vocabTerms.name }));
+    }
+    return landed;
+  };
+
+  const putVocab = await put(vocab);
+  const putModels = await put(fresh);
+
+  // A model the plan called new that no row came back for is a name some other
+  // workspace on this instance has already defined - reported, not lost silently.
+  const landedKey = new Set(putModels.map((r) => `${r.assetType.toLowerCase()}|${r.name.toLowerCase()}`));
+  for (const p of plan.rows) {
+    if (p.verdict !== "new" || !p.write?.model) continue;
+    const k = `${p.write.model.moduleType.toLowerCase()}|${p.write.model.name.toLowerCase()}`;
+    if (landedKey.has(k)) continue;
+    skipped.push({
+      line: p.line, model: p.write.model.name,
+      problem: `"${p.write.model.name}" is already defined for ${p.write.model.moduleType} elsewhere on this instance`,
+    });
+  }
+
+  let merged = 0;
+  for (const p of plan.rows) {
+    if (p.verdict !== "merge" || !p.write?.model?.id) continue;
+    await db.update(vocabTerms)
+      .set({ categories: p.write.model.categories, manufacturer: p.write.model.manufacturer })
+      .where(eq(vocabTerms.id, p.write.model.id));
+    merged++;
+  }
+
+  const counts = plan.counts;
+  const kind = (k: string) => putVocab.filter((r) => r.kind === k).length;
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: 0, tenantOrgId: tenant,
+    action: `imported a catalog sheet of ${rows.length} line${rows.length === 1 ? "" : "s"}: `
+      + `${putModels.length} new model${putModels.length === 1 ? "" : "s"}, ${merged} widened, `
+      + `${kind("asset_type")} module types, ${kind("category")} system types, ${kind("maker")} makers; `
+      + `${counts.same + counts.repeat} already on file, ${skipped.length} left for review`,
+  });
+
+  revalidatePath("/settings/catalog");
+  revalidatePath("/checkout");
+  revalidatePath("/maintenance");
+  rev();
+  return {
+    models: putModels.length, merged,
+    makers: putVocab.filter((r) => r.kind === "maker").length,
+    moduleTypes: putVocab.filter((r) => r.kind === "asset_type").length,
+    systemTypes: putVocab.filter((r) => r.kind === "category").length,
+    skipped, counts,
+  };
 }
 
 // ── House members (owner / staff) ───────────────────────────────────────────

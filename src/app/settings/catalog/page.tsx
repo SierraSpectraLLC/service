@@ -6,6 +6,7 @@ import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import CatalogForm from "@/components/CatalogForm";
+import CatalogImportCard from "@/components/CatalogImportCard";
 import MakersCard from "@/components/MakersCard";
 import PendingModelsCard from "@/components/PendingModelsCard";
 import { makerBook } from "@/lib/makersData";
@@ -104,6 +105,18 @@ export default async function CatalogPage() {
     <div>
       <PendingModelsCard pending={pendingModels} modelOptions={modelsByTypeName} makers={makerRows.map((m) => m.name)} />
       <CatalogForm categories={categories} models={models} types={types} makers={makerRows.map((m) => m.name)} />
+      {/* Two thousand models arrive as a spreadsheet, not as two thousand trips
+          through the New model dialog. Only the DEFINED types are handed over:
+          a stray kind that exists on units alone is not vocabulary yet, and a
+          sheet naming it should define it rather than quietly match it. */}
+      <CatalogImportCard
+        models={models.map((m) => ({
+          id: m.id, moduleType: m.assetType, name: m.name,
+          manufacturer: m.manufacturer, categories: m.categories,
+        }))}
+        moduleTypes={types.filter((t) => t.id !== null).map((t) => t.name)}
+        systemTypes={categories.filter((c) => c.id !== null).map((c) => c.name)}
+        makers={makerRows.map((m) => m.name)} />
       <MakersCard makers={makerRows} />
       <CatalogPhotosCard entries={terms.map((t) => ({
         id: t.id, kind: t.kind, assetType: t.assetType, name: t.name, manufacturer: t.manufacturer,
