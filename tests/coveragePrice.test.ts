@@ -8,9 +8,16 @@
 // on: a round of PMs is one journey, not one journey per instrument.
 import { describe, expect, it } from "vitest";
 import {
-  allocate, estimate, estimateProblems, periodLabel, periodWindows, siteCost, tripsPerYear,
-  type CoverageInput, type CoverageSite,
+  allocate, estimate, estimateProblems, periodLabel, periodWindows, reserveCost, reserveTerms,
+  siteCost, tripsPerYear,
+  type CoverageInput, type CoverageSite, type ResponseReserve,
 } from "@/lib/coveragePrice";
+
+const CAPPED: ResponseReserve = {
+  tripsPerYear: 2, hoursPerTrip: 8, tripCostCents: 220_000, partsCents: 300_000,
+  unlimitedTrips: false, unlimitedParts: false, uncappedLoadBps: 0,
+};
+const NO_RESERVE: ResponseReserve = { ...CAPPED, tripsPerYear: 0, hoursPerTrip: 0, tripCostCents: 0, partsCents: 0 };
 
 const sciex = (name: string, visits = 2) => ({
   name, visitsPerYear: visits, hoursPerVisit: 8, partsCentsPerVisit: 120_000,
@@ -32,11 +39,12 @@ const BASE: CoverageInput = {
   laborCostPerHourCents: 9_000,
   laborBillPerHourCents: 22_500,
   partsMarkupBps: 3000,
-  reserve: { tripsPerYear: 2, hoursPerTrip: 8, tripCostCents: 220_000, partsCents: 300_000 },
+  reserve: CAPPED,
   overheadBps: 1200,
   marginBps: 3000,
   periods: 5,
   escalationBps: 300,
+  deescalationBps: 0,
 };
 
 describe("a round of visits is one journey", () => {
@@ -110,7 +118,7 @@ describe("cost to price", () => {
      */
     const flat = estimate({
       ...BASE, periods: 1, overheadBps: 0, escalationBps: 0, marginBps: 3000,
-      reserve: { tripsPerYear: 0, hoursPerTrip: 0, tripCostCents: 0, partsCents: 0 },
+      reserve: NO_RESERVE,
     });
     expect(flat.priceCents).toBe(Math.round((flat.costCents / 0.7) / 100) * 100);
     expect(flat.priceCents).toBeGreaterThan(flat.costCents * 1.3);
@@ -151,9 +159,7 @@ describe("cost to price", () => {
      * when they happen - so the reserve's work is on both sides or neither.
      */
     const withReserve = estimate(BASE);
-    const without = estimate({
-      ...BASE, reserve: { tripsPerYear: 0, hoursPerTrip: 0, tripCostCents: 0, partsCents: 0 },
-    });
+    const without = estimate({ ...BASE, reserve: NO_RESERVE });
     expect(withReserve.tmCents).toBeGreaterThan(without.tmCents);
     expect(withReserve.priceCents).toBeGreaterThan(without.priceCents);
   });
@@ -169,6 +175,128 @@ describe("cost to price", () => {
     const at30 = estimate(BASE);
     const atCost = estimate({ ...BASE, partsMarkupBps: 0 });
     expect(at30.tmCents).toBeGreaterThan(atCost.tmCents);
+  });
+});
+
+describe("an uncapped promise", () => {
+  const unlimited: ResponseReserve = {
+    ...CAPPED, unlimitedTrips: true, unlimitedParts: true, uncappedLoadBps: 5000,
+  };
+
+  it("prices off the year we expect, plus what absorbing the tail is worth", () => {
+    /*
+     * Unlimited does not mean unpriced. Two callouts and $3,000 of emergency
+     * stock is still what a normal year is expected to bring - the toggle only
+     * says the client is not cut off at that point - so the expectation is
+     * unchanged and a 50% loading is what we charge for owning the bad year.
+     */
+    const capped = reserveCost(CAPPED, 9_000);
+    const open = reserveCost(unlimited, 9_000);
+    expect(open.expectedCents).toBe(capped.expectedCents);
+    expect(capped.loadCents).toBe(0);
+    expect(open.loadCents).toBe(Math.round(capped.expectedCents / 2));
+    expect(open.totalCents).toBe(open.expectedCents + open.loadCents);
+  });
+
+  it("loads only the leg that is actually uncapped", () => {
+    const partsOnly = reserveCost({ ...unlimited, unlimitedTrips: false }, 9_000);
+    const full = reserveCost(unlimited, 9_000);
+    expect(partsOnly.loadCents).toBe(Math.round(partsOnly.partsCents / 2));
+    expect(partsOnly.loadCents).toBeLessThan(full.loadCents);
+  });
+
+  it("puts the loading in the price and NOT in the time-and-materials comparison", () => {
+    /*
+     * The one that matters. A client without a contract pays for the callouts
+     * they have, not a premium for a promise nobody made them - so loading the
+     * T&M side would flatter the contract by pretending both carry the same
+     * risk, when absorbing that risk is the thing being sold.
+     */
+    const capped = estimate(BASE);
+    const open = estimate({ ...BASE, reserve: unlimited });
+    expect(open.uncappedLoadCents).toBeGreaterThan(0);
+    expect(open.reserveCents).toBe(capped.reserveCents + open.uncappedLoadCents);
+    expect(open.priceCents).toBeGreaterThan(capped.priceCents);
+    expect(open.tmCents).toBe(capped.tmCents);
+    expect(open.savingBps).toBeLessThan(capped.savingBps);
+  });
+
+  it("says on the quote what the client actually bought", () => {
+    expect(reserveTerms(CAPPED)).toBe("");
+    expect(reserveTerms(unlimited)).toBe("unlimited callouts · unlimited emergency parts");
+    expect(reserveTerms({ ...unlimited, unlimitedParts: false })).toBe("unlimited callouts");
+    expect(estimate({ ...BASE, reserve: unlimited }).line).toContain("unlimited callouts");
+  });
+
+  it("refuses to price unlimited off nothing", () => {
+    // The most expensive thing this form could let somebody do: a promise
+    // costed at zero, discovered on the first emergency of the base year.
+    const empty = estimateProblems({ ...BASE, reserve: { ...unlimited, tripsPerYear: 0, partsCents: 0 } });
+    expect(empty.some((x) => x.includes("Unlimited callouts, but the price expects none"))).toBe(true);
+    expect(empty.some((x) => x.includes("Unlimited emergency parts"))).toBe(true);
+
+    const free = estimateProblems({ ...BASE, reserve: { ...unlimited, uncappedLoadBps: 0 } });
+    expect(free.some((x) => x.includes("no loading"))).toBe(true);
+    expect(estimateProblems({ ...BASE, reserve: unlimited })).toEqual([]);
+  });
+
+  it("leaves a capped reserve exactly as it was", () => {
+    // A loading typed and then switched off must not leak into the price.
+    expect(estimate({ ...BASE, reserve: { ...CAPPED, uncappedLoadBps: 5000 } }).priceCents)
+      .toBe(estimate(BASE).priceCents);
+  });
+});
+
+describe("de-escalating a multi-year term", () => {
+  const TERM = { ...BASE, deescalationBps: 200 };
+
+  it("leaves the base year alone and discounts each option year further", () => {
+    const e = estimate(TERM);
+    const flat = estimate(BASE);
+    expect(e.periods[0].priceCents).toBe(flat.periods[0].priceCents);
+    expect(e.periods[0].discountCents).toBe(0);
+    for (let i = 1; i < 5; i++) {
+      expect(e.periods[i].priceCents).toBeLessThan(flat.periods[i].priceCents);
+      expect(e.periods[i].discountCents).toBeGreaterThan(e.periods[i - 1].discountCents);
+    }
+    // 3% up and 2% back, compounded, to the dollar.
+    expect(e.periods[4].priceCents).toBe(Math.round((e.priceCents * 1.03 ** 4 * 0.98 ** 4) / 100) * 100);
+  });
+
+  it("comes off the price and not off what the year costs us", () => {
+    /*
+     * The distinction the field exists on. Nobody's flights get cheaper because
+     * a client signed for five years - the give-back is margin, and pretending
+     * it is a cost saving is how an option year quietly prices below cost.
+     */
+    const e = estimate(TERM);
+    const flat = estimate(BASE);
+    expect(e.periods.map((p) => p.costCents)).toEqual(flat.periods.map((p) => p.costCents));
+    expect(e.periods[4].priceCents - e.periods[4].costCents)
+      .toBeLessThan(flat.periods[4].priceCents - flat.periods[4].costCents);
+  });
+
+  it("totals the give-back against the list price", () => {
+    const e = estimate(TERM);
+    expect(e.listTotalCents).toBe(estimate(BASE).totalCents);
+    expect(e.deescalationCents).toBe(e.listTotalCents - e.totalCents);
+    expect(e.deescalationCents).toBe(e.periods.reduce((a, p) => a + p.discountCents, 0));
+    expect(e.line).toContain("Committing to all 5 years gives back");
+  });
+
+  it("gives a single-year quote nothing, because nothing was committed", () => {
+    const one = estimate({ ...TERM, periods: 1 });
+    expect(one.deescalationCents).toBe(0);
+    expect(one.totalCents).toBe(estimate({ ...BASE, periods: 1 }).totalCents);
+    expect(one.line).not.toContain("gives back");
+  });
+
+  it("says so when the give-back has eaten the margin", () => {
+    // 10%/yr off a 30% margin is under water by option year 4, and a schedule
+    // that loses money in its last period is not noticed until its last period.
+    expect(estimateProblems({ ...BASE, deescalationBps: 1000 })
+      .some((x) => x.includes("Option year 4 de-escalates below what it costs"))).toBe(true);
+    expect(estimateProblems({ ...BASE, deescalationBps: 200 })).toEqual([]);
   });
 });
 
