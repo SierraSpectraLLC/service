@@ -134,7 +134,15 @@ export default async function MoneyPage({ searchParams }: {
             {mOut.overheadCents !== null && (
               <Row label="Overhead" sub="runs whether or not anyone works" cents={mOut.overheadCents} />
             )}
-            <Row label="Reimbursements" sub={`${mOut.reimbursementReports} report${mOut.reimbursementReports === 1 ? "" : "s"} awaiting payout`}
+            {/* Reimbursements, as the two figures they actually are - the flaw
+                the shop called out was one row wearing the other's name. Money
+                OUT is what left the account: reports PAID in the period, cash
+                basis on paidOn, the same rule "Paid this period" applies
+                across the aisle. What is submitted and unpaid has not moved
+                yet - it is the payable half of the position, feeds "Owed by
+                you" below, and now says so in its own name. */}
+            <Row label="Reimbursed" sub="paid out this period" cents={mOut.reimbursedCents} />
+            <Row label="Reimbursements pending" sub={`${mOut.reimbursementReports} report${mOut.reimbursementReports === 1 ? "" : "s"} awaiting payout`}
               cents={mOut.reimbursementsCents} tone={mOut.reimbursementsCents > 0 ? "warn" : undefined} />
             <div className="ledger total">
               <span className="grow">
