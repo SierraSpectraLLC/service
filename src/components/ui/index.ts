@@ -11,6 +11,7 @@ export { default as Id } from "@/components/ui/Id";
 export { default as PageHead } from "@/components/ui/PageHead";
 export { default as Toolbar } from "@/components/ui/Toolbar";
 export { default as FacetStrip } from "@/components/ui/FacetStrip";
+export { default as Pager } from "@/components/ui/Pager";
 export { default as SectionHead } from "@/components/ui/SectionHead";
 export { default as RowActions } from "@/components/ui/RowActions";
 export { default as Panel } from "@/components/ui/Panel";
