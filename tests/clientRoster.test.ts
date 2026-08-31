@@ -7,8 +7,8 @@
 import { describe, expect, it } from "vitest";
 import { clientRoster, filterRoster, rosterSummary, type RosterOrg } from "@/lib/clientRoster";
 
-const org = (id: number, name: string, kind = "client"): RosterOrg =>
-  ({ id, name, kind, themeColor: "" });
+const org = (id: number, name: string, kind = "client", prospect = false): RosterOrg =>
+  ({ id, name, kind, themeColor: "", prospect });
 
 const ORGS = [org(1, "Lab Zen"), org(2, "Testen"), org(3, "Cascade Instrument", "provider")];
 

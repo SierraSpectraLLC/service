@@ -1,12 +1,13 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
   setOrgAppearance, updateEodRecipients, updateDigestRecipients, setDigestHour, sendDigestNow,
   addClientAccess, addClientPerson, removeClientAccess,
   setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit,
-  setOrgRemoteAccess, setOrgResale, setClientTempPassword, clearClientTempPassword, setClientSeesPayroll,
+  setOrgRemoteAccess, setOrgProspect, setOrgResale, setClientTempPassword, clearClientTempPassword, setClientSeesPayroll,
   resendInvite,
   setClientSeesMoney,
   setStartView,
@@ -70,6 +71,11 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
     storageLimitMb: number; quota: Quota;
     remoteAccessEnabled: boolean; remoteDevices: number;
     resaleEnabled: boolean;
+    /** Somebody we are selling to. See lib/prospects. */
+    prospect: boolean;
+    /** Systems they OWN - what the fleet holds back while they are a prospect.
+        Not `systems` above, which counts what has been shared with them. */
+    ownedSystems: number;
   };
   /** Whether the instance has the remote-support module on at all. */
   showRemote?: boolean;
@@ -143,6 +149,11 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
     }
   };
   // Remote support tier
+  // The fleet pages read the flag server-side, so the switch has to make the
+  // app go and look again rather than just repaint this card.
+  const router = useRouter();
+  const [prospectOn, setProspectOn] = useState(org.prospect);
+  const [prospectMsg, setProspectMsg] = useState("");
   const [remoteOn, setRemoteOn] = useState(org.remoteAccessEnabled);
   // Resale: off unless this organization is actually in that business.
   const [resaleOn, setResaleOn] = useState(org.resaleEnabled);
@@ -841,6 +852,43 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
             </span>
           </div>
           {resaleMsg && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{resaleMsg}</div>}
+        </Panel>
+      )}
+
+      {/* The state the app had no word for. Quoting a company means creating it
+          and its systems, and those systems then joined the working fleet - so
+          one quote put a stranger's machines on the board, in the metrics and
+          on the maintenance calendar. Nothing here moves or deletes anything;
+          it changes which systems the fleet queries ask for. */}
+      {isOwner && !org.isOperator && org.kind === "client" && (
+        <Panel title="Where we stand with them"
+          hint={prospectOn
+            ? `We are selling to ${org.name}. Their ${org.ownedSystems === 1 ? "system is" : "systems are"} on file and on their own page, and stay off the board, the metrics and the maintenance calendar until they are a client.`
+            : `${org.name} is a client. Everything of theirs is in the working fleet.`}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <button className={`btn sm${prospectOn ? " accent" : ""}`} disabled={pending}
+              onClick={() => {
+                const next = !prospectOn;
+                setProspectOn(next); setProspectMsg("");
+                startTransition(async () => {
+                  const res = await setOrgProspect(org.id, next);
+                  if (res?.error) { setProspectOn(!next); setProspectMsg(res.error); }
+                  else router.refresh();
+                });
+              }}>
+              {prospectOn ? "They are a client now" : "Mark as a prospect"}
+            </button>
+            <span className={`pill ${prospectOn ? "warn" : "good"}`}>
+              {prospectOn ? "prospect" : "client"}
+            </span>
+            {org.ownedSystems > 0 && (
+              <span className="mut t-meta">
+                {org.ownedSystems} system{org.ownedSystems === 1 ? "" : "s"} on file
+                {prospectOn ? ", held out of the fleet" : ""}
+              </span>
+            )}
+          </div>
+          {prospectMsg && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{prospectMsg}</div>}
         </Panel>
       )}
 

@@ -237,6 +237,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
           storageLimitMb: org.storageLimitMb, quota,
           remoteAccessEnabled: org.remoteAccessEnabled,
           resaleEnabled: org.resaleEnabled, remoteDevices: deviceCount,
+          prospect: org.prospect, ownedSystems: ownedSystems.length,
           isOperator: s?.operatorOrgId === org.id, isSheetOrg: s?.sheetOrgId === org.id,
         }}
         people={allowRows.map((r) => {

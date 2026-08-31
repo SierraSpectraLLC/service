@@ -66,7 +66,7 @@ export default async function ClientsPage({ searchParams }: {
   const roster = clientRoster(
     orgRows
       .filter((o) => !o.isOperator)
-      .map((o) => ({ id: o.id, name: o.name, kind: o.kind, themeColor: o.themeColor })),
+      .map((o) => ({ id: o.id, name: o.name, kind: o.kind, themeColor: o.themeColor, prospect: o.prospect })),
     systemRows, siteRows, workRows,
   ).sort((a, b) => a.name.localeCompare(b.name));
 

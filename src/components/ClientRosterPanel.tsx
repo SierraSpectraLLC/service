@@ -68,9 +68,16 @@ export default function ClientRosterPanel({ rows, filter, canOpen, canAdd }: {
           </form>
         }
         facets={
-          <FacetStrip facets={(["client", "provider"] as const).map((k) => ({
-            key: k, label: k === "client" ? "Clients" : "Providers",
-            count: rows.filter((o) => o.kind === k).length || undefined,
+          /* Prospects sit beside the two kinds because to a reader it is one
+             question - which of these companies is this list about - and
+             because a Clients facet that included the people we are still
+             selling to would be the roster telling the same lie the fleet
+             was. */
+          <FacetStrip facets={(["client", "prospect", "provider"] as const).map((k) => ({
+            key: k,
+            label: k === "client" ? "Clients" : k === "prospect" ? "Prospects" : "Providers",
+            count: rows.filter((o) => (k === "prospect" ? o.prospect : o.kind === k && !o.prospect))
+              .length || undefined,
             on: filter.kind === k, href: href(filter.kind === k ? "" : k),
           }))} />
         }
@@ -93,8 +100,16 @@ export default function ClientRosterPanel({ rows, filter, canOpen, canAdd }: {
                 <span className="t-lead" style={{ fontWeight: 700 }}>{o.name}</span>
               </span>
             ),
-            kind: <Pill tone={o.kind === "provider" ? "warn" : "info"}>{o.kind}</Pill>,
-            has: <span className="mut t-meta">{rosterSummary(o)}</span>,
+            kind: o.prospect
+              ? <Pill tone="warn">prospect</Pill>
+              : <Pill tone={o.kind === "provider" ? "warn" : "info"}>{o.kind}</Pill>,
+            /* A prospect's systems are on file and not in the fleet, and the
+               roster is where somebody notices the difference. */
+            has: (
+              <span className="mut t-meta">
+                {rosterSummary(o)}{o.prospect && o.systems > 0 ? " · not in the fleet" : ""}
+              </span>
+            ),
           },
         }))}
         empty={filter.q || filter.kind

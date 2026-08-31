@@ -19,8 +19,8 @@ afterEach(cleanup);
 beforeEach(() => addOrg.mockClear());
 
 const ROWS = [
-  { id: 1, name: "Lab Zen", kind: "client", themeColor: "", systems: 2, sites: 1, openWork: 0 },
-  { id: 2, name: "Testen", kind: "client", themeColor: "", systems: 0, sites: 0, openWork: 0 },
+  { id: 1, name: "Lab Zen", kind: "client", themeColor: "", prospect: false, systems: 2, sites: 1, openWork: 0 },
+  { id: 2, name: "Testen", kind: "client", themeColor: "", prospect: false, systems: 0, sites: 0, openWork: 0 },
 ];
 
 const draw = async (over: { canOpen?: boolean; canAdd?: boolean } = {}) => {

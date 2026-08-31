@@ -4184,3 +4184,10 @@ CREATE TABLE IF NOT EXISTS "calendar_notes" (
 );
 CREATE INDEX IF NOT EXISTS "calendar_notes_day_idx" ON "calendar_notes" ("on_date");
 CREATE INDEX IF NOT EXISTS "calendar_notes_org_idx" ON "calendar_notes" ("org_id");
+
+-- Somebody we are selling to, not somebody we work for. Quoting a company
+-- means creating it and its systems, and those systems then joined the working
+-- fleet - so a shop that sent one quote got a prospect's machines on its board,
+-- in its metrics and on its maintenance calendar. Additive and false, so every
+-- organization on file stays the client it already was.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "prospect" boolean NOT NULL DEFAULT false;

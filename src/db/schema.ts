@@ -202,6 +202,26 @@ export const orgs = pgTable("orgs", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   kind: text("kind").notNull().default("client"), // client | provider
+  /**
+   * SOMEBODY WE ARE SELLING TO, not somebody we work for.
+   *
+   * Orthogonal to `kind`, which says which side of the relationship an
+   * organization is on and is load-bearing for personas, sharing and the
+   * provider queue. This says whether they have bought anything yet, which is
+   * a different question and was not being asked at all: quoting a company
+   * means creating it and its systems, and those systems then joined the
+   * working fleet. One quote put a stranger's machines on the board, in the
+   * metrics and on the maintenance calendar.
+   *
+   * Their record is complete either way - the systems stay on file, on their
+   * own page and in the quote's coverage picker. What a prospect's systems are
+   * held out of is the WORKING FLEET; see lib/prospects, which owns that rule
+   * and is the only place that decides it.
+   *
+   * False on every row that existed before this column, which is the point: an
+   * organization already on file is a client until somebody says otherwise.
+   */
+  prospect: boolean("prospect").notNull().default(false),
   // Does this organization run a workspace of its own - staff, documents it
   // signs, clients it creates? That is what makes it a TENANT, and it is the
   // difference between the company selling the service and the companies buying
