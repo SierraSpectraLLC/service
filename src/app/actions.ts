@@ -49,7 +49,7 @@ import { checkRows, type PartImportRow, type RowProblem } from "@/lib/partImport
 // which made every new agreement throw on its own audit line.
 import {
   AGREEMENT_KINDS, AGREEMENT_STATES, KIND_LABEL as AGREEMENT_KIND_LABEL,
-  serializeKits, type IncludedKit,
+  serializeKits, shapeOf, type IncludedKit,
 } from "@/lib/agreements";
 import {
   closeLine, moverOf, severityOf, woAcceptsWork, woMove, woOpen, WO_LABEL,
@@ -77,7 +77,8 @@ import {
   addMonths, billCadenceLabel, dueCycles, missedCycles, openingCursor, recurring,
 } from "@/lib/recurring";
 import {
-  checkReportTitle, editableReport, mayWorkReport, reimbursementPool, reportTotalCents,
+  amendmentTitle, checkReportTitle, editableReport, mayWorkReport, reimbursementPool,
+  reportTotalCents, settledReport,
 } from "@/lib/expenseReports";
 import { checkStipend } from "@/lib/stipends";
 import { poProblem, usablePoLines } from "@/lib/backfill";
@@ -8607,7 +8608,12 @@ export async function logMyExpense(
     /** Which of the job's labs the trip went to, when it has more than one. */
     siteId?: number | null;
   },
-): Promise<{ error?: string }> {
+  /**
+   * The report it actually landed on, when that is not the one it was aimed
+   * at: a settled claim cannot take a row, so the row goes to that claim's
+   * amendment. Absent on the ordinary path.
+   */
+): Promise<{ error?: string; amendedTo?: number }> {
   const u = await requireStaff();
   const cents = parseMoney(data.amount);
   if (cents === null || cents <= 0) return { error: "Enter an amount like 43.00" };
@@ -8638,10 +8644,24 @@ export async function logMyExpense(
    */
   let person = u.name;
   let report: Awaited<ReturnType<typeof workableReport>> = null;
+  /** Set when the row landed on an amendment rather than where it was aimed. */
+  let amendedTo: number | null = null;
   if (data.reportId != null) {
     report = await workableReport(u, data.reportId);
     if (!report) return { error: "Not your report" };
-    if (!editableReport(report.status)) return { error: `That report is ${report.status} - it cannot take new rows` };
+    /* A settled claim cannot take the row, and refusing was the end of the
+       road: the receipt went onto a report somebody opened by hand and
+       renamed. It goes to the amendment instead - opened here if there is not
+       one already, which is why amendExpenseReport is idempotent. The caller
+       is told, because the row is not where they pointed it. */
+    if (settledReport(report.status)) {
+      const to = await amendExpenseReport(report.id);
+      if (to.error || to.id === undefined) return { error: to.error ?? "Could not open an amendment" };
+      const [onto] = await db.select().from(expenseReports).where(eq(expenseReports.id, to.id));
+      if (!onto) return { error: "Could not open an amendment" };
+      report = onto;
+      amendedTo = onto.id;
+    }
     reportId = report.id;
     person = report.person;
   }
@@ -8664,13 +8684,14 @@ export async function logMyExpense(
     action: `logged ${formatCents(cents)} - ${description}`
       + (workOrderId !== null ? ` on a work order` : " (no job - overhead)")
       + (person === u.name ? "" : ` for ${person}`)
+      + (amendedTo !== null ? ` - onto an amendment, the report it was aimed at is settled` : "")
       + (ruling.state === "flagged" ? ` - FLAGGED: ${ruling.note}` : ""),
   });
   revalidatePath("/money/reimbursements");
   if (reportId !== null) revalidatePath(`/money/reimbursements/${reportId}`);
   revalidatePath("/money/expenses");
   if (workOrderId !== null) revalidatePath(`/work/${workOrderId}`);
-  return {};
+  return amendedTo === null ? {} : { amendedTo };
 }
 
 /**
@@ -8831,6 +8852,65 @@ export async function createExpenseReport(
 }
 
 /**
+ * The report that corrects a settled one - opened, or handed back if it exists.
+ *
+ * The gap, as the shop put it: "I had to manually open one as a new report."
+ * A submitted or paid claim refuses new rows, correctly - it has been approved,
+ * and once paid the money has moved - but the refusal was the end of the road.
+ * The receipt that turned up late went onto a report somebody opened by hand
+ * and renamed, leaving two claims for one trip with nothing tying them
+ * together, and the second reading as a separate expense nobody can reconcile
+ * against the first.
+ *
+ * IDEMPOTENT, and that is what makes it safe to offer from several places at
+ * once. A report has at most one amendment still being filled; asking again
+ * hands back the same one rather than opening a second, so a double-click, a
+ * button and a late receipt arriving by another path all land on one claim.
+ * Once that amendment is itself submitted, asking again opens the next - a
+ * second late receipt is a second correction and its own money.
+ *
+ * It carries the original's person, job and purpose, because those are the
+ * facts that made retyping it by hand a chore and a chance to get one wrong.
+ * It does NOT carry its rows: an amendment claims what the first claim missed,
+ * and copying them would ask to be paid twice for the same receipts.
+ */
+export async function amendExpenseReport(
+  reportId: number,
+): Promise<{ error?: string; id?: number; existing?: boolean }> {
+  const u = await requireStaff();
+  const report = await workableReport(u, reportId);
+  if (!report) return { error: "Not your report" };
+  /* A draft or a returned report is still open to the receipt itself. Opening
+     a second claim beside one that can simply take the row is how a trip ends
+     up split across two payouts for no reason. */
+  if (!settledReport(report.status)) {
+    return { error: `That report is still a ${report.status} - add the receipt to it directly` };
+  }
+  const [open] = await db.select().from(expenseReports).where(and(
+    eq(expenseReports.amendsId, reportId),
+    inArray(expenseReports.status, ["draft", "returned"]),
+  )).limit(1);
+  if (open) return { id: open.id, existing: true };
+
+  const [made] = await db.insert(expenseReports).values({
+    tenantOrgId: report.tenantOrgId,
+    person: report.person, status: "draft", openedBy: u.email,
+    workOrderId: report.workOrderId, purpose: report.purpose,
+    title: amendmentTitle(report.title), amendsId: reportId,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "expense_report", entityId: made.id, tenantOrgId: made.tenantOrgId,
+    action: `opened "${made.title}" to correct ${report.person}'s ${report.status} report`
+      + ` - the original stays as it was paid`,
+    field: "amends_id", newValue: String(reportId),
+  });
+  revalidatePath("/money/reimbursements");
+  revalidatePath(`/money/reimbursements/${reportId}`);
+  revalidatePath("/people");
+  return { id: made.id };
+}
+
+/**
  * Move a claim onto a different job, or off one and onto overhead.
  *
  * The job is asked for at creation, which is where it belongs - but a trip
@@ -8908,11 +8988,22 @@ export async function nameExpenseReport(
  */
 export async function attachPoolExpenses(
   reportId: number, expenseIds: number[],
-): Promise<{ error?: string }> {
+): Promise<{ error?: string; amendedTo?: number }> {
   const u = await requireStaff();
-  const report = await workableReport(u, reportId);
+  let report = await workableReport(u, reportId);
   if (!report) return { error: "Not your report" };
-  if (!editableReport(report.status)) return { error: `That report is ${report.status} - it cannot take new rows` };
+  /* Same road as logMyExpense: a settled claim cannot take the rows, and
+     refusing left somebody to open a report by hand. They go to the
+     amendment, opened here if there is not one already. */
+  let amendedTo: number | null = null;
+  if (settledReport(report.status)) {
+    const to = await amendExpenseReport(report.id);
+    if (to.error || to.id === undefined) return { error: to.error ?? "Could not open an amendment" };
+    const [onto] = await db.select().from(expenseReports).where(eq(expenseReports.id, to.id));
+    if (!onto) return { error: "Could not open an amendment" };
+    report = onto;
+    amendedTo = onto.id;
+  }
   const ids = [...new Set(expenseIds)].filter((n) => Number.isInteger(n));
   if (!ids.length) return { error: "Pick at least one expense" };
   const rows = await db.select().from(expenses)
@@ -8926,7 +9017,7 @@ export async function attachPoolExpenses(
         : `Some of those are not ${report.person}'s to claim, or are already on a report`,
     };
   }
-  await db.update(expenses).set({ reportId }).where(inArray(expenses.id, ids));
+  await db.update(expenses).set({ reportId: report.id }).where(inArray(expenses.id, ids));
   /* A per diem logged loose in the pool was never judged - there was no job to
      judge it against. Landing on a claim that names one is the first moment
      the rulebook can speak, and skipping it here would make the pool the way
@@ -8934,7 +9025,8 @@ export async function attachPoolExpenses(
   await rerulePerDiems(report);
   revalidatePath("/money/reimbursements");
   revalidatePath(`/money/reimbursements/${reportId}`);
-  return {};
+  if (amendedTo !== null) revalidatePath(`/money/reimbursements/${amendedTo}`);
+  return amendedTo === null ? {} : { amendedTo };
 }
 
 // ---------------- Stipends ----------------
@@ -10679,6 +10771,49 @@ export async function addOrg(name: string, kind: string): Promise<{ error?: stri
   });
   revalidatePath("/settings");
   return { id: row.id };
+}
+
+/**
+ * "We are selling to them" / "they are a client now."
+ *
+ * The state the app had no word for. Quoting a company means creating it and
+ * its systems, and those systems then joined the working fleet - so one quote
+ * put a stranger's machines on the board, in the metrics and on the
+ * maintenance calendar, and the only way to keep them off was not to record
+ * them.
+ *
+ * Nothing is moved, copied or deleted either way. This flips one boolean; what
+ * it changes is which systems the fleet queries ask for - see lib/prospects,
+ * which owns that rule. Converting is therefore complete by construction:
+ * every system, site, quote and file they already had is theirs, and the day
+ * they say yes it is all simply in the fleet.
+ *
+ * Not offered for a provider. "Prospect" is about somebody buying from us, and
+ * a service company we subcontract to is a different relationship wearing the
+ * same table.
+ */
+export async function setOrgProspect(orgId: number, prospect: boolean): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const gate = await adminOrgGate(u, orgId);
+  if ("error" in gate) return gate;
+  const { org } = gate;
+  if (org.isOperator) return { error: "That is a workspace, not a client" };
+  if (org.kind === "provider") {
+    return { error: "Providers are companies we work with, not companies we are selling to" };
+  }
+  if (org.prospect === prospect) return {};
+  await db.update(orgs).set({ prospect }).where(eq(orgs.id, orgId));
+  await audit({
+    actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: org.parentOrgId,
+    action: prospect
+      ? `marked "${org.name}" a prospect - their systems come off the working fleet until they are a client`
+      : `made "${org.name}" a client - their systems join the working fleet`,
+    field: "prospect", oldValue: String(org.prospect), newValue: String(prospect),
+  });
+  revalidatePath("/clients");
+  revalidatePath("/settings");
+  rev();
+  return {};
 }
 
 export async function removeOrg(orgId: number, reason: string): Promise<{ error?: string }> {
@@ -14786,7 +14921,8 @@ export type AgreementInput = {
   providerName?: string;
   startsOn: string; endsOn: string; renewNoticeDays: number | string;
   visitsIncluded: number | string; partsAllowance: string; laborIncludedHours: string;
-  visitsUnlimited?: boolean; partsUnlimited?: boolean; pmPartsIncluded?: boolean;
+  visitsUnlimited?: boolean; partsUnlimited?: boolean; laborUnlimited?: boolean;
+  pmPartsIncluded?: boolean;
   includedKits?: IncludedKit[];
   hourlyRate?: string;
   instrumentIds?: number[];
@@ -14797,13 +14933,21 @@ function cleanAgreement(d: AgreementInput): { error: string } | {
   kind: string; number: string; title: string; status: string;
   startsOn: string; endsOn: string; renewNoticeDays: number;
   visitsIncluded: number; partsAllowanceCents: number; laborIncludedMinutes: number;
-  visitsUnlimited: boolean; partsUnlimited: boolean; pmPartsIncluded: boolean;
+  visitsUnlimited: boolean; partsUnlimited: boolean; laborUnlimited: boolean;
+  pmPartsIncluded: boolean;
   includedKits: string;
   hourlyRateCents: number | null; instrumentIds: number[];
   valueCents: number | null; note: string;
 } {
   const kind = (AGREEMENT_KINDS as readonly string[]).includes(d.kind) ? d.kind : "contract";
   const status = (AGREEMENT_STATES as readonly string[]).includes(d.status) ? d.status : "active";
+  /* What this kind of paper actually has - see lib/agreements.AGREEMENT_SHAPE.
+     Entitlements belong to a contract, and every reader already agreed: both
+     coverage sites gate on kind === "contract". Zeroed rather than merely
+     hidden, for the same reason unlimited zeroes its cap below - a number the
+     form no longer shows is a number nobody can correct, and one left behind
+     by a kind change would keep answering questions about a quote. */
+  const shape = shapeOf(kind);
   const startsOn = d.startsOn.trim();
   const endsOn = d.endsOn.trim();
   if (startsOn && !isIsoDay(startsOn)) return { error: "Start date should look like 2026-01-01" };
@@ -14820,18 +14964,26 @@ function cleanAgreement(d: AgreementInput): { error: string } | {
     number: d.number.trim().slice(0, 60),
     title: d.title.trim().slice(0, 160),
     startsOn, endsOn,
-    renewNoticeDays: whole(d.renewNoticeDays, 3650),
+    /* An invoice does not lapse, it falls due, so a renewal notice on one
+       points at the wrong event - and left at its default 60 it would quietly
+       drive `standing` to "Up for renewal" from a field the form no longer
+       shows. */
+    renewNoticeDays: shape.renewal ? whole(d.renewNoticeDays, 3650) : 0,
     // Unlimited beats a cap: the number is zeroed so nothing reads it as one.
-    visitsIncluded: d.visitsUnlimited ? 0 : whole(d.visitsIncluded, 10_000),
+    visitsIncluded: !shape.entitlements || d.visitsUnlimited ? 0 : whole(d.visitsIncluded, 10_000),
     // parseMoney returns null for "not money-shaped"; an allowance nobody typed
     // is 0, which lib/agreements reads as "not part of this agreement".
-    partsAllowanceCents: d.partsUnlimited ? 0 : parseMoney(d.partsAllowance) ?? 0,
-    laborIncludedMinutes: Math.round((parseFloat(d.laborIncludedHours.trim()) || 0) * 60),
-    visitsUnlimited: d.visitsUnlimited ?? false,
-    partsUnlimited: d.partsUnlimited ?? false,
-    pmPartsIncluded: d.pmPartsIncluded ?? false,
-    includedKits: serializeKits(d.includedKits ?? []),
-    hourlyRateCents: parseMoney(d.hourlyRate ?? ""),
+    partsAllowanceCents: !shape.entitlements || d.partsUnlimited ? 0 : parseMoney(d.partsAllowance) ?? 0,
+    // Same rule as the two above: unlimited beats a cap, so the number is
+    // zeroed and nothing downstream reads it as one.
+    laborIncludedMinutes: !shape.entitlements || d.laborUnlimited
+      ? 0 : Math.round((parseFloat(d.laborIncludedHours.trim()) || 0) * 60),
+    visitsUnlimited: shape.entitlements && (d.visitsUnlimited ?? false),
+    partsUnlimited: shape.entitlements && (d.partsUnlimited ?? false),
+    laborUnlimited: shape.entitlements && (d.laborUnlimited ?? false),
+    pmPartsIncluded: shape.entitlements && (d.pmPartsIncluded ?? false),
+    includedKits: shape.entitlements ? serializeKits(d.includedKits ?? []) : "",
+    hourlyRateCents: shape.entitlements ? parseMoney(d.hourlyRate ?? "") : null,
     // Which of the client's systems this paper covers; [] = all of them.
     // Ownership is validated by usage-time scoping, not here - a system that
     // changes hands stops counting by itself.

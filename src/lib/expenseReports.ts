@@ -180,3 +180,49 @@ export function checkReportTitle(raw: string): { title: string } | { error: stri
   if (!title) return { error: "Name the report - \"Reno install, week of the 12th\"" };
   return { title };
 }
+
+/**
+ * WHAT AN AMENDMENT IS CALLED.
+ *
+ * A settled report is fixed - approved, and in the paid case the money has
+ * already gone - so a receipt that surfaces afterwards cannot join it. What
+ * people did was open a fresh report by hand and retype the trip, which leaves
+ * two claims for one trip and nothing saying so. The amendment carries the
+ * original's name so both are obviously the same trip, and says which pass it
+ * is so three of them are still three distinguishable things.
+ *
+ * NUMBERED RATHER THAN STACKED. Amending an amendment gives "amendment 2", not
+ * "amendment - amendment": the suffix is parsed off before the next one goes
+ * on, so the name stays the trip's name however many times a receipt turns up
+ * late. The base is trimmed to fit BEFORE the suffix is added, because a title
+ * silently cut at 120 characters loses the word that says what it is.
+ */
+const AMEND_RE = /\s+[-–]\s+amendment(?:\s+(\d+))?$/i;
+
+export function amendmentTitle(title: string): string {
+  const raw = title.trim();
+  const hit = AMEND_RE.exec(raw);
+  const base = hit ? raw.slice(0, hit.index).trim() : raw;
+  // "amendment", then "amendment 2" - the first correction needs no number,
+  // and a shop with one of them should not have to read one.
+  const next = hit ? (parseInt(hit[1] ?? "1", 10) || 1) + 1 : 1;
+  const suffix = next === 1 ? " - amendment" : ` - amendment ${next}`;
+  const room = REPORT_TITLE_MAX - suffix.length;
+  const kept = base.length > room ? base.slice(0, room).trimEnd() : base;
+  /* A report whose whole name WAS the suffix leaves nothing to hang it off,
+     and "- amendment 2" names a dangling hyphen. The word stands on its own -
+     which is also the honest answer for a report nobody named, back when
+     naming one was optional. */
+  if (!kept) return next === 1 ? "Amendment" : `Amendment ${next}`;
+  return `${kept}${suffix}`;
+}
+
+/**
+ * Is this report finished with, so far as its own rows are concerned?
+ *
+ * The mirror of editableReport, named for the question the amendment path
+ * actually asks: a draft or a returned report takes the receipt directly and
+ * needs no amendment at all, and offering one there would be offering a second
+ * claim for money the first is still open to carry.
+ */
+export const settledReport = (status: string): boolean => !editableReport(status);

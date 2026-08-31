@@ -31,6 +31,80 @@ export const KIND_LABEL: Record<string, string> = {
 
 export const AGREEMENT_STATES = ["draft", "active", "expired", "cancelled"] as const;
 
+/**
+ * WHICH PARTS OF THE PAPER A KIND ACTUALLY HAS.
+ *
+ * The form asked all four kinds the same five sections, so a Quote was asked
+ * for a parts allowance, service visits, PM kits included, labor hours, three
+ * unlimited toggles and an hourly rate. That is worse than clutter, because
+ * nothing reads any of it: both places that resolve coverage gate on
+ * `kind === "contract"` (lib/invoiceData), and costingBoard only looks for
+ * contracts. Entitlements typed on a PO, a quote or an invoice were saved and
+ * then ignored by every reader there is - a form collecting numbers that go
+ * nowhere, which is how a shop comes to believe a quote covers four visits.
+ *
+ * So entitlements are a CONTRACT's, and this is the one place that says so.
+ *
+ * What survives on every kind is the AMOUNT and the DATES, under the names
+ * that kind uses for them. A quote has a figure and two dates; they are just
+ * not a contract value, a start and an end. Kept as labels rather than
+ * separate columns because it is the same fact wearing the right word - and a
+ * kind change then never strands a number in a column nobody reads.
+ *
+ * `renewal` follows what an end date MEANS. A contract, a PO and a quote all
+ * lapse and all want chasing beforehand; an invoice does not lapse, it falls
+ * due, so a renewal notice on one is a reminder about the wrong event. See
+ * cleanAgreement, which zeroes it for the kinds that have none rather than
+ * leaving a hidden 60 driving `standing` from a field nobody can see.
+ */
+export type AgreementShape = {
+  /** Visits, parts, labor, PM kits, the unlimited flags, the hourly rate. */
+  entitlements: boolean;
+  /** "Tell me this many days before it ends." */
+  renewal: boolean;
+  /** Who holds the paper. Only a contract's provider is read by coverage. */
+  provider: boolean;
+  /** The heading over the money, and what that money is called. */
+  amountSection: string;
+  amountLabel: string;
+  startLabel: string;
+  endLabel: string;
+  /** The greyed example in the box. A quote is not numbered "PO-4417". */
+  numberHint: string;
+  titleHint: string;
+};
+
+export const AGREEMENT_SHAPE: Record<AgreementKind, AgreementShape> = {
+  contract: {
+    entitlements: true, renewal: true, provider: true,
+    amountSection: "What's included", amountLabel: "Contract value ($)",
+    startLabel: "Starts", endLabel: "Ends",
+    numberHint: "AGR-2026-01", titleHint: "Annual service contract - 4 systems",
+  },
+  po: {
+    entitlements: false, renewal: true, provider: false,
+    amountSection: "Amount", amountLabel: "PO amount ($)",
+    startLabel: "Issued", endLabel: "Good through",
+    numberHint: "PO-4417", titleHint: "What the order is for",
+  },
+  quote: {
+    entitlements: false, renewal: true, provider: false,
+    amountSection: "Amount", amountLabel: "Quoted amount ($)",
+    startLabel: "Quoted", endLabel: "Valid until",
+    numberHint: "Q-2026-118", titleHint: "What was quoted",
+  },
+  invoice: {
+    entitlements: false, renewal: false, provider: false,
+    amountSection: "Amount", amountLabel: "Invoice amount ($)",
+    startLabel: "Invoiced", endLabel: "Due",
+    numberHint: "INV-2026-0431", titleHint: "What it bills for",
+  },
+};
+
+/** An unknown kind reads as a contract - the widest shape, so nothing hides. */
+export const shapeOf = (kind: string): AgreementShape =>
+  AGREEMENT_SHAPE[kind as AgreementKind] ?? AGREEMENT_SHAPE.contract;
+
 export type AgreementLike = {
   kind: string;
   status: string;
@@ -43,6 +117,7 @@ export type AgreementLike = {
   /** Unlimited beats any cap: a full-service contract has no number to burn. */
   visitsUnlimited?: boolean;
   partsUnlimited?: boolean;
+  laborUnlimited?: boolean;
 };
 
 /** draft | cancelled | expired | expiring | active - what it is TODAY. */
@@ -223,7 +298,7 @@ export function drawdown(a: AgreementLike, used: Usage) {
   return {
     parts: allowance(a.partsAllowanceCents, used.partsCents, a.partsUnlimited),
     visits: allowance(a.visitsIncluded, used.visits, a.visitsUnlimited),
-    labor: allowance(a.laborIncludedMinutes, used.laborMinutes),
+    labor: allowance(a.laborIncludedMinutes, used.laborMinutes, a.laborUnlimited),
   };
 }
 

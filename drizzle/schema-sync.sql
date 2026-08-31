@@ -2148,6 +2148,9 @@ ALTER TABLE "part_catalog" ADD COLUMN IF NOT EXISTS "models" text[] NOT NULL DEF
 ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "visits_unlimited" boolean NOT NULL DEFAULT false;
 ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "parts_unlimited" boolean NOT NULL DEFAULT false;
 ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "hourly_rate_cents" integer;
+-- Labor gets the unlimited flag its two siblings already had: an all-in
+-- contract could not say so, and read to the client as labor NOT included.
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "labor_unlimited" boolean NOT NULL DEFAULT false;
 ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "instrument_ids" integer[] NOT NULL DEFAULT '{}';
 
 -- ── Catalog reference library ───────────────────────────────────────────────
@@ -4181,3 +4184,19 @@ CREATE TABLE IF NOT EXISTS "calendar_notes" (
 );
 CREATE INDEX IF NOT EXISTS "calendar_notes_day_idx" ON "calendar_notes" ("on_date");
 CREATE INDEX IF NOT EXISTS "calendar_notes_org_idx" ON "calendar_notes" ("org_id");
+
+-- Somebody we are selling to, not somebody we work for. Quoting a company
+-- means creating it and its systems, and those systems then joined the working
+-- fleet - so a shop that sent one quote got a prospect's machines on its board,
+-- in its metrics and on its maintenance calendar. Additive and false, so every
+-- organization on file stays the client it already was.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "prospect" boolean NOT NULL DEFAULT false;
+
+-- The report this one corrects. A settled claim is fixed on purpose - it has
+-- been approved, and in the paid case the money has already moved - so a
+-- receipt that turns up afterwards needs somewhere to go that is not "edit
+-- history". Before this it went onto a report opened by hand, with nothing
+-- tying it to the claim it was correcting. Null on delete: the amendment is a
+-- claim in its own right and outlives the paperwork it came from.
+ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "amends_id" integer;
+CREATE INDEX IF NOT EXISTS "expense_reports_amends_idx" ON "expense_reports" ("amends_id");

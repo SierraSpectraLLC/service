@@ -45,6 +45,16 @@ export default async function ExpenseReportPage({ params }: { params: Promise<{ 
   if (!mayWork) notFound();
   const mine = report.person === user.name;
 
+  /* Both ends of a correction, so neither claim is ever read alone: what this
+     one amends, and what has been opened to amend it. */
+  const [amends] = report.amendsId === null ? [] : await db
+    .select({ id: expenseReports.id, title: expenseReports.title, status: expenseReports.status })
+    .from(expenseReports).where(eq(expenseReports.id, report.amendsId));
+  const amendedBy = await db
+    .select({ id: expenseReports.id, title: expenseReports.title, status: expenseReports.status })
+    .from(expenseReports).where(eq(expenseReports.amendsId, id))
+    .orderBy(asc(expenseReports.id));
+
   const [rows, categoryRows, allWos, myExpenses, roster] = await Promise.all([
     db.select().from(expenses).where(eq(expenses.reportId, id))
       .orderBy(desc(expenses.incurredOn), desc(expenses.id)),
@@ -127,6 +137,10 @@ export default async function ExpenseReportPage({ params }: { params: Promise<{ 
           title: report.title, purpose: report.purpose,
           workOrderId: report.workOrderId, workOrderNumber: reportWoNumber,
           openedByName,
+          amends: amends ? { ...amends, title: amends.title || `Report #${amends.id}` } : null,
+          amendedBy: amendedBy.map((a) => ({
+            ...a, title: a.title || `Report #${a.id}`,
+          })),
           submittedAt: report.submittedAt.toISOString().slice(0, 10),
           paidOn: report.paidOn, paidRef: report.paidRef, returnedReason: report.returnedReason,
         }}

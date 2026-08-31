@@ -237,6 +237,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
           storageLimitMb: org.storageLimitMb, quota,
           remoteAccessEnabled: org.remoteAccessEnabled,
           resaleEnabled: org.resaleEnabled, remoteDevices: deviceCount,
+          prospect: org.prospect, ownedSystems: ownedSystems.length,
           isOperator: s?.operatorOrgId === org.id, isSheetOrg: s?.sheetOrgId === org.id,
         }}
         people={allowRows.map((r) => {
@@ -282,6 +283,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
           visitsIncluded: r.visitsIncluded, partsAllowanceCents: r.partsAllowanceCents,
           laborIncludedMinutes: r.laborIncludedMinutes,
           visitsUnlimited: r.visitsUnlimited, partsUnlimited: r.partsUnlimited,
+          laborUnlimited: r.laborUnlimited,
           pmPartsIncluded: r.pmPartsIncluded, includedKits: r.includedKits,
           hourlyRateCents: r.hourlyRateCents, instrumentIds: r.instrumentIds,
           providerName: providerNameOf(r.providerOrgId, provNames),

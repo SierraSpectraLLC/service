@@ -258,12 +258,20 @@ const FIXTURE = `
 
   INSERT INTO agreements (org_id, kind, number, title, status, starts_on, ends_on, visits_included, parts_allowance_cents, labor_included_minutes, value_cents, created_by) VALUES
     (1, 'contract', 'AGR-2026-01', 'Lab Zen full service', 'active', '2026-01-01', '2026-12-31', 6, 500000, 4800, 3600000, '${OWNER}'),
+    -- The all-in shape: every entitlement unlimited. It exists so the client's
+    -- coverage card has a contract that says Unlimited three times rather than
+    -- twice over "Labor - not part of this agreement", which is what a shop
+    -- reported seeing on exactly this kind of paper.
+    (1, 'contract', 'AGR-2026-09', 'Lab Zen all-inclusive cover', 'active',
+      '2026-03-01', '2027-02-28', 0, 0, 0, 4800000, '${OWNER}'),
     -- A second contract inside its 60-day notice window, so the renewals cron
     -- has something to draft against and the Contracts screen shows what a
     -- term coming to an end looks like.
     (1, 'contract', 'AGR-2025-04', 'Lab Zen GC-MS coverage', 'active',
       to_char(now() - interval '320 days', 'YYYY-MM-DD'),
       to_char(now() + interval '39 days', 'YYYY-MM-DD'), 4, 250000, 2400, 1800000, '${OWNER}');
+  UPDATE agreements SET visits_unlimited = true, parts_unlimited = true,
+    labor_unlimited = true, pm_parts_included = true WHERE number = 'AGR-2026-09';
 
   -- A retainer: $20,000 a month with no job behind it, which is the one kind
   -- of revenue nothing else in the fixture produces. Its cursor is left a

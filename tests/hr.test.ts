@@ -371,7 +371,8 @@ describe("one place assembles the payroll viewer, and the HR room stays out of t
      */
     const src = strip("src/app/people/page.tsx");
     for (const reader of [
-      "allInvoices", "allQuotes", "collectionsBoard", "costingBoard", "unbilledJobs",
+      "allInvoices", "allQuotes", "collectionsBoard", "costingBoard", "pmCostingBoard",
+      "unbilledJobs",
       "booksContext", "financeFigures", "railContext",
     ]) {
       const named = new RegExp(`\\b${reader}\\b`).test(src);

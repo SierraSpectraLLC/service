@@ -12,7 +12,11 @@
 // verb, and both call the same addOrg.
 
 /** An organization, as the orgs table holds it. */
-export type RosterOrg = { id: number; name: string; kind: string; themeColor: string };
+export type RosterOrg = {
+  id: number; name: string; kind: string; themeColor: string;
+  /** Somebody we are selling to, not somebody we work for. See lib/prospects. */
+  prospect: boolean;
+};
 
 /** What we look after for one of them. */
 export type RosterCounts = {
@@ -69,8 +73,15 @@ export function clientRoster(
 export function filterRoster(rows: ClientRow[], opts: { q?: string; kind?: string }): ClientRow[] {
   const needle = (opts.q ?? "").trim().toLowerCase();
   const kind = (opts.kind ?? "").trim();
+  /* "prospect" rides the same facet as the two kinds because to a reader it is
+     the same question - which of these companies is this list about - even
+     though underneath it is a different column. A client facet that quietly
+     included the people we are still selling to would be the roster telling
+     the same lie the fleet was. */
+  const matches = (r: ClientRow) =>
+    kind === "prospect" ? r.prospect : r.kind === kind && !r.prospect;
   return rows.filter((r) =>
-    (!kind || r.kind === kind) && (!needle || r.name.toLowerCase().includes(needle)));
+    (!kind || matches(r)) && (!needle || r.name.toLowerCase().includes(needle)));
 }
 
 /**

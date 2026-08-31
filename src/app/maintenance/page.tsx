@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { assets, instruments, pmSchedules, tasks } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { forTenant, readTenant } from "@/lib/tenancy";
+import { notProspect, prospectHold } from "@/lib/prospects";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { cadenceLabel, pmStanding } from "@/lib/pm";
 import { pmGroups } from "@/lib/pmGroups";
@@ -28,10 +29,17 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
   const today = shopToday();
   const { q = "", show = "" } = await searchParams;
 
+  const heldBack = await prospectHold(readTenant(user));
   const [schedules, openPm] = await Promise.all([
     // This workspace's schedules. Another operator's PM calendar is not ours to
     // plan, and the two must never appear on one page.
-    db.select().from(pmSchedules).where(forTenant(pmSchedules.tenantOrgId, readTenant(user)))
+    /* Nothing falls due on a company that has not bought anything. The column
+       is nullable - an asset-level PM names no system - which is why the rule
+       lets a null through rather than using a bare NOT IN. See lib/prospects. */
+    db.select().from(pmSchedules)
+      .where(and(forTenant(pmSchedules.tenantOrgId, readTenant(user)),
+        notProspect(pmSchedules.instrumentId, heldBack.systems),
+        notProspect(pmSchedules.assetId, heldBack.assets)))
       .orderBy(asc(pmSchedules.paused), asc(pmSchedules.nextDue), asc(pmSchedules.id)),
     db.select({ pmScheduleId: tasks.pmScheduleId }).from(tasks)
       .where(and(isNotNull(tasks.pmScheduleId), ne(tasks.state, "Done"))),

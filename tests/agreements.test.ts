@@ -9,6 +9,7 @@ const TODAY = "2026-08-16";
 const ag = (over: Partial<{
   kind: string; status: string; startsOn: string; endsOn: string; renewNoticeDays: number;
   visitsIncluded: number; partsAllowanceCents: number; laborIncludedMinutes: number;
+  visitsUnlimited: boolean; partsUnlimited: boolean; laborUnlimited: boolean;
 }> = {}) => ({
   kind: "contract", status: "active", startsOn: "2026-01-01", endsOn: "2026-12-31",
   renewNoticeDays: 60, visitsIncluded: 0, partsAllowanceCents: 0, laborIncludedMinutes: 0, ...over,
@@ -175,6 +176,36 @@ describe("an entitlement drawn down", () => {
     expect(d.visits.over).toBe(true);
     expect(d.visits.remaining).toBe(-1);
     expect(d.labor.tracked).toBe(false);
+  });
+
+  it("carries the unlimited flag for LABOR, not only for parts and visits", () => {
+    /*
+     * The gap a shop found on a live contract: visits and parts each had an
+     * unlimited flag and labor had none, so an all-in agreement had no way to
+     * say so. With no hours filled in, zero means "not part of this agreement"
+     * - correct for a contract that excludes labor, and exactly backwards for
+     * one that covers all of it. The client's own coverage card read "Labor -
+     * not part of this agreement" underneath two rows saying Unlimited.
+     */
+    const d = drawdown(
+      ag({ visitsUnlimited: true, partsUnlimited: true, laborUnlimited: true }),
+      { partsCents: 250_000, visits: 5, laborMinutes: 900 },
+    );
+    for (const e of [d.parts, d.visits, d.labor]) {
+      expect(e.unlimited).toBe(true);
+      expect(e.tracked).toBe(true);
+      expect(e.over).toBe(false);
+    }
+    // Usage still reports - it is real work - it just burns nothing down.
+    expect(d.labor.used).toBe(900);
+    expect(d.labor.remaining).toBe(0);
+  });
+
+  it("still reads an unfilled labor entitlement as not included", () => {
+    // The flag is opt-in, so every contract written before it keeps saying
+    // exactly what it said: nothing about labor, rather than "unlimited".
+    expect(drawdown(ag({}), { partsCents: 0, visits: 0, laborMinutes: 0 }).labor.tracked)
+      .toBe(false);
   });
 });
 

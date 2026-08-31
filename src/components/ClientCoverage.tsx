@@ -32,6 +32,7 @@ export default function ClientCoverage({ agreements, today, operatorName }: {
     partsAllowanceCents: number;
     partsUnlimited: boolean;
     laborIncludedMinutes: number;
+    laborUnlimited: boolean;
     pmPartsIncluded: boolean;
     /**
      * Who provides it. Null is the operator - and it is named anyway, because
@@ -99,10 +100,7 @@ export default function ClientCoverage({ agreements, today, operatorName }: {
                 Labor
                 <span className="sub">Time on the bench and on your floor</span>
               </span>
-              {/* No unlimited flag exists for labor in the record, so this
-                  never claims one - a contract that really is all-in reads as
-                  its hours until the column exists to say otherwise. */}
-              <span>{entitlement(false, a.laborIncludedMinutes,
+              <span>{entitlement(a.laborUnlimited, a.laborIncludedMinutes,
                 (n) => `${Math.round(n / 60)} hour${Math.round(n / 60) === 1 ? "" : "s"} included`)}</span>
             </div>
             <div className="mut t-meta" style={{ marginTop: 8 }}>

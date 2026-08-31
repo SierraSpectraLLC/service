@@ -5,7 +5,8 @@ import { db } from "@/db";
 import { agreements, assets, clientAllowlist, instruments, orgSites, orgs, users } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
-import { forTenant, viewTenant, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, readTenant, viewTenant, visibleSystemIds } from "@/lib/tenancy";
+import { notProspect, prospectHold } from "@/lib/prospects";
 import { systemLabel } from "@/lib/systemLabel";
 import { brandForTenant } from "@/lib/brand";
 import { ageDays, getStageSince } from "@/lib/stageAges";
@@ -49,10 +50,13 @@ export default async function UnitsPage({ searchParams }: {
   const today = shopToday();
 
   const visible = await visibleSystemIds(user);
+  // A prospect's systems are on file and on their own page, and are not part of
+  // what this shop is looking after - see lib/prospects.
+  const heldBack = await prospectHold(readTenant(user));
   const rows = visible === null || visible.length === 0
     ? []
     : (await db.select().from(instruments)
-        .where(eq(instruments.archived, false))
+        .where(and(eq(instruments.archived, false), notProspect(instruments.id, heldBack.systems)))
         .orderBy(asc(instruments.externalId)))
       .filter((i) => visible.includes(i.id));
 

@@ -87,6 +87,7 @@ export default async function AgreementsPage({ searchParams }: { searchParams: P
     visitsIncluded: r.visitsIncluded, partsAllowanceCents: r.partsAllowanceCents,
     laborIncludedMinutes: r.laborIncludedMinutes,
     visitsUnlimited: r.visitsUnlimited, partsUnlimited: r.partsUnlimited,
+    laborUnlimited: r.laborUnlimited,
     pmPartsIncluded: r.pmPartsIncluded, includedKits: r.includedKits,
     hourlyRateCents: r.hourlyRateCents, instrumentIds: r.instrumentIds,
     providerName: providerNameOf(r.providerOrgId, provNames),

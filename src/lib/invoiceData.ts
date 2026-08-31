@@ -11,14 +11,14 @@
 // proved they are entitled to - never through an id off a URL. See
 // invoiceForOrg, which is the only door the share viewer uses.
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import { db } from "@/db";
 import {
   agreements, appSettings, creditOverrides, disputes, dunningEvents, expenses,
   instruments, invoiceFees, invoiceLines, invoices, orgs, orgSites, partPrices,
-  parts, payments, promises, quoteLines, quotes, rateCards, shareLinks, timeEntries,
-  workOrders,
+  parts, payments, promises, quoteLines, quotes, rateCards, shareLinks, tasks,
+  timeEntries, workOrders,
 } from "@/db/schema";
 import {
   buildInvoiceLines, coverageFor, coveredValue, linesTotal, sellPrice,
@@ -34,6 +34,9 @@ import { nextAction, promiseBroken } from "@/lib/dunning";
 import {
   clientMargin, inWindow, jobMargin, type ClientMargin, type JobMargin,
 } from "@/lib/costing";
+import { pmCosts, type PmCompletion, type PmCostBoard } from "@/lib/pmCosting";
+import { isoDay } from "@/lib/partGroups";
+import { getSystemLabels } from "@/lib/systemLabel";
 import { daysToExpiry, stale } from "@/lib/quotes";
 import type { BillingPolicy } from "@/lib/billingPolicy";
 import type { MoneyInput } from "@/lib/digestMoney";
@@ -648,4 +651,93 @@ export async function costingBoard(today: string, windowDays: number, tenantOrgI
   }).sort((a, b) => b.billedCents - a.billedCents);
 
   return { jobs, clients, loadedLaborCents: loaded };
+}
+
+/**
+ * What maintenance cost, per completed job.
+ *
+ * The other half of the costing page, and the half nothing has ever loaded. A
+ * completed PM is a Done task carrying its schedule's id - never a work order,
+ * and never an invoice - so it has been invisible to costing since costing
+ * existed, while its parts quietly left the building. See lib/pmCosting for
+ * the attribution rule and for why this is parts only.
+ *
+ * EVERY Done PM record is read, not only the window's. A part goes against the
+ * completion it was fitted for, and deciding that from the window's rows alone
+ * would land a seal fitted two years ago on the oldest job still on screen,
+ * dressed up as this quarter's spend.
+ *
+ * Its own loader rather than another field on costingBoard: /money and
+ * /metrics call that one for figures that have nothing to do with PM, and
+ * three more queries on two pages that will not read them is a bill nobody
+ * asked for.
+ */
+export async function pmCostingBoard(
+  today: string, windowDays: number, tenantOrgId: number | null,
+): Promise<PmCostBoard> {
+  const done = await db.select({
+    id: tasks.id, pmScheduleId: tasks.pmScheduleId, title: tasks.title,
+    instrumentId: tasks.instrumentId, assetId: tasks.assetId, completedAt: tasks.completedAt,
+  }).from(tasks).where(and(
+    forTenant(tasks.tenantOrgId, tenantOrgId),
+    isNotNull(tasks.pmScheduleId),
+    eq(tasks.state, "Done"),
+    isNotNull(tasks.completedAt),
+  ));
+  if (!done.length) return { rows: [], quiet: 0, totalCents: 0 };
+
+  const scheduleIds = [...new Set(done.map((t) => t.pmScheduleId as number))];
+  const instIds = [...new Set(done.map((t) => t.instrumentId).filter((n): n is number => n !== null))];
+  const [instRows, orgRows, partRows] = await Promise.all([
+    instIds.length
+      ? db.select({
+          id: instruments.id, name: instruments.name, model: instruments.model,
+          ownerOrgId: instruments.ownerOrgId,
+        }).from(instruments).where(inArray(instruments.id, instIds))
+      : Promise.resolve([]),
+    db.select({ id: orgs.id, name: orgs.name }).from(orgs),
+    /* Scoped by the schedule ids, which came off tenant-scoped tasks - the
+       same way costingBoard reaches parts through its own work order ids. */
+    db.select({
+      pmScheduleId: parts.pmScheduleId, installedAt: parts.installedAt,
+      costCents: parts.costCents, workOrderId: parts.workOrderId,
+    }).from(parts).where(and(
+      inArray(parts.pmScheduleId, scheduleIds),
+      isNotNull(parts.costCents),
+      sql`${parts.installedAt} <> ''`,
+    )),
+  ]);
+
+  const woIds = [...new Set(partRows.map((p) => p.workOrderId).filter((n): n is number => n !== null))];
+  const [labels, woRows] = await Promise.all([
+    getSystemLabels(instRows),
+    woIds.length
+      ? db.select({ id: workOrders.id, number: workOrders.number }).from(workOrders)
+          .where(inArray(workOrders.id, woIds))
+      : Promise.resolve([]),
+  ]);
+  const orgName = (id: number | null) => orgRows.find((o) => o.id === id)?.name ?? "";
+
+  const completions: PmCompletion[] = done.map((t) => {
+    const inst = instRows.find((i) => i.id === t.instrumentId);
+    return {
+      taskId: t.id, scheduleId: t.pmScheduleId as number, title: t.title,
+      orgName: orgName(inst?.ownerOrgId ?? null),
+      systemName: t.instrumentId === null ? "" : labels.get(t.instrumentId) ?? "",
+      // The record lives where the record lives: on the system's job band, or
+      // on the module for a PM that belongs to a unit and no system.
+      href: t.instrumentId !== null ? `/instruments/${t.instrumentId}#task-${t.id}`
+        : t.assetId !== null ? `/assets/${t.assetId}` : "",
+      completedOn: (t.completedAt as Date).toISOString().slice(0, 10),
+    };
+  });
+
+  return pmCosts(completions, partRows.map((p) => ({
+    scheduleId: p.pmScheduleId as number,
+    // Anything that is not a calendar day cannot be placed against a cycle, and
+    // isoDay is where the shop's one date rule already lives - see partGroups.
+    installedOn: isoDay(p.installedAt),
+    costCents: p.costCents ?? 0,
+    onWorkOrder: p.workOrderId === null ? "" : woRows.find((w) => w.id === p.workOrderId)?.number ?? "",
+  })), today, windowDays);
 }
