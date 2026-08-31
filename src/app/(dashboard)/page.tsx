@@ -613,6 +613,7 @@ export default async function Home({ searchParams }: {
                 startsOn: a.startsOn, endsOn: a.endsOn, renewNoticeDays: a.renewNoticeDays,
                 visitsIncluded: a.visitsIncluded, visitsUnlimited: a.visitsUnlimited,
                 partsAllowanceCents: a.partsAllowanceCents, partsUnlimited: a.partsUnlimited,
+                laborUnlimited: a.laborUnlimited,
                 laborIncludedMinutes: a.laborIncludedMinutes, pmPartsIncluded: a.pmPartsIncluded,
                 providerName: a.providerOrgId === null
                   ? null

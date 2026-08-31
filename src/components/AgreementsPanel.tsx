@@ -21,7 +21,7 @@ export type AgreementRow = {
   kind: string; number: string; title: string; status: string;
   startsOn: string; endsOn: string; renewNoticeDays: number;
   visitsIncluded: number; partsAllowanceCents: number; laborIncludedMinutes: number;
-  visitsUnlimited: boolean; partsUnlimited: boolean; pmPartsIncluded: boolean;
+  visitsUnlimited: boolean; partsUnlimited: boolean; laborUnlimited: boolean; pmPartsIncluded: boolean;
   /** JSON [{partNumber, name, qty}] - what the paper includes in kind. */
   includedKits: string;
   hourlyRateCents: number | null;
@@ -41,7 +41,7 @@ const emptyDraft = {
   providerName: "",
   startsOn: "", endsOn: "", renewNoticeDays: "60",
   visitsIncluded: "0", partsAllowance: "", laborIncludedHours: "",
-  visitsUnlimited: false, partsUnlimited: false, pmPartsIncluded: false, hourlyRate: "",
+  visitsUnlimited: false, partsUnlimited: false, laborUnlimited: false, pmPartsIncluded: false, hourlyRate: "",
   includedKits: [] as IncludedKit[],
   instrumentIds: [] as number[],
   value: "", note: "",
@@ -79,6 +79,7 @@ function firstProblem(d: Draft): string | null {
   if (d.startsOn && d.endsOn && d.endsOn < d.startsOn) return "the end date is before the start";
   for (const f of NUMERIC_FIELDS) if (badNumber(d[f.key])) return `${f.label} must be a number`;
   if (d.partsAllowance.trim() !== "" && d.partsUnlimited) return "parts are marked unlimited and capped at once";
+  if (d.laborIncludedHours.trim() !== "" && d.laborUnlimited) return "labor is marked unlimited and capped at once";
   return null;
 }
 
@@ -91,7 +92,8 @@ function stepProblem(step: StepKey, d: Draft): boolean {
   }
   if (step === "included") {
     return NUMERIC_FIELDS.some((f) => f.step === "included" && badNumber(d[f.key]))
-      || (d.partsAllowance.trim() !== "" && d.partsUnlimited);
+      || (d.partsAllowance.trim() !== "" && d.partsUnlimited)
+      || (d.laborIncludedHours.trim() !== "" && d.laborUnlimited);
   }
   return false; // paper, coverage and note have nothing to get wrong
 }
@@ -319,6 +321,7 @@ export default function AgreementsPanel({
       partsAllowance: r.partsAllowanceCents ? (r.partsAllowanceCents / 100).toFixed(2) : "",
       laborIncludedHours: r.laborIncludedMinutes ? (r.laborIncludedMinutes / 60).toFixed(1) : "",
       visitsUnlimited: r.visitsUnlimited, partsUnlimited: r.partsUnlimited,
+      laborUnlimited: r.laborUnlimited,
       pmPartsIncluded: r.pmPartsIncluded,
       includedKits: parseKits(r.includedKits),
       hourlyRate: r.hourlyRateCents != null ? (r.hourlyRateCents / 100).toFixed(2) : "",
@@ -541,7 +544,7 @@ export default function AgreementsPanel({
           terms: draft.number.trim() !== "" && draft.title.trim() !== "",
           paper: hasPaper,
           included: draft.includedKits.length > 0
-            || draft.partsUnlimited || draft.visitsUnlimited || draft.pmPartsIncluded
+            || draft.partsUnlimited || draft.visitsUnlimited || draft.laborUnlimited || draft.pmPartsIncluded
             || [draft.partsAllowance, draft.laborIncludedHours, draft.hourlyRate, draft.value]
               .some((v) => v.trim() !== "")
             || !["", "0"].includes(draft.visitsIncluded.trim()),
@@ -783,9 +786,23 @@ export default function AgreementsPanel({
 
               <div className="pf2" style={{ marginBottom: 8 }}>
                 <div>
-                  <label>Labor hours included</label>
-                  <input value={draft.laborIncludedHours} placeholder="40"
+                  {/* Tied to its input, which the labels around it are not:
+                      a bare <label> next to a bare <input> reads to a screen
+                      reader as two unrelated things. Done here because this is
+                      the field being changed; the rest of the form is the same
+                      shape and wants the same treatment. */}
+                  <label htmlFor="ag-labor-hours">Labor hours included</label>
+                  <input id="ag-labor-hours" value={draft.laborIncludedHours} placeholder="40" disabled={draft.laborUnlimited}
                     onChange={(e) => up("included", { laborIncludedHours: e.target.value })} />
+                  {/* The flag visits and parts already had. Without it an
+                      all-in contract had no way to say so, and the client's own
+                      coverage card read "Labor - not part of this agreement" on
+                      a contract that covers all of it. */}
+                  <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
+                    <input type="checkbox" checked={draft.laborUnlimited} style={{ width: 15, height: 15 }}
+                      onChange={(e) => up("included", { laborUnlimited: e.target.checked })} />
+                    Unlimited labor - all time is covered, hours aren&apos;t counted down
+                  </label>
                   <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
                     Hours of work the contract includes; logged time draws it down.
                   </div>

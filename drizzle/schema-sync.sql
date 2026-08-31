@@ -2148,6 +2148,9 @@ ALTER TABLE "part_catalog" ADD COLUMN IF NOT EXISTS "models" text[] NOT NULL DEF
 ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "visits_unlimited" boolean NOT NULL DEFAULT false;
 ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "parts_unlimited" boolean NOT NULL DEFAULT false;
 ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "hourly_rate_cents" integer;
+-- Labor gets the unlimited flag its two siblings already had: an all-in
+-- contract could not say so, and read to the client as labor NOT included.
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "labor_unlimited" boolean NOT NULL DEFAULT false;
 ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "instrument_ids" integer[] NOT NULL DEFAULT '{}';
 
 -- ── Catalog reference library ───────────────────────────────────────────────

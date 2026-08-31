@@ -14786,7 +14786,8 @@ export type AgreementInput = {
   providerName?: string;
   startsOn: string; endsOn: string; renewNoticeDays: number | string;
   visitsIncluded: number | string; partsAllowance: string; laborIncludedHours: string;
-  visitsUnlimited?: boolean; partsUnlimited?: boolean; pmPartsIncluded?: boolean;
+  visitsUnlimited?: boolean; partsUnlimited?: boolean; laborUnlimited?: boolean;
+  pmPartsIncluded?: boolean;
   includedKits?: IncludedKit[];
   hourlyRate?: string;
   instrumentIds?: number[];
@@ -14797,7 +14798,8 @@ function cleanAgreement(d: AgreementInput): { error: string } | {
   kind: string; number: string; title: string; status: string;
   startsOn: string; endsOn: string; renewNoticeDays: number;
   visitsIncluded: number; partsAllowanceCents: number; laborIncludedMinutes: number;
-  visitsUnlimited: boolean; partsUnlimited: boolean; pmPartsIncluded: boolean;
+  visitsUnlimited: boolean; partsUnlimited: boolean; laborUnlimited: boolean;
+  pmPartsIncluded: boolean;
   includedKits: string;
   hourlyRateCents: number | null; instrumentIds: number[];
   valueCents: number | null; note: string;
@@ -14826,9 +14828,13 @@ function cleanAgreement(d: AgreementInput): { error: string } | {
     // parseMoney returns null for "not money-shaped"; an allowance nobody typed
     // is 0, which lib/agreements reads as "not part of this agreement".
     partsAllowanceCents: d.partsUnlimited ? 0 : parseMoney(d.partsAllowance) ?? 0,
-    laborIncludedMinutes: Math.round((parseFloat(d.laborIncludedHours.trim()) || 0) * 60),
+    // Same rule as the two above: unlimited beats a cap, so the number is
+    // zeroed and nothing downstream reads it as one.
+    laborIncludedMinutes: d.laborUnlimited
+      ? 0 : Math.round((parseFloat(d.laborIncludedHours.trim()) || 0) * 60),
     visitsUnlimited: d.visitsUnlimited ?? false,
     partsUnlimited: d.partsUnlimited ?? false,
+    laborUnlimited: d.laborUnlimited ?? false,
     pmPartsIncluded: d.pmPartsIncluded ?? false,
     includedKits: serializeKits(d.includedKits ?? []),
     hourlyRateCents: parseMoney(d.hourlyRate ?? ""),

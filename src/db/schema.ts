@@ -2496,6 +2496,11 @@ export const agreements = pgTable("agreements", {
   // as information rather than as drawdown against a number.
   visitsUnlimited: boolean("visits_unlimited").notNull().default(false),
   partsUnlimited: boolean("parts_unlimited").notNull().default(false),
+  /* Labor had no unlimited flag while visits and parts did, so an all-in
+     contract could not say so: with no hours filled in, the client's own
+     coverage card read "Labor - not part of this agreement" on a contract that
+     covers all of it. Same third state as the two above. */
+  laborUnlimited: boolean("labor_unlimited").notNull().default(false),
   // The PM's own parts are part of the PM, so they must not also be drawn from
   // the parts allowance - "1 PM included, parts included" is one thing sold,
   // not two. Off by default: turning it on is a statement about this contract,

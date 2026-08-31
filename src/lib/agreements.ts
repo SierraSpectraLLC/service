@@ -43,6 +43,7 @@ export type AgreementLike = {
   /** Unlimited beats any cap: a full-service contract has no number to burn. */
   visitsUnlimited?: boolean;
   partsUnlimited?: boolean;
+  laborUnlimited?: boolean;
 };
 
 /** draft | cancelled | expired | expiring | active - what it is TODAY. */
@@ -223,7 +224,7 @@ export function drawdown(a: AgreementLike, used: Usage) {
   return {
     parts: allowance(a.partsAllowanceCents, used.partsCents, a.partsUnlimited),
     visits: allowance(a.visitsIncluded, used.visits, a.visitsUnlimited),
-    labor: allowance(a.laborIncludedMinutes, used.laborMinutes),
+    labor: allowance(a.laborIncludedMinutes, used.laborMinutes, a.laborUnlimited),
   };
 }
 
