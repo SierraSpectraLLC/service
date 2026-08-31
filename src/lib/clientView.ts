@@ -273,14 +273,22 @@ export const clientMaySee = (key: string): boolean =>
 
 /**
  * The contexts, named for what a client came to find rather than for how the
- * shop files it. "Configuration" is a word about a database; "What it is" is
- * the question somebody actually has.
+ * shop files it. Anything absent falls through to the staff label, which is
+ * the honest default: a word only earns a place here by being BETTER for the
+ * client, not by being different.
+ *
+ * `config` used to be "What it is", on the reasoning that "Configuration" is a
+ * word about a database. The shop asked for it back, and they are right on
+ * both counts. It is the same tab on the same kind of page, and the module
+ * record has always called it Configuration for everybody - so the rename
+ * bought a softer word at the price of two names for one thing, which is the
+ * more expensive of the two. And "what it is" is a question a client asks
+ * about a machine, not a heading they scan for when they already know.
  */
 export const CLIENT_GROUP_LABEL: Record<string, string> = {
   now: "Now",
   work: "Work",
   maintenance: "Maintenance",
-  config: "What it is",
   files: "Documents",
   history: "History",
 };

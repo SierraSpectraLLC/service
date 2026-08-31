@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import {
-  CARD_EVERYTHING_MAX, CLIENT_STATE, CLIENT_STATES, PM_BADLY_OVERDUE_DAYS, STALE_ANSWER_DAYS,
+  CARD_EVERYTHING_MAX, CLIENT_GROUP_LABEL, CLIENT_STATE, CLIENT_STATES,
+  PM_BADLY_OVERDUE_DAYS, STALE_ANSWER_DAYS,
   STALLED_DAYS, bySeverity, clientState, density, isStalled, medianDays, moveLabel, moveTone,
   needsAttention, queueNeedsThem, rankTodos, sitesOf, standingPill, type ClientTodo,
 } from "@/lib/clientView";
@@ -582,5 +583,33 @@ describe("no fabricated metric reaches a client", () => {
     const page = readFileSync("src/app/(dashboard)/page.tsx", "utf8");
     expect(page).toMatch(/closedThisYear/);
     expect(page).not.toMatch(/uptime/i);
+  });
+
+  it("calls the configuration tab what everybody else calls it", () => {
+    /*
+     * It was "What it is" for clients, on the reasoning that "Configuration"
+     * is a word about a database. The shop asked for it back: it is the same
+     * tab on the same kind of page, and the module record at /assets/[id] has
+     * always said Configuration for everybody - so the rename bought a softer
+     * word at the price of two names for one thing.
+     *
+     * Pinned as an ABSENCE, because that is the mechanism: anything missing
+     * from this map falls through to the staff label, and re-adding an entry
+     * here is exactly how the old wording would come back.
+     */
+    expect(CLIENT_GROUP_LABEL.config).toBeUndefined();
+    expect(Object.values(CLIENT_GROUP_LABEL)).not.toContain("What it is");
+
+    const assets = readFileSync("src/app/assets/[id]/page.tsx", "utf8");
+    const systems = readFileSync("src/app/instruments/[id]/page.tsx", "utf8");
+    for (const src of [assets, systems]) {
+      expect(src).toMatch(/key: "config", label: "Configuration"/);
+    }
+  });
+
+  it("still gives a client its own word where one is genuinely better", () => {
+    // The map is not being emptied - "Documents" beats "Files" for somebody
+    // who came looking for a report, and that reasoning still holds.
+    expect(CLIENT_GROUP_LABEL.files).toBe("Documents");
   });
 });
