@@ -56,6 +56,12 @@ const STAMPED = [
   // The lease a shipped system enforces on itself offline. Device stamp,
   // like its siblings: the lease belongs to the machine's workspace.
   "deviceLeases",
+  // A dated note somebody wrote onto the calendar. Written by a CLIENT as
+  // often as by the shop, so the stamp is taken from the note's organization
+  // rather than from the writer: a client has no workspace of their own, and
+  // myTenantOrgId would be null for every note they ever left - unreadable to
+  // the shop they left it for, which is the whole point of writing one.
+  "calendarNotes",
 ];
 
 const walk = (dir: string): string[] =>

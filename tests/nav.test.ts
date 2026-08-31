@@ -156,6 +156,27 @@ describe("the rules every tree obeys", () => {
     });
   }
 
+  it("keeps the calendar and Documents on a client's tab bar, whatever else gives way", () => {
+    /*
+     * The bar holds five and a lab now wants seven, so two give way - in a
+     * stated order rather than by whatever slice(0, 5) happened to cut off,
+     * which used to shed Documents the moment a seventh door appeared.
+     *
+     * What must survive: Documents, the second most used thing a client comes
+     * here for, and the calendar, which answers the first - when is somebody
+     * coming. What gives way is a page you open deliberately (/owner) and a
+     * place you go to shop (/store, /listings); both stay one tap away in the
+     * header and the drawer.
+     */
+    for (const ctx of [CLIENT_LAB, CLIENT_RESELLER]) {
+      const hrefs = buildNav(ctx).tabs.map((t) => t.href);
+      expect(hrefs.length).toBeLessThanOrEqual(5);
+      expect(hrefs).toContain("/calendar");
+      expect(hrefs).toContain("/documents");
+      expect(hrefs).not.toContain("/owner");
+    }
+  });
+
   it("gives every signed-in reader an account section", () => {
     for (const [who, ctx] of PERSONAS) {
       const account = buildNav(ctx).sections.find((s) => s.key === "account");
@@ -233,6 +254,44 @@ describe("who gets which room", () => {
   it("drops Inventory for somebody with no stockroom", () => {
     expect(buildNav({ ...OWNER, hasStock: false }).primary.map((l) => l.href))
       .not.toContain("/stock");
+  });
+
+  it("gives every staff member the client roster, under Operations", () => {
+    /*
+     * "Who is this client and what else of theirs do we look after" is a daily
+     * question in a service company, and the only room that answered it was
+     * owner-only Settings - so an engineer could spend a week on a client's
+     * system without being able to look the company up.
+     *
+     * The engineer is the assertion that matters. The owner having it was
+     * never in doubt.
+     */
+    for (const ctx of [OWNER, ENGINEER, HR]) {
+      const ops = buildNav(ctx).sections.find((s) => s.key === "ops")!;
+      expect(ops.items.map((i) => i.href)).toContain("/clients");
+    }
+  });
+
+  it("keeps it out of a client's own nav", () => {
+    // Staff, not "signed in": the roster is who the shop works for, which is
+    // not a list any one of them is shown.
+    for (const ctx of [CLIENT_LAB, CLIENT_RESELLER]) {
+      const hrefs = buildNav(ctx).sections.flatMap((s) => s.items.map((i) => i.href));
+      expect(hrefs).not.toContain("/clients");
+    }
+  });
+
+  it("leaves the Settings room out of the nav rather than naming it twice", () => {
+    /*
+     * The roster and Settings > Clients & orgs are two questions - who they
+     * are, and who may sign in - so they are two rooms. What must not happen
+     * is BOTH in one menu: two words a reader has to tell apart, for what
+     * reads like one subject. The Settings sidebar is where the other one
+     * lives, and lib/settingsNav still carries it.
+     */
+    const hrefs = buildNav(OWNER).sections.flatMap((s) => s.items.map((i) => i.href));
+    expect(hrefs).not.toContain("/settings/organizations");
+    expect(readFileSync("src/lib/settingsNav.ts", "utf8")).toContain('"/settings/organizations"');
   });
 
   it("names an organization settings room only for whoever administers one", () => {

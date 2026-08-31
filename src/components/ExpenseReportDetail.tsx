@@ -19,7 +19,7 @@ import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { Panel, Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
-import ReceiptScanner from "@/components/ReceiptScanner";
+import DocScanner from "@/components/DocScanner";
 
 /** A PDF receipt has no thumbnail to show; an image does. Name first - a blob
  *  url is a hash, and the name is what the person actually uploaded. */
@@ -125,7 +125,7 @@ export default function ExpenseReportDetail({
   /* A photo waiting to be scanned. Set the moment the camera returns one and
      cleared when the scanner hands back a result - which may be the original,
      if that is what they chose. */
-  const [scanning, setScanning] = useState<File | null>(null);
+  const [scanning, setScanning] = useState<File | "live" | null>(null);
   const [addErr, setAddErr] = useState("");
   const [busy, setBusy] = useState("");
   const [pulling, setPulling] = useState(false);
@@ -616,20 +616,15 @@ export default function ExpenseReportDetail({
           <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
             {editable && (
               <>
-                {/* capture="environment" opens the CAMERA rather than a picker,
-                    and what comes back goes through the scanner: found, cropped,
-                    flattened and whitened, so the thing stored is a document and
-                    not a photograph of paper on a car seat. */}
-                <label className="btn sm primary" style={{ marginBottom: 0 }}>
+                {/* Opens the LIVE viewfinder: edges found on the video, a
+                    lock when it is steady, a shutter - and the scanner falls
+                    back to the phone's own camera app by itself when the
+                    browser will not stream. Either way what is stored is a
+                    document, not a photograph of paper on a car seat. */}
+                <button type="button" className="btn sm primary" style={{ marginBottom: 0 }}
+                  onClick={() => setScanning("live")}>
                   {attached.url || receipt ? "Replace it" : "Scan receipt"}
-                  <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] ?? null;
-                      // Reset, or picking the same photo twice fires nothing.
-                      e.target.value = "";
-                      if (f) setScanning(f);
-                    }} />
-                </label>
+                </button>
                 {/* Attaching goes round the scanner on purpose: a PDF has no
                     corners to find, and an emailed invoice is already flat. An
                     image picked from the roll still gets offered the scan. */}
@@ -804,7 +799,10 @@ export default function ExpenseReportDetail({
           decision, with its own way out, and burying a corner-dragging canvas
           inside a form makes both worse. */}
       {scanning && (
-        <ReceiptScanner file={scanning}
+        /* Multi-page on purpose, even for "a receipt": a hotel folio is three
+           pages, and the pages leave the scanner as one PDF - which the report
+           PDF already knows how to copy in whole (lib/reportPdf). */
+        <DocScanner file={scanning === "live" ? undefined : scanning} title="Scan the receipt"
           onCancel={() => setScanning(null)}
           onDone={(f) => { setReceipt(f); setScanning(null); }} />
       )}

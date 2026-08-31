@@ -10,6 +10,7 @@ import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
 import PdfCombiner from "@/components/PdfCombiner";
+import DocScanner from "@/components/DocScanner";
 import StorageMeter from "@/components/StorageMeter";
 import type { Quota } from "@/lib/storage";
 import { fmtWhen } from "@/lib/when";
@@ -189,6 +190,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
   const photos = attachments.length - docs.length;
 
   const fileRef = useRef<HTMLInputElement>(null);
+  const [scanning, setScanning] = useState(false);
   const [staged, setStaged] = useState<Staged[]>([]);
   const [uploading, setUploading] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
@@ -208,7 +210,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
     });
   };
 
-  const addFiles = (list: FileList | null) => {
+  const addFiles = (list: FileList | File[] | null) => {
     if (!list) return;
     const next = Array.from(list).map((file) => ({
       key: `${file.name}-${file.size}-${file.lastModified}`,
@@ -328,6 +330,15 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                 From library
               </button>
             )}
+            {/* The phone gesture: point the camera at the paper and get a
+                document back - edges tracked live on the viewfinder, cropped,
+                flattened, whitened, several pages bound as one PDF
+                (DocScanner). Beside "+ Add files" because a work order's paper
+                trail - a signed ticket, a packing slip, a vendor cert - mostly
+                still arrives as paper. */}
+            <button className="btn sm" onClick={() => setScanning(true)} disabled={uploading}>
+              Scan
+            </button>
             <button className="btn sm primary" onClick={() => fileRef.current?.click()} disabled={uploading}>
               + Add files
             </button>
@@ -564,6 +575,13 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
           defaultCover={combineTitle}
           coverLines={combineLines}
         />
+      )}
+      {scanning && (
+        /* The scan lands STAGED, not uploaded: same as a picked file, so the
+           kind can be set and the description written before anything moves. */
+        <DocScanner
+          onCancel={() => setScanning(false)}
+          onDone={(f) => { addFiles([f]); setScanning(false); }} />
       )}
     </div>
   );

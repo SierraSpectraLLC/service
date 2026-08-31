@@ -24,6 +24,7 @@ exports[`buildNav, per persona > builds one tree for a HR with payroll 1`] = `
         "Calendar → /calendar",
         "Maintenance → /maintenance",
         "Restoration queue → /restorations",
+        "Clients → /clients",
         "Service companies → /network",
         "Remote support → /remote",
         "Metrics → /metrics",
@@ -66,6 +67,7 @@ exports[`buildNav, per persona > builds one tree for a client lab 1`] = `
   "primary": [
     "Your lab → /",
     "Requests → /work",
+    "Calendar → /calendar",
     "Approvals → /orders",
     "Your account → /owner",
     "Parts → /store",
@@ -92,8 +94,8 @@ exports[`buildNav, per persona > builds one tree for a client lab 1`] = `
   "tabs": [
     "Your lab → /",
     "Requests → /work",
+    "Calendar → /calendar",
     "Approvals → /orders",
-    "Parts → /store",
     "Documents → /documents",
   ],
 }
@@ -104,6 +106,7 @@ exports[`buildNav, per persona > builds one tree for a client reseller 1`] = `
   "primary": [
     "Your pipeline → /",
     "Requests → /work",
+    "Calendar → /calendar",
     "Approvals → /orders",
     "Listings → /listings",
     "Documents → /documents",
@@ -128,8 +131,8 @@ exports[`buildNav, per persona > builds one tree for a client reseller 1`] = `
   "tabs": [
     "Your pipeline → /",
     "Requests → /work",
+    "Calendar → /calendar",
     "Approvals → /orders",
-    "Listings → /listings",
     "Documents → /documents",
   ],
 }
@@ -151,6 +154,7 @@ exports[`buildNav, per persona > builds one tree for a staff engineer 1`] = `
         "Calendar → /calendar",
         "Maintenance → /maintenance",
         "Restoration queue → /restorations",
+        "Clients → /clients",
         "Service companies → /network",
         "Purchasing → /money/purchasing",
         "Reimbursements → /money/reimbursements",
@@ -220,6 +224,7 @@ exports[`buildNav, per persona > builds one tree for a staff owner 1`] = `
         "Calendar → /calendar",
         "Maintenance → /maintenance",
         "Restoration queue → /restorations",
+        "Clients → /clients",
         "Service companies → /network",
         "People → /people",
         "Remote support → /remote",

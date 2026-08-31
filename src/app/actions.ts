@@ -16,7 +16,7 @@ import {
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
   awards, shareLinkSystems, providerProfiles, providerLinks, clientShares, referralFees,
-  leads, leadOffers,
+  leads, leadOffers, calendarNotes,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, stipends, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
@@ -212,7 +212,7 @@ import {
 } from "@/lib/lead";
 import { leadWithOffers, wasOffered } from "@/lib/leadData";
 import { normalizePhone } from "@/lib/sms";
-import { isPlatformStaff, isStaffRole, mayAdminOrg, mayBillOrg, mayCreateOrgs } from "@/lib/tenants";
+import { isPlatformStaff, isStaffRole, mayAdminOrg, mayBillOrg, mayCreateOrgs, tenantOf } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
 import { signInIdentity } from "@/auth";
 import { maySeeTrail, safeQuery, trailAdmins } from "@/lib/trail";
@@ -226,7 +226,8 @@ import { PLACES_DRIVE, type CloudItem } from "@/lib/cloudItems";
 import { parseFrame, serializeFrame } from "@/lib/photoFrame";
 import { isPhotoFile, photoRemovalNote, sharedCover } from "@/lib/photos";
 import { coverOf, photoRecord, photoTwin, type PhotoRecord } from "@/lib/photoPair";
-import { pmRequestDue, pmRequestTitle, pmWindow, scheduleLine } from "@/lib/pmRequest";
+import { askLabel, pmRequestDue, pmRequestTitle, pmWindow, scheduleLine, visitKind } from "@/lib/pmRequest";
+import { checkNote } from "@/lib/calendarNotes";
 import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/houseRole";
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, scopeMatches, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
@@ -240,7 +241,11 @@ import { cleanProvenance, isPublishable, PROVENANCE_LABEL } from "@/lib/provenan
 import { partsFlag, visitFlag } from "@/lib/entitlementFlags";
 import { parseModelSpecs, serializeModelSpecs } from "@/lib/modelSpecs";
 import { MAX_SUMMARY, modelSlug, publishBlockers, uniqueSlug } from "@/lib/publicCatalog";
-import { tenantCatalogIds } from "@/lib/makersData";
+import { makerNames, tenantCatalogIds } from "@/lib/makersData";
+import {
+  needsReading, planCatalogImport,
+  type CatalogImportRow, type Verdict,
+} from "@/lib/catalogImport";
 import {
   assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess, canEditSystem, forTenant, isHouse, readTenant, tenantOfOrg, tenantOfSystem, viewTenant, visibleOrgs, visibleSystemIds,
 } from "@/lib/tenancy";
@@ -2356,6 +2361,152 @@ export async function undoRunPmNow(scheduleId: number): Promise<{ error?: string
   await audit({
     actor: u.email, instrumentId: s.instrumentId, assetId: s.assetId, entityType: "pm", entityId: s.id,
     action: `undid an early start of '${s.title}' - the schedule keeps its ${s.nextDue} due date`,
+  });
+  revWork(s);
+  return {};
+}
+
+/**
+ * One tap: this maintenance was done, now.
+ *
+ * The gesture a PM RUN is built from. The old path took three rooms per job -
+ * "Do it now" here, find the task in Tasks, mark it Done there - which on a
+ * stacked system's annual visit is twenty-nine round trips for work the
+ * engineer just did with a wrench. This is the whole loop in one write: the
+ * record task (Done, dated, attributed - exactly what completing the job live
+ * leaves), the schedule advanced from today, the appointment cleared.
+ *
+ * Two paths, one rule. A schedule with an OPEN generated task completes that
+ * task through setTaskState, so the result gate, the checklist accounting and
+ * the advance all run once, in the one place they are defined. With no open
+ * task the record is filed directly - after the same result gate: a leak-rate
+ * test closed by tap with no number is a checkbox claiming to be a
+ * measurement, and the refusal names the way that work is meant to go.
+ */
+export async function completePmNow(
+  scheduleId: number, note?: string,
+): Promise<{ error?: string; taskId?: number; viaOpenTask?: boolean }> {
+  const u = await requireEditor();
+  const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, scheduleId));
+  if (!s) return { error: "Not found" };
+  await assertWorkEditable(u, s);
+  if (s.paused) return { error: "This schedule is paused - resume it first" };
+
+  const [open] = await db.select({ id: tasks.id }).from(tasks)
+    .where(and(eq(tasks.pmScheduleId, scheduleId), ne(tasks.state, "Done")))
+    .limit(1);
+  if (open) {
+    const res = await setTaskState(open.id, "Done");
+    if (res?.error) return res;
+    return { taskId: open.id, viaOpenTask: true };
+  }
+
+  const spec = await testSpecFor({ procedureId: s.procedureId });
+  if (spec) {
+    const blocked = completionBlocked({ kind: spec.kind, resultType: spec.resultType }, null);
+    if (blocked) {
+      return { error: `'${s.title}' records a result. Start it as a task and record the reading there.` };
+    }
+  }
+
+  const today = shopToday();
+  const onSystem = s.instrumentId ?? (s.assetId === null
+    ? null
+    : (await db.select({ instrumentId: assets.instrumentId }).from(assets)
+        .where(eq(assets.id, s.assetId)))[0]?.instrumentId ?? null);
+
+  const doneBy = u.name || u.email;
+  const [t] = await db.insert(tasks).values({
+    tenantOrgId: s.tenantOrgId,
+    instrumentId: onSystem, assetId: s.assetId,
+    title: s.title,
+    body: [(note ?? "").trim(), `Completed on the spot by ${doneBy}.`].filter(Boolean).join("\n"),
+    state: "Done", origin: "pm", pmScheduleId: s.id, procedureId: s.procedureId,
+    assignee: doneBy,
+    /* The day the cycle FELL due, same as a generated task would carry - the
+       record says what was owed, completedAt says when it was met. It is also
+       what lets an undo put the calendar back where it was. */
+    dueDate: s.nextDue,
+    completedAt: new Date(),
+  }).returning();
+  /* No checklist stamped, deliberately. Boxes exist for working a task; a
+     record filed at the moment of completion asserting fourteen unticked
+     steps would read as a job closed unfinished. Their absence is also what
+     tells undoPmComplete this record came from a tap and not from worked
+     task - see the guard there. */
+
+  const nextDue = advancePm(today, s.everyDays);
+  await db.update(pmSchedules)
+    .set({ lastDone: today, nextDue, bookedOn: "", bookedNote: "" })
+    .where(eq(pmSchedules.id, s.id));
+  await audit({
+    actor: u.email, instrumentId: onSystem, assetId: s.assetId, entityType: "pm", entityId: s.id,
+    action: `completed '${s.title}' on the spot - next due ${nextDue} (${cadenceLabel(s.everyDays)})`
+      + (s.nextDue !== today ? ` (was due ${s.nextDue})` : ""),
+    field: "nextDue", oldValue: s.nextDue, newValue: nextDue,
+  });
+  revWork(s);
+  return { taskId: t.id };
+}
+
+/**
+ * Take back a tap.
+ *
+ * Run mode makes a tap mean "done", and thumbs slip. Undo removes the record
+ * completePmNow just filed and puts the calendar back - but only while the
+ * record is untouched and today's: a task with results, notes, or ticked
+ * boxes is work somebody did, not a slip, and yesterday's completion is
+ * history. The checklist guard doubles as the path check - a tap-filed record
+ * has no checklist rows, a generated task usually does, and a worked task
+ * must never be deleted by an undo.
+ *
+ * The prior calendar comes from the CALLER - the row it just rendered - and
+ * that is not a privilege escalation: updatePmSchedule already lets the same
+ * editor set nextDue and lastDone to anything. The one field recovered
+ * server-side is nextDue's floor: the deleted record's own dueDate says what
+ * was owed, and a prior that disagrees with it is refused.
+ */
+export async function undoPmComplete(
+  scheduleId: number, taskId: number,
+  prior: { nextDue: string; lastDone: string; bookedOn?: string; bookedNote?: string },
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, scheduleId));
+  if (!s) return { error: "Not found" };
+  await assertWorkEditable(u, s);
+  const today = shopToday();
+  if (s.lastDone !== today) return { error: "Nothing completed today to undo" };
+  if (!isIsoDay(prior.nextDue) || (prior.lastDone !== "" && !isIsoDay(prior.lastDone))) {
+    return { error: "Not found" };
+  }
+
+  const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
+  if (!t || t.pmScheduleId !== scheduleId || t.state !== "Done") return { error: "Not found" };
+  /* Recent by the clock rather than "today" by the calendar: completedAt is a
+     UTC instant and `today` is a shop day, and comparing the two calls an
+     evening tap yesterday's. lastDone === today already pins the day; this
+     only keeps undo off a stale record. */
+  if (!t.completedAt || Date.now() - t.completedAt.getTime() > 24 * 3600 * 1000) {
+    return { error: "That completion is not today's - fix the dates with edit instead" };
+  }
+  if (t.dueDate !== prior.nextDue) return { error: "Not found" };
+  const [r] = await db.select().from(taskResults).where(eq(taskResults.taskId, taskId));
+  if (r) return { error: "A result was recorded against it - that is work now, not a slip" };
+  const items = await db.select({ id: checklistItems.id }).from(checklistItems)
+    .where(eq(checklistItems.taskId, taskId));
+  if (items.length) {
+    return { error: "That one went through a worked task - reopen it in Tasks instead" };
+  }
+
+  await db.delete(tasks).where(eq(tasks.id, taskId));
+  await db.update(pmSchedules).set({
+    lastDone: prior.lastDone, nextDue: prior.nextDue,
+    bookedOn: (prior.bookedOn ?? "").trim(), bookedNote: (prior.bookedNote ?? "").trim(),
+  }).where(eq(pmSchedules.id, scheduleId));
+  await audit({
+    actor: u.email, instrumentId: s.instrumentId, assetId: s.assetId, entityType: "pm", entityId: scheduleId,
+    action: `undid today's completion of '${s.title}' - back to due ${prior.nextDue}`,
+    field: "nextDue", oldValue: s.nextDue, newValue: prior.nextDue,
   });
   revWork(s);
   return {};
@@ -6973,7 +7124,17 @@ export async function reportIssue(instrumentId: number, data: {
  * Asking twice doesn't file twice: the second ask lands on the discussion of the
  * open one, which is where a "any update?" belongs.
  */
-export async function requestPm(instrumentId: number, data: { window: string; note: string }):
+export async function requestPm(instrumentId: number, data: {
+  window: string; note: string;
+  /**
+   * The weekdays they will have somebody on site, 0 = Sunday. A preference
+   * rather than a booking: it moves the due date forward to the first one that
+   * suits them and rides along on the record for whoever schedules the van.
+   */
+  days?: number[];
+  /** pm | service. Maintenance says upkeep is owed; service work does not. */
+  kind?: string;
+}):
 Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; workOrderId?: number }> {
   const u = await requireUser();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
@@ -6986,6 +7147,11 @@ Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; w
   const w = pmWindow(data.window);
   const note = data.note.trim().slice(0, 2000);
   const today = shopToday();
+  const kind = visitKind(data.kind ?? "pm");
+  /* What they asked for, in one phrase, used in every sentence this writes -
+     so the task, the post, the audit line and the email cannot describe the
+     same request three different ways. */
+  const asked = askLabel(data.window, data.days);
   const orgName = u.orgId === null ? (await getBrand()).operatorName : u.orgName || "a client";
   const who = u.name || u.email;
 
@@ -7000,7 +7166,8 @@ Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; w
     .where(and(eq(tasks.instrumentId, instrumentId), eq(tasks.origin, "pm_request"), ne(tasks.state, "Done")))
     .limit(1);
   if (openReq) {
-    await post([`Maintenance requested again - ${w.label.toLowerCase()}.`, note].filter(Boolean).join("\n\n"));
+    await post([`${kind === "service" ? "Service" : "Maintenance"} requested again - ${asked}.`, note]
+      .filter(Boolean).join("\n\n"));
     await audit({
       actor: u.email, instrumentId, entityType: "task", entityId: openReq.id,
       action: `${orgName} followed up on the maintenance request for ${inst.externalId} (open, due ${openReq.dueDate})`,
@@ -7019,14 +7186,17 @@ Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; w
       : eq(pmSchedules.instrumentId, instrumentId));
   const calendar = scheduleLine(scheds, today);
 
-  // Upkeep is owed, and the dashboard should say so - without disturbing where
-  // the system is in its build.
-  if (!inst.stages.includes("Maintenance due")) {
+  /* Upkeep is owed, and the dashboard should say so - without disturbing where
+     the system is in its build. Only for MAINTENANCE: service work is a job
+     somebody wants doing, and marking the machine as owing a PM because a
+     client asked for a bracket to be moved would be a false reading of the
+     board that only an engineer could clear. */
+  if (kind === "pm" && !inst.stages.includes("Maintenance due")) {
     await db.update(instruments).set({ stages: [...inst.stages, "Maintenance due"] }).where(eq(instruments.id, instrumentId));
     await db.insert(stageEvents).values({ instrumentId, stage: "Maintenance due", kind: "added" });
   }
 
-  const dueDate = pmRequestDue(today, w.key);
+  const dueDate = pmRequestDue(today, w.key, data.days);
   // Planned, not an emergency - the fourth thing a work order can be. It gets a
   // number and a close-out like any other job, because "did the PM we asked for
   // in March ever happen" is exactly the question a work order exists to answer.
@@ -7035,7 +7205,7 @@ Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; w
     instrumentId, assetId: null, tenantOrgId: inst.tenantOrgId,
     orgId: u.orgId ?? inst.ownerOrgId,
     requestedBy: who, requestedByEmail: u.email,
-    title: pmRequestTitle(note), body: [note, calendar].filter(Boolean).join("\n\n"),
+    title: pmRequestTitle(note, kind), body: [note, calendar].filter(Boolean).join("\n\n"),
     severity: "Planned", origin: "pm_request", assignee: "",
     externalId: inst.externalId,
   });
@@ -7043,26 +7213,124 @@ Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; w
   const [task] = await db.insert(tasks).values({
     tenantOrgId: inst.tenantOrgId,
     instrumentId, assetId: null,
-    title: pmRequestTitle(note),
-    body: [note, `Requested by ${who} at ${orgName} - ${w.label.toLowerCase()}.`, calendar].filter(Boolean).join("\n\n"),
+    title: pmRequestTitle(note, kind),
+    body: [note, `Requested by ${who} at ${orgName} - ${asked}.`, calendar].filter(Boolean).join("\n\n"),
     dueDate, origin: "pm_request", workOrderId: wo.id,
   }).returning();
 
-  await post([`${wo.number} · Maintenance requested - ${w.label.toLowerCase()}.`, note].filter(Boolean).join("\n\n"));
-  await handOffForClientAsk(inst, `maintenance requested: ${w.label.toLowerCase()}`, u.email);
+  const what = kind === "service" ? "Service" : "Maintenance";
+  await post([`${wo.number} · ${what} requested - ${asked}.`, note].filter(Boolean).join("\n\n"));
+  await handOffForClientAsk(inst, `${what.toLowerCase()} requested: ${asked}`, u.email);
   await audit({
     actor: u.email, instrumentId, entityType: "task", entityId: task.id,
-    action: `${orgName} asked for maintenance on ${inst.externalId} as ${wo.number} - ${w.label.toLowerCase()}, due ${dueDate}`,
+    action: `${orgName} asked for ${what.toLowerCase()} on ${inst.externalId} as ${wo.number} - ${asked}, due ${dueDate}`,
   });
   await notifyPmRequested({
     to: await houseEmails(inst.tenantOrgId), externalId: inst.externalId, instrumentId, orgName,
-    windowLabel: w.label, note, calendar, requester: who, dueDate,
+    windowLabel: asked, note, calendar, requester: who, dueDate,
   });
 
   rev(instrumentId);
   revalidatePath("/maintenance");
   revalidatePath("/work");
+  revalidatePath("/calendar");
   return { taskId: task.id, number: wo.number, workOrderId: wo.id };
+}
+
+// ── Calendar notes ──────────────────────────────────────────────────────────
+
+/**
+ * Whose calendar a note belongs on, and whether this reader may write there.
+ *
+ * A client writes on their OWN company's calendar and nowhere else - which is
+ * also the only one they can read, so there is nothing to choose. Staff write
+ * on the shop's own (orgId null) or on a client's, because "their site is shut
+ * that week" is as often something the shop was told on the phone as something
+ * the client typed.
+ *
+ * The org is resolved rather than trusted: an id off the wire that is not in
+ * this workspace is refused, which is the same wall every other org-bearing
+ * write in this file puts up.
+ */
+async function noteOrgFor(
+  u: SessionUser, want: number | null | undefined,
+): Promise<{ orgId: number | null; tenantOrgId: number | null } | { error: string }> {
+  const staff = isStaffRole(u.role);
+  if (!staff) {
+    // Not a choice for them: their own company or nothing.
+    if (u.orgId === null) return { error: "Not found" };
+    const [own] = await db.select().from(orgs).where(eq(orgs.id, u.orgId));
+    if (!own) return { error: "Not found" };
+    return { orgId: own.id, tenantOrgId: tenantOf(own) };
+  }
+  const t = myTenantOrgId(u);
+  if (want === null || want === undefined) return { orgId: null, tenantOrgId: t };
+  const [org] = await db.select().from(orgs)
+    .where(and(eq(orgs.id, want), forTenant(orgs.parentOrgId, t)));
+  if (!org) return { error: "That organization is not one of ours" };
+  return { orgId: org.id, tenantOrgId: t };
+}
+
+/**
+ * Write a dated note onto the calendar.
+ *
+ * The only thing on that page somebody types rather than derives, and it earns
+ * the exception: a lab shut for an audit week has no other row in this app to
+ * live on, and a van sent to a locked door is what not knowing costs. See
+ * db/schema.calendarNotes.
+ */
+export async function addCalendarNote(data: {
+  onDate: string; endsOn?: string; title: string; note?: string;
+  /** Staff only: whose calendar. Ignored for a client, who has one. */
+  orgId?: number | null;
+}): Promise<{ error?: string; id?: number }> {
+  const u = await requireUser();
+  const where = await noteOrgFor(u, data.orgId);
+  if ("error" in where) return where;
+  const wrong = checkNote({ onDate: data.onDate, endsOn: data.endsOn, title: data.title });
+  if (wrong) return { error: wrong };
+  const [row] = await db.insert(calendarNotes).values({
+    tenantOrgId: where.tenantOrgId, orgId: where.orgId,
+    onDate: data.onDate, endsOn: (data.endsOn ?? "").trim(),
+    title: data.title.trim().slice(0, 120),
+    note: (data.note ?? "").trim().slice(0, 1000),
+    createdBy: u.email, createdByName: u.name || u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "calendar_note", entityId: row.id, tenantOrgId: where.tenantOrgId,
+    action: `noted "${row.title}" on ${row.onDate}${row.endsOn ? ` - ${row.endsOn}` : ""}`,
+  });
+  revalidatePath("/calendar");
+  return { id: row.id };
+}
+
+/**
+ * Rub one out.
+ *
+ * Deleted rather than archived, which is the right weight for the thing: a
+ * note is a sticky on a wall, not a record of work, and nothing downstream
+ * refers to it. Whoever may write on that calendar may clear it - a colleague
+ * fixing somebody's typo'd shutdown week should not have to find its author.
+ */
+export async function removeCalendarNote(id: number): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const [row] = await db.select().from(calendarNotes).where(eq(calendarNotes.id, id));
+  if (!row) return {};
+  /* Two readers, one rule each, and the same words for every refusal - whether
+     a note exists in another workspace is not a fact to confirm by the shape
+     of an error. Staff of the note's OWN workspace may clear any of its notes;
+     a client may clear one on their own company's calendar, which is the only
+     calendar they can see. */
+  const asStaff = isStaffRole(u.role) && houseOf(u, row.tenantOrgId);
+  const asClient = !isStaffRole(u.role) && u.orgId !== null && row.orgId === u.orgId;
+  if (!asStaff && !asClient) return { error: "Not found" };
+  await db.delete(calendarNotes).where(eq(calendarNotes.id, id));
+  await audit({
+    actor: u.email, entityType: "calendar_note", entityId: id, tenantOrgId: row.tenantOrgId,
+    action: `cleared the note "${row.title}" on ${row.onDate}`,
+  });
+  revalidatePath("/calendar");
+  return {};
 }
 
 /** Point a device at the system it drives, or clear the link. Staff only. */
@@ -10663,6 +10931,146 @@ export async function addVocabTerms(
     else created++;
   }
   return { created, failures };
+}
+
+/**
+ * A whole catalog sheet - modules and the OEMs that make them - in one go.
+ *
+ * Two thousand models is not two thousand trips through addVocabTerm: that
+ * function re-reads the whole vocabulary and revalidates four routes per call,
+ * which is why its batch sibling caps at 300. This reads the book ONCE, decides
+ * every line against it in lib/catalogImport, and writes in chunks.
+ *
+ * The deciding is the point, and it lives in that pure module so the preview a
+ * person approves and the writes that follow cannot disagree about what line
+ * 1500 means. Here there are only three things worth saying:
+ *
+ *   ONE UNIVERSE FOR THE LOOKUP AND THE INSERT. The plan merges against models
+ *   this workspace owns, because those are the only rows it may write to.
+ *
+ *   BUT vocab_term_unique is (kind, asset_type, name) with NO tenant column -
+ *   instance-wide. So a name another workspace already defined is invisible to
+ *   the plan and fatal to the insert. onConflictDoNothing turns that from a
+ *   thrown transaction that loses the whole sheet into one reported line.
+ *
+ *   NOTHING ON FILE IS OVERWRITTEN. Every update here widens a row the plan
+ *   marked "merge" - system types it did not carry, a maker where it had none.
+ *   A sheet that disagrees with what somebody set is reported, never applied.
+ */
+export async function importCatalog(rows: CatalogImportRow[]): Promise<{
+  error?: string;
+  models?: number; merged?: number; makers?: number;
+  moduleTypes?: number; systemTypes?: number;
+  skipped?: { line: number; model: string; problem: string }[];
+  counts?: Record<Verdict, number>;
+}> {
+  const u = await requireStaff();
+  if (!rows.length) return { error: "Nothing on that sheet to import" };
+  if (rows.length > 5000) return { error: "Import 5000 lines at a time" };
+  const tenant = myTenantOrgId(u);
+
+  const mine = await db.select().from(vocabTerms)
+    .where(forTenant(vocabTerms.tenantOrgId, tenant));
+  const plan = planCatalogImport(rows, {
+    models: mine.filter((t) => t.kind === "model").map((t) => ({
+      id: t.id, moduleType: t.assetType, name: t.name,
+      manufacturer: t.manufacturer, categories: t.categories,
+    })),
+    moduleTypes: mine.filter((t) => t.kind === "asset_type").map((t) => t.name),
+    systemTypes: mine.filter((t) => t.kind === "category").map((t) => t.name),
+    // The whole book - defined names AND every spelling already in use - so the
+    // sheet's makers settle onto what the shop writes rather than beside it.
+    makers: await makerNames(tenant),
+  });
+
+  const skipped = plan.rows
+    .filter((p) => needsReading(p.verdict))
+    .map((p) => ({ line: p.line, model: p.row.model || p.row.manufacturer, problem: p.note ?? p.verdict }));
+
+  /* Vocabulary first, models second: a model that lands before its module type
+     is defined is a model no picker can offer. */
+  // No tenant here on purpose: the stamp goes on at the insert, below, so there
+  // is exactly one line to read to know whose workspace a sheet lands in.
+  const term = (kind: string, name: string, extra: Partial<typeof vocabTerms.$inferInsert> = {}) => ({
+    kind, assetType: "", name, ...extra,
+  });
+  const vocab = [
+    ...plan.newModuleTypes.map((n) => term("asset_type", n)),
+    ...plan.newSystemTypes.map((n) => term("category", n)),
+    ...plan.newMakers.map((n) => term("maker", n)),
+  ];
+  const fresh = plan.rows.flatMap((p) =>
+    p.verdict === "new" && p.write?.model
+      ? [term("model", p.write.model.name, {
+          assetType: p.write.model.moduleType,
+          manufacturer: p.write.model.manufacturer,
+          categories: p.write.model.categories,
+        })]
+      : []);
+
+  /* Chunked, and onConflictDoNothing on every one: see the note above about the
+     unique constraint having no tenant column. What comes back is what actually
+     landed, so the counts reported are what is on file and not what was asked
+     for. */
+  const put = async (values: (typeof vocabTerms.$inferInsert)[]) => {
+    const landed: { id: number; kind: string; assetType: string; name: string }[] = [];
+    for (let i = 0; i < values.length; i += 200) {
+      // The stamp is applied HERE rather than trusted from the rows built
+      // above: one workspace per import, said at the only line that writes.
+      landed.push(...await db.insert(vocabTerms)
+        .values(values.slice(i, i + 200).map((v) => ({ ...v, tenantOrgId: tenant })))
+        .onConflictDoNothing()
+        .returning({ id: vocabTerms.id, kind: vocabTerms.kind, assetType: vocabTerms.assetType, name: vocabTerms.name }));
+    }
+    return landed;
+  };
+
+  const putVocab = await put(vocab);
+  const putModels = await put(fresh);
+
+  // A model the plan called new that no row came back for is a name some other
+  // workspace on this instance has already defined - reported, not lost silently.
+  const landedKey = new Set(putModels.map((r) => `${r.assetType.toLowerCase()}|${r.name.toLowerCase()}`));
+  for (const p of plan.rows) {
+    if (p.verdict !== "new" || !p.write?.model) continue;
+    const k = `${p.write.model.moduleType.toLowerCase()}|${p.write.model.name.toLowerCase()}`;
+    if (landedKey.has(k)) continue;
+    skipped.push({
+      line: p.line, model: p.write.model.name,
+      problem: `"${p.write.model.name}" is already defined for ${p.write.model.moduleType} elsewhere on this instance`,
+    });
+  }
+
+  let merged = 0;
+  for (const p of plan.rows) {
+    if (p.verdict !== "merge" || !p.write?.model?.id) continue;
+    await db.update(vocabTerms)
+      .set({ categories: p.write.model.categories, manufacturer: p.write.model.manufacturer })
+      .where(eq(vocabTerms.id, p.write.model.id));
+    merged++;
+  }
+
+  const counts = plan.counts;
+  const kind = (k: string) => putVocab.filter((r) => r.kind === k).length;
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: 0, tenantOrgId: tenant,
+    action: `imported a catalog sheet of ${rows.length} line${rows.length === 1 ? "" : "s"}: `
+      + `${putModels.length} new model${putModels.length === 1 ? "" : "s"}, ${merged} widened, `
+      + `${kind("asset_type")} module types, ${kind("category")} system types, ${kind("maker")} makers; `
+      + `${counts.same + counts.repeat} already on file, ${skipped.length} left for review`,
+  });
+
+  revalidatePath("/settings/catalog");
+  revalidatePath("/checkout");
+  revalidatePath("/maintenance");
+  rev();
+  return {
+    models: putModels.length, merged,
+    makers: putVocab.filter((r) => r.kind === "maker").length,
+    moduleTypes: putVocab.filter((r) => r.kind === "asset_type").length,
+    systemTypes: putVocab.filter((r) => r.kind === "category").length,
+    skipped, counts,
+  };
 }
 
 // ── House members (owner / staff) ───────────────────────────────────────────

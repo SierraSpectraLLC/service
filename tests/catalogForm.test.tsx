@@ -82,3 +82,60 @@ describe("Add model from every facet", () => {
     expect(addVocabTerm).toHaveBeenCalledWith("model", "Pump", "Quattro Ultima", [], "Waters");
   });
 });
+
+/*
+ * Where the add buttons live.
+ *
+ * They used to sit in a card BELOW the model cards, so on a catalog of
+ * seventy-two models the one thing this page is for was off the bottom of the
+ * screen. They are in the toolbar now, beside the search box.
+ *
+ * The DOM order is the assertion that matters and it is not fussiness: the
+ * toolbar is a wrapping flex row, and the facet strip is wide enough to take a
+ * line of its own, so anything placed after the facets lands a line BELOW the
+ * search box rather than beside it. Moving these after the strip would look
+ * fine in a component test and wrong on the page.
+ */
+describe("the add buttons sit beside the search box", () => {
+  const draw = async () => {
+    const CatalogForm = (await import("@/components/CatalogForm")).default;
+    return render(<CatalogForm categories={categories} models={models} types={types} makers={[]} />);
+  };
+
+  it("puts both of them inside the toolbar", async () => {
+    const { container } = await draw();
+    const toolbar = container.querySelector(".toolbar")!;
+    expect(toolbar).toBeTruthy();
+    expect(toolbar.contains(screen.getByText("+ New model"))).toBe(true);
+    expect(toolbar.contains(screen.getByText("+ Several"))).toBe(true);
+  });
+
+  it("puts them after the search box and before the facets", async () => {
+    const { container } = await draw();
+    const search = container.querySelector(".toolbar-search")!;
+    const facets = container.querySelector(".facets")!;
+    const add = screen.getByText("+ New model");
+    // Node.DOCUMENT_POSITION_FOLLOWING === 4: the argument comes after.
+    expect(search.compareDocumentPosition(add) & 4).toBeTruthy();
+    expect(add.compareDocumentPosition(facets) & 4).toBeTruthy();
+  });
+
+  it("opens the several-at-once grid above the model cards, not below them", async () => {
+    // A button at the top that unfolds a spreadsheet past seventy cards is a
+    // button that appears to do nothing.
+    const { container } = await draw();
+    expect(screen.queryByText("Add several models")).toBeNull();
+    fireEvent.click(screen.getByText("+ Several"));
+    const panel = screen.getByText("Add several models");
+    const cards = container.querySelector(".cardgrid")!;
+    expect(panel.compareDocumentPosition(cards) & 4).toBeTruthy();
+    // ...and it closes again from the same button.
+    fireEvent.click(screen.getByText("Close grid"));
+    expect(screen.queryByText("Add several models")).toBeNull();
+  });
+
+  it("leaves no add card stranded at the bottom", async () => {
+    await draw();
+    expect(screen.queryByText("Add a model")).toBeNull();
+  });
+});

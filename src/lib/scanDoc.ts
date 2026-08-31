@@ -406,5 +406,38 @@ export function canvasToFile(canvas: HTMLCanvasElement, name: string): Promise<F
 export const scanName = (name: string): string =>
   `${(name.replace(/\.[^.]+$/, "") || "receipt").slice(0, 60)}-scan.jpg`;
 
+/**
+ * A quarter turn clockwise, as a new canvas.
+ *
+ * EXIF rotation is already handled at decode (drawToCanvas), so this is for the
+ * other case: paper genuinely photographed sideways - a wide folio shot with
+ * the phone upright because that is how the phone was in the hand. The warp
+ * cannot know which way up the words go; a person can, with one tap per turn.
+ */
+export function rotateQuarter(canvas: HTMLCanvasElement): HTMLCanvasElement {
+  const out = document.createElement("canvas");
+  out.width = canvas.height;
+  out.height = canvas.width;
+  const ctx = out.getContext("2d");
+  if (!ctx) throw new Error("This browser will not give us a canvas to work on");
+  ctx.translate(out.width, 0);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(canvas, 0, 0);
+  return out;
+}
+
+/** A canvas as JPEG bytes, for binding into a PDF (lib/scanPdf). */
+export function canvasJpegBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      async (blob) => blob
+        ? resolve(new Uint8Array(await blob.arrayBuffer()))
+        : reject(new Error("The scan could not be encoded")),
+      "image/jpeg",
+      0.85,
+    );
+  });
+}
+
 /** What the detection pass runs on. Big enough for edges, small enough to be quick. */
 export const DETECT_EDGE = 1000;
