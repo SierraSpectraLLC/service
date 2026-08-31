@@ -30,6 +30,46 @@
 
 import { formatCents } from "@/lib/money";
 
+/**
+ * What the 48-hour promise is made of.
+ *
+ * Capped or uncapped, the ARITHMETIC needs a number of callouts and a parts
+ * figure, because a year is priced off what we expect to spend in it. So
+ * "unlimited" does not blank those fields - it changes what they MEAN. Capped,
+ * they are the ceiling: this many callouts, this much emergency stock, and the
+ * client buys the rest per call. Uncapped, they are the EXPECTATION - our
+ * honest guess at a normal year - and the client may call as often as they
+ * need to.
+ *
+ * Which is why an uncapped promise carries a loading. Unlimited does not make
+ * the bad year less likely, it moves who pays for it: the tail we would have
+ * billed per call is now ours, and a contract that prices an uncapped promise
+ * at exactly the expectation has given that tail away for nothing. The loading
+ * is a percentage rather than a fixed sum so it scales with the promise, and
+ * it is typed rather than assumed because the right number is a judgment about
+ * this client's instruments and this shop's luck.
+ */
+export type ResponseReserve = {
+  /**
+   * Unplanned journeys a year. A ceiling when capped; when `unlimitedTrips`,
+   * what a normal year is expected to bring - not a limit on the client.
+   */
+  tripsPerYear: number;
+  hoursPerTrip: number;
+  tripCostCents: number;
+  /** Emergency parts for the year. Expectation, not ceiling, when uncapped. */
+  partsCents: number;
+  /** Callouts are uncapped: the client calls as often as they need. */
+  unlimitedTrips: boolean;
+  /** Emergency parts are uncapped. */
+  unlimitedParts: boolean;
+  /**
+   * What writing an uncapped promise costs on top of the expectation, in bps
+   * of whichever legs are uncapped. Nothing when both are capped.
+   */
+  uncappedLoadBps: number;
+};
+
 /** One system on the contract, and what one visit to it takes. */
 export type CoveredSystem = {
   name: string;
@@ -84,7 +124,7 @@ export type CoverageInput = {
    * than smeared into an overhead percentage, because it is the assumption a
    * losing bid is usually wrong about, and it should be arguable on its own.
    */
-  reserve: { tripsPerYear: number; hoursPerTrip: number; tripCostCents: number; partsCents: number };
+  reserve: ResponseReserve;
   /** Everything the shop costs that no job causes, as bps of direct cost. */
   overheadBps: number;
   /**
@@ -97,6 +137,23 @@ export type CoverageInput = {
   periods: number;
   /** Uplift compounded on each period after the first, for the option years. */
   escalationBps: number;
+  /**
+   * The multi-year discount, compounded on each period after the first.
+   *
+   * The other side of escalation, and a different kind of number. Escalation
+   * is a COST fact - the same year of work costs more in 2029 than in 2026 -
+   * so it lifts cost and price alike. De-escalation is a PRICE decision: what
+   * we give back for the client committing to the whole term rather than
+   * re-competing it every twelve months. Our costs do not fall because
+   * somebody signed for five years, so this comes off the price only, and the
+   * margin in the late option years genuinely narrows. That is the trade, and
+   * it is worth being able to see: `estimateProblems` says so when the
+   * give-back has eaten the margin entirely.
+   *
+   * A single-period quote gets none of it, which is the point - there is no
+   * commitment to pay for.
+   */
+  deescalationBps: number;
 };
 
 export type SystemShare = {
@@ -130,6 +187,10 @@ export type Period = {
   label: string;
   costCents: number;
   priceCents: number;
+  /** What this period would price at without the multi-year discount. */
+  listCents: number;
+  /** What the commitment took off this period. Zero on the base year. */
+  discountCents: number;
 };
 
 export type CoverageEstimate = {
@@ -137,6 +198,8 @@ export type CoverageEstimate = {
   directCents: number;
   reserveCents: number;
   overheadCents: number;
+  /** What the uncapped promise adds on top of the expectation. */
+  uncappedLoadCents: number;
   /** One period's cost, before margin. */
   costCents: number;
   /** One period's price. */
@@ -144,6 +207,10 @@ export type CoverageEstimate = {
   periods: Period[];
   /** Every period added up - the "total five-year price" an RFQ asks for. */
   totalCents: number;
+  /** The same term without the multi-year discount, for stating what it saves. */
+  listTotalCents: number;
+  /** What committing to the whole term gives back, across every period. */
+  deescalationCents: number;
   /** What one period's work would come to at time and materials. */
   tmCents: number;
   /** How far under T&M the base year is, in bps. Negative means over. */
@@ -249,6 +316,37 @@ export function siteCost(site: CoverageSite, laborCostPerHourCents: number): Sit
   };
 }
 
+/**
+ * What the response promise costs in a year.
+ *
+ * `expectedCents` is the year we expect either way - the callouts and the
+ * emergency stock - and is what the time-and-materials comparison uses, because
+ * a client without a contract pays for the emergencies they actually have, not
+ * for the ones they might. `loadCents` is what the UNCAPPED promise costs on
+ * top: the tail we have agreed to absorb, on whichever legs are uncapped. It is
+ * in the contract price and deliberately not in the T&M figure, so the saving a
+ * client is shown is honest about what the extra buys them.
+ */
+export function reserveCost(r: ResponseReserve, laborCostPerHourCents: number): {
+  calloutsCents: number; partsCents: number; expectedCents: number; loadCents: number; totalCents: number;
+} {
+  const rate = Math.max(0, cents(laborCostPerHourCents));
+  const calloutsCents = cents(count(r.tripsPerYear) * (Math.max(0, r.tripCostCents) + hours(r.hoursPerTrip) * rate));
+  const partsCents = cents(Math.max(0, r.partsCents));
+  const uncapped = (r.unlimitedTrips ? calloutsCents : 0) + (r.unlimitedParts ? partsCents : 0);
+  const loadCents = cents((uncapped * Math.max(0, r.uncappedLoadBps)) / 10000);
+  const expectedCents = calloutsCents + partsCents;
+  return { calloutsCents, partsCents, expectedCents, loadCents, totalCents: expectedCents + loadCents };
+}
+
+/** What the promise is called on a quote a client reads. Empty when nothing is uncapped. */
+export function reserveTerms(r: ResponseReserve): string {
+  return [
+    r.unlimitedTrips ? "unlimited callouts" : "",
+    r.unlimitedParts ? "unlimited emergency parts" : "",
+  ].filter(Boolean).join(" · ");
+}
+
 /** What the label on a period is. The words an RFQ uses. */
 export const periodLabel = (i: number): string => (i === 0 ? "Base year" : `Option year ${i}`);
 
@@ -259,6 +357,39 @@ export function estimateProblems(input: CoverageInput): string[] {
   if (count(input.laborCostPerHourCents) === 0) out.push("An hour of labor costs nothing - the price will be wrong");
   if (input.marginBps >= 10000) out.push("A margin of 100% or more cannot be priced");
   if (count(input.periods) === 0) out.push("Price at least one 12-month period");
+
+  /*
+   * An uncapped promise priced off nothing at all. "Unlimited" is a term of the
+   * contract, not a way of leaving the reserve blank - with no expected callout
+   * and no loading there is literally nothing in the price for a promise we
+   * have made, and the first emergency of the base year is paid for out of the
+   * margin on the rest.
+   */
+  const r = input.reserve;
+  const uncapped = r.unlimitedTrips || r.unlimitedParts;
+  if (r.unlimitedTrips && count(r.tripsPerYear) === 0) {
+    out.push("Unlimited callouts, but the price expects none - say how many a normal year brings");
+  }
+  if (r.unlimitedParts && Math.max(0, r.partsCents) === 0) {
+    out.push("Unlimited emergency parts, but the price expects none - say what a normal year consumes");
+  }
+  if (uncapped && Math.max(0, r.uncappedLoadBps) === 0) {
+    out.push("An uncapped promise with no loading on it - a bad year comes out of the margin");
+  }
+
+  const margin = Math.min(9900, Math.max(0, input.marginBps));
+  const deesc = Math.min(9900, Math.max(0, input.deescalationBps));
+  const last = count(input.periods) - 1;
+  if (last > 0 && deesc > 0 && (1 - deesc / 10000) ** last < 1 - margin / 10000) {
+    /*
+     * The give-back has outrun the margin. Independent of every other figure:
+     * a period prices at cost / (1 - margin), discounted by (1 - deesc)^i, so
+     * it lands under its own cost exactly when (1 - deesc)^i < 1 - margin. The
+     * last period is the first to go, and a five-year schedule whose option
+     * years lose money is the kind of thing nobody notices until year four.
+     */
+    out.push(`${periodLabel(last)} de-escalates below what it costs - the discount has eaten the margin`);
+  }
   const untravelled = input.sites.filter((s) => s.systems.length > 0 && Math.max(0, s.tripCostCents) === 0);
   if (untravelled.length > 0) {
     // The failure this module exists to prevent, so it is said out loud rather
@@ -284,10 +415,8 @@ export function estimate(input: CoverageInput): CoverageEstimate {
   const directCents = sites.reduce((a, s) => a + s.totalCents, 0);
 
   const r = input.reserve;
-  const reserveCents = cents(
-    count(r.tripsPerYear) * (Math.max(0, r.tripCostCents) + hours(r.hoursPerTrip) * rate)
-    + Math.max(0, r.partsCents),
-  );
+  const res = reserveCost(r, rate);
+  const reserveCents = res.totalCents;
 
   const overheadCents = cents(((directCents + reserveCents) * Math.max(0, input.overheadBps)) / 10000);
   const costCents = directCents + reserveCents + overheadCents;
@@ -297,14 +426,25 @@ export function estimate(input: CoverageInput): CoverageEstimate {
 
   const n = count(input.periods);
   const esc = Math.max(0, input.escalationBps);
+  const deesc = Math.min(9900, Math.max(0, input.deescalationBps));
   const periods: Period[] = [];
   for (let i = 0; i < n; i++) {
-    const factor = (1 + esc / 10000) ** i;
+    /*
+     * Escalation moves cost AND price - the same year of work really does cost
+     * more later. The multi-year give-back moves the price only, so what it
+     * costs us is unchanged and the narrowing margin in the option years is
+     * visible rather than hidden inside one blended factor.
+     */
+    const escalated = (1 + esc / 10000) ** i;
+    const listCents = toDollar(priceCents * escalated);
+    const discounted = toDollar(priceCents * escalated * (1 - deesc / 10000) ** i);
     periods.push({
       index: i,
       label: periodLabel(i),
-      costCents: cents(costCents * factor),
-      priceCents: toDollar(priceCents * factor),
+      costCents: cents(costCents * escalated),
+      priceCents: discounted,
+      listCents,
+      discountCents: listCents - discounted,
     });
   }
 
@@ -331,6 +471,13 @@ export function estimate(input: CoverageInput): CoverageEstimate {
     const tripCash = s.travelCents - s.travelHours * rate;
     return a + (s.onsiteHours + s.travelHours) * bill + markup(s.partsCents) + tripCash;
   }, 0);
+  /*
+   * The EXPECTED emergencies, at the rate card - never the uncapped loading.
+   * A client without a contract pays for the callouts they actually have; they
+   * do not pay a premium for a promise nobody made them. Putting the loading on
+   * this side would flatter the contract by pretending T&M carries the same
+   * risk, when absorbing that risk is precisely what the client is buying.
+   */
   const reserveOnTm = count(r.tripsPerYear) * (hours(r.hoursPerTrip) * bill + Math.max(0, r.tripCostCents))
     + markup(Math.max(0, r.partsCents));
   const tmCents = cents(planned + reserveOnTm);
@@ -338,6 +485,8 @@ export function estimate(input: CoverageInput): CoverageEstimate {
   const savingBps = tmCents > 0 ? Math.round(((tmCents - base) / tmCents) * 10000) : 0;
 
   const totalCents = periods.reduce((a, p) => a + p.priceCents, 0);
+  const listTotalCents = periods.reduce((a, p) => a + p.listCents, 0);
+  const deescalationCents = listTotalCents - totalCents;
   const trips = sites.reduce((a, s) => a + s.trips, 0);
   const systems = sites.reduce((a, s) => a + s.systems.length, 0);
   const line = systems === 0 ? "" :
@@ -354,11 +503,18 @@ export function estimate(input: CoverageInput): CoverageEstimate {
         // decides whether to bid, and a summary that quietly omitted it would
         // be the most expensive omission in the module.
         ? ` - ${(-savingBps / 100).toFixed(0)}% ABOVE the same year billed per call.`
-        : ".");
+        : ".")
+    + (deescalationCents > 0
+      // What the commitment bought, in money rather than in a percentage. It is
+      // the sentence the client is being asked to sign a five-year term for.
+      ? ` Committing to all ${n} years gives back ${formatCents(deescalationCents)}.`
+      : "")
+    + (reserveTerms(r) ? ` Carries ${reserveTerms(r)}.` : "");
 
   return {
-    sites, directCents, reserveCents, overheadCents, costCents, priceCents,
-    periods, totalCents, tmCents, savingBps, line, problems,
+    sites, directCents, reserveCents, uncappedLoadCents: res.loadCents,
+    overheadCents, costCents, priceCents,
+    periods, totalCents, listTotalCents, deescalationCents, tmCents, savingBps, line, problems,
   };
 }
 

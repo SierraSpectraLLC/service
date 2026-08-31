@@ -74,9 +74,17 @@ export default function CoverageEstimateBuilder({ quoteId, models, defaultStart 
   const [startsOn, setStartsOn] = useState(defaultStart);
   const [a, setA] = useState({
     laborCost: "95", laborBill: "225", partsMarkup: "30",
-    overhead: "12", margin: "32", escalation: "3", periods: "5",
-    resTrips: "2", resHours: "8", resTrip: "2100", resParts: "4000",
+    overhead: "12", margin: "32", escalation: "3", deescalation: "0", periods: "5",
+    resTrips: "2", resHours: "8", resTrip: "2100", resParts: "4000", uncappedLoad: "50",
   });
+  /*
+   * Unlimited is a TERM, not a blank field. Both flags leave the numbers next
+   * to them in place and change what they mean - from a ceiling to what a
+   * normal year is expected to bring - because an uncapped promise still has
+   * to be priced off some year, and the honest one is the year we expect.
+   */
+  const [uncapped, setUncapped] = useState({ trips: false, parts: false });
+  const anyUncapped = uncapped.trips || uncapped.parts;
 
   const input: CoverageInput = {
     sites: sites.map((s): CoverageSite => ({
@@ -99,11 +107,14 @@ export default function CoverageEstimateBuilder({ quoteId, models, defaultStart 
     reserve: {
       tripsPerYear: num(a.resTrips), hoursPerTrip: num(a.resHours),
       tripCostCents: money(a.resTrip), partsCents: money(a.resParts),
+      unlimitedTrips: uncapped.trips, unlimitedParts: uncapped.parts,
+      uncappedLoadBps: anyUncapped ? pct(a.uncappedLoad) : 0,
     },
     overheadBps: pct(a.overhead),
     marginBps: pct(a.margin),
     periods: num(a.periods),
     escalationBps: pct(a.escalation),
+    deescalationBps: pct(a.deescalation),
   };
   const out = estimate(input);
   const windows = periodWindows(startsOn, out.periods.length);
@@ -291,6 +302,9 @@ export default function CoverageEstimateBuilder({ quoteId, models, defaultStart 
         {field("Overhead %", "overhead", 60)}
         {field("Margin %", "margin", 60)}
         {field("Escalation %/yr", "escalation", 60)}
+        {/* Off the price only, and only on the option years - what the client
+            gets back for committing to the term instead of re-competing it. */}
+        {field("De-escalation %/yr", "deescalation", 60)}
         {field("Periods", "periods", 54)}
         <label style={{ display: "block" }}>
           <span className="mut t-meta" style={{ display: "block" }}>First period starts</span>
@@ -303,15 +317,28 @@ export default function CoverageEstimateBuilder({ quoteId, models, defaultStart 
         What the response promise is worth
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-        {field("Callouts/yr", "resTrips", 54)}
+        <Capped label={uncapped.trips ? "Callouts/yr expected" : "Callouts/yr"} width={54}
+          value={a.resTrips} onValue={(v) => setA({ ...a, resTrips: v })}
+          on={uncapped.trips} toggleLabel="Unlimited callouts"
+          onToggle={(v) => setUncapped({ ...uncapped, trips: v })} />
         {field("Hours each", "resHours", 54)}
         {field("Cost per callout", "resTrip", 84)}
-        {field("Parts reserve", "resParts", 84)}
+        <Capped label={uncapped.parts ? "Parts/yr expected" : "Parts reserve"} width={84}
+          value={a.resParts} onValue={(v) => setA({ ...a, resParts: v })}
+          on={uncapped.parts} toggleLabel="Unlimited parts"
+          onToggle={(v) => setUncapped({ ...uncapped, parts: v })} />
+        {/* The loading only exists while something is uncapped, and it is typed
+            rather than assumed: what the tail is worth is a judgment about this
+            client's instruments, not a constant. */}
+        {anyUncapped && field("Uncapped loading %", "uncappedLoad", 60)}
         {/* An emergency contract is an option we are writing. Priced as its own
             line because it is the assumption a losing bid is usually wrong
             about, and because a client asks what it costs to drop it. */}
         <span className="mut t-small" style={{ paddingBottom: 6 }}>
           {formatCents(out.reserveCents)} a year of the price
+          {out.uncappedLoadCents > 0
+            ? `, ${formatCents(out.uncappedLoadCents)} of it for going uncapped`
+            : ""}
         </span>
       </div>
 
@@ -325,6 +352,12 @@ export default function CoverageEstimateBuilder({ quoteId, models, defaultStart 
           <span className="mono t-small" style={{ width: 78 }}>CLIN {String(i + 1).padStart(4, "0")}</span>
           <span className="t-body" style={{ flex: 1, minWidth: 0 }}>{p.label}</span>
           <span className="mut t-meta">{windows[i]?.from ? `${windows[i].from} – ${windows[i].to}` : ""}</span>
+          {/* The give-back, per period, next to the number it came off. A
+              discount stated only as a percentage on a form is one nobody
+              checks; stated in money against the list price it is arguable. */}
+          {p.discountCents > 0 && (
+            <span className="mut t-meta">{formatCents(p.listCents)} less {formatCents(p.discountCents)}</span>
+          )}
           <b className="t-body" style={{ width: 100, textAlign: "right" }}>{formatCents(p.priceCents)}</b>
         </div>
       ))}
@@ -341,6 +374,37 @@ export default function CoverageEstimateBuilder({ quoteId, models, defaultStart 
         {error && <span className="t-small" style={{ color: "var(--t-bad-fg)" }}>{error}</span>}
       </div>
     </Panel>
+  );
+}
+
+/**
+ * A reserve figure with an unlimited toggle in its caption.
+ *
+ * The toggle rides on the LABEL line rather than under the input, for two
+ * reasons. It keeps every input in the row on the same baseline, and it says
+ * what it actually does: unlimited does not replace the number, it changes what
+ * the number means - from a ceiling to what a normal year is expected to bring.
+ * Blanking the field on unlimited would leave nothing to price the year off,
+ * and a promise costed at zero is the most expensive thing this form could let
+ * somebody do.
+ */
+function Capped({ label, width, value, onValue, on, toggleLabel, onToggle }: {
+  label: string; width: number; value: string; onValue: (v: string) => void;
+  on: boolean; toggleLabel: string; onToggle: (v: boolean) => void;
+}) {
+  return (
+    <div>
+      <div className="mut t-meta" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <span>{label}</span>
+        <label style={{ display: "flex", gap: 3, alignItems: "center" }}>
+          <input type="checkbox" className="check" checked={on} aria-label={toggleLabel}
+            onChange={(e) => onToggle(e.target.checked)} />
+          unlimited
+        </label>
+      </div>
+      <input className="mono t-small" style={{ width }} value={value} aria-label={label}
+        onChange={(e) => onValue(e.target.value)} />
+    </div>
   );
 }
 

@@ -176,7 +176,9 @@ import {
   DOC_KINDS, DOC_LABEL, serializeScheme, templateProblems, type Scheme,
 } from "@/lib/docNumber";
 import { PLAN_MAX_PER_YEAR, perYearLabel } from "@/lib/pmPlan";
-import { estimate, estimateProblems, periodWindows, type CoverageInput } from "@/lib/coveragePrice";
+import {
+  estimate, estimateProblems, periodWindows, reserveTerms, type CoverageInput,
+} from "@/lib/coveragePrice";
 import { kitFrom, kitSourceFor } from "@/lib/pmKitData";
 import type { ModelKit } from "@/lib/pmKit";
 import {
@@ -17538,7 +17540,14 @@ export async function applyCoverageEstimate(
        */
       kind: "retainer",
       description: `CLIN ${String(i + 1).padStart(4, "0")} · ${p.label}`,
-      detail: w.from ? `${w.from} through ${w.to}` : "12 months",
+      /*
+       * An uncapped promise goes on the line the client reads. It is the part
+       * of the price that is not visible in the arithmetic - the fee is the
+       * same shape either way - and a client who accepts a fixed fee without
+       * being told the callouts are unlimited has not been sold what we costed.
+       */
+      detail: [w.from ? `${w.from} through ${w.to}` : "12 months", reserveTerms(input.reserve)]
+        .filter(Boolean).join(" · "),
       qty: 1000,
       unitCents: p.priceCents,
       position: position++,
@@ -17550,7 +17559,11 @@ export async function applyCoverageEstimate(
     actor: u.email, entityType: "quote", entityId: quoteId, tenantOrgId: q.tenantOrgId,
     action: `priced ${out.periods.length} coverage period${out.periods.length === 1 ? "" : "s"} onto ${q.number}: `
       + `${formatCents(out.totalCents)} total, built from ${trips} planned journey${trips === 1 ? "" : "s"} a year `
-      + `at ${(input.marginBps / 100).toFixed(0)}% margin`,
+      + `at ${(input.marginBps / 100).toFixed(0)}% margin`
+      + (out.deescalationCents > 0
+        ? `, after ${(input.deescalationBps / 100).toFixed(1)}%/yr de-escalation worth ${formatCents(out.deescalationCents)}`
+        : "")
+      + (reserveTerms(input.reserve) ? ` · ${reserveTerms(input.reserve)}` : ""),
   });
   revQuote(q);
   return { added: out.periods.length };
