@@ -11,6 +11,7 @@ import { toast } from "@/components/ui/Toast";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import {
   AGREEMENT_KINDS, KIND_LABEL, STANDING_LABEL, STANDING_TONE, allowance, kitStates, parseKits,
+  shapeOf,
   renewalLine, standing, type IncludedKit, type Standing,
 } from "@/lib/agreements";
 import { formatCents } from "@/lib/money";
@@ -49,24 +50,50 @@ const emptyDraft = {
 
 type Draft = typeof emptyDraft;
 
-/** The dialog's step rail, in body order. */
+/**
+ * The dialog's step rail, in body order.
+ *
+ * The "included" step wears the kind's own heading - "What's included" on a
+ * contract, "Amount" on the three kinds that have a figure and no
+ * entitlements. See lib/agreements.AGREEMENT_SHAPE, which is the one place
+ * that says what each kind of paper has.
+ */
 type StepKey = "terms" | "paper" | "included" | "coverage" | "note";
-const STEP_LABEL: Record<StepKey, string> = {
-  terms: "Terms", paper: "The paper", included: "What's included", coverage: "Coverage", note: "Note",
-};
+const stepLabels = (kind: string): Record<StepKey, string> => ({
+  terms: "Terms", paper: "The paper", included: shapeOf(kind).amountSection,
+  coverage: "Coverage", note: "Note",
+});
 
 /** Filled with something that isn't a number. Blank is fine - blank means untracked. */
 const badNumber = (v: string) => v.trim() !== "" && !Number.isFinite(Number(v.trim()));
 
 /** The numeric fields, in the order the problem chain reports them. */
-const NUMERIC_FIELDS: { key: "partsAllowance" | "visitsIncluded" | "laborIncludedHours" | "hourlyRate" | "value" | "renewNoticeDays"; label: string; step: StepKey }[] = [
-  { key: "partsAllowance", label: "Parts allowance", step: "included" },
-  { key: "visitsIncluded", label: "Service visits", step: "included" },
-  { key: "laborIncludedHours", label: "Labor hours included", step: "included" },
-  { key: "hourlyRate", label: "Hourly rate", step: "included" },
-  { key: "value", label: "Contract value", step: "included" },
-  { key: "renewNoticeDays", label: "Renewal notice days", step: "terms" },
+const NUMERIC_FIELDS: {
+  key: "partsAllowance" | "visitsIncluded" | "laborIncludedHours" | "hourlyRate" | "value" | "renewNoticeDays";
+  label: string; step: StepKey;
+  /** Only asked for on kinds that have it - entitlements, or a renewal. */
+  needs?: "entitlements" | "renewal";
+}[] = [
+  { key: "partsAllowance", label: "Parts allowance", step: "included", needs: "entitlements" },
+  { key: "visitsIncluded", label: "Service visits", step: "included", needs: "entitlements" },
+  { key: "laborIncludedHours", label: "Labor hours included", step: "included", needs: "entitlements" },
+  { key: "hourlyRate", label: "Hourly rate", step: "included", needs: "entitlements" },
+  { key: "value", label: "Amount", step: "included" },
+  { key: "renewNoticeDays", label: "Renewal notice days", step: "terms", needs: "renewal" },
 ];
+
+/**
+ * Which numeric fields this kind is actually asked for.
+ *
+ * The gate matters as much as the rendering: a draft that was a contract and
+ * is now a quote still carries whatever was typed into the boxes the quote no
+ * longer shows, and validating those would refuse to save over a field nobody
+ * can see to fix.
+ */
+const asked = (d: Draft) => {
+  const shape = shapeOf(d.kind);
+  return NUMERIC_FIELDS.filter((f) => !f.needs || shape[f.needs]);
+};
 
 /**
  * The first reason this draft can't save, or null. One sentence at a time, in
@@ -77,7 +104,12 @@ function firstProblem(d: Draft): string | null {
   if (!d.number.trim()) return "give it a number";
   if (!d.title.trim()) return "say what it covers";
   if (d.startsOn && d.endsOn && d.endsOn < d.startsOn) return "the end date is before the start";
-  for (const f of NUMERIC_FIELDS) if (badNumber(d[f.key])) return `${f.label} must be a number`;
+  for (const f of asked(d)) {
+    if (badNumber(d[f.key])) {
+      return `${f.key === "value" ? shapeOf(d.kind).amountLabel.replace(" ($)", "") : f.label} must be a number`;
+    }
+  }
+  if (!shapeOf(d.kind).entitlements) return null;
   if (d.partsAllowance.trim() !== "" && d.partsUnlimited) return "parts are marked unlimited and capped at once";
   if (d.laborIncludedHours.trim() !== "" && d.laborUnlimited) return "labor is marked unlimited and capped at once";
   return null;
@@ -85,15 +117,16 @@ function firstProblem(d: Draft): string | null {
 
 /** The same checks, scoped to one step, for the rail's warn marks. */
 function stepProblem(step: StepKey, d: Draft): boolean {
+  const shape = shapeOf(d.kind);
   if (step === "terms") {
     return !d.number.trim() || !d.title.trim()
       || !!(d.startsOn && d.endsOn && d.endsOn < d.startsOn)
-      || badNumber(d.renewNoticeDays);
+      || (shape.renewal && badNumber(d.renewNoticeDays));
   }
   if (step === "included") {
-    return NUMERIC_FIELDS.some((f) => f.step === "included" && badNumber(d[f.key]))
-      || (d.partsAllowance.trim() !== "" && d.partsUnlimited)
-      || (d.laborIncludedHours.trim() !== "" && d.laborUnlimited);
+    return asked(d).some((f) => f.step === "included" && badNumber(d[f.key]))
+      || (shape.entitlements && d.partsAllowance.trim() !== "" && d.partsUnlimited)
+      || (shape.entitlements && d.laborIncludedHours.trim() !== "" && d.laborUnlimited);
   }
   return false; // paper, coverage and note have nothing to get wrong
 }
@@ -484,7 +517,13 @@ export default function AgreementsPanel({
                 used" would read as eight visits still in hand rather than as
                 a number we are in no position to know. What it entitles them
                 to still shows above; only the burn is withheld. */}
-            {r.providerName !== null ? (
+            {/* Drawdown is a contract's. A PO, a quote and an invoice have no
+                entitlements to burn - and a row written before the form stopped
+                asking may still carry numbers in those columns, so the gate is
+                on the KIND rather than on whether the columns happen to be
+                zero. Nothing reads them either way: both coverage sites in
+                lib/invoiceData test kind === "contract". */}
+            {!shapeOf(r.kind).entitlements ? null : r.providerName !== null ? (
               <div className="mut t-small" style={{ marginTop: 8 }}>
                 Held by {r.providerName}. What has been used against it is theirs to
                 report — nothing here draws it down.
@@ -543,17 +582,23 @@ export default function AgreementsPanel({
         const filled: Record<StepKey, boolean> = {
           terms: draft.number.trim() !== "" && draft.title.trim() !== "",
           paper: hasPaper,
-          included: draft.includedKits.length > 0
+          /* Entitlements only count as "filled" on a kind that has them - a
+             quote carrying a leftover allowance from when it was a contract
+             must not tick its own Amount step on the strength of it. */
+          included: draft.value.trim() !== "" || (shapeOf(draft.kind).entitlements && (
+            draft.includedKits.length > 0
             || draft.partsUnlimited || draft.visitsUnlimited || draft.laborUnlimited || draft.pmPartsIncluded
-            || [draft.partsAllowance, draft.laborIncludedHours, draft.hourlyRate, draft.value]
+            || [draft.partsAllowance, draft.laborIncludedHours, draft.hourlyRate]
               .some((v) => v.trim() !== "")
-            || !["", "0"].includes(draft.visitsIncluded.trim()),
+            || !["", "0"].includes(draft.visitsIncluded.trim()))),
           coverage: draft.instrumentIds.length > 0,
           note: draft.note.trim() !== "",
         };
-        const steps = (Object.keys(STEP_LABEL) as StepKey[]).map((k) => {
+        const shape = shapeOf(draft.kind);
+        const labels = stepLabels(draft.kind);
+        const steps = (Object.keys(labels) as StepKey[]).map((k) => {
           const warn = stepProblem(k, draft);
-          return { key: k, label: STEP_LABEL[k], warn, done: !warn && (touched.has(k) || filled[k]) };
+          return { key: k, label: labels[k], warn, done: !warn && (touched.has(k) || filled[k]) };
         });
         // The ok line: the renewal summary when there is a term to summarize,
         // else the coverage, else who the paper is for.
@@ -610,6 +655,10 @@ export default function AgreementsPanel({
                     onClick={() => up("terms", { kind: k })}>{KIND_LABEL[k]}</button>
                 ))}
               </div>
+              {/* Contract only. It is the only kind any reader consults: coverage
+                  resolves a provider off a contract and nothing else, so asking
+                  it of a quote collects an answer nobody looks at. */}
+              {shape.provider && (
               <div style={{ marginBottom: 8 }}>
                 <label>Who provides the service</label>
                 <input value={draft.providerName}
@@ -626,11 +675,12 @@ export default function AgreementsPanel({
                     : `${operatorName}'s own contract. What it includes is what we absorb.`}
                 </div>
               </div>
+              )}
 
               <div className="pf2" style={{ marginBottom: 8 }}>
                 <div>
                   <label>Number</label>
-                  <input className="mono" value={draft.number} placeholder="PO-4417"
+                  <input className="mono" value={draft.number} placeholder={shape.numberHint}
                     onChange={(e) => up("terms", { number: e.target.value })} />
                 </div>
                 <div>
@@ -644,25 +694,35 @@ export default function AgreementsPanel({
               </div>
 
               <label>What it covers</label>
-              <input value={draft.title} placeholder="Annual service contract - 4 systems"
+              <input value={draft.title} placeholder={shape.titleHint}
                 onChange={(e) => up("terms", { title: e.target.value })} style={{ marginBottom: 8 }} />
 
               <div className="pf2" style={{ marginBottom: 8 }}>
                 <div>
-                  <label>Starts</label>
-                  <input type="date" value={draft.startsOn}
+                  {/* The same two columns wearing the word this kind uses:
+                      a quote is "Quoted / Valid until", an invoice
+                      "Invoiced / Due". One fact, the right name. */}
+                  <label>{shape.startLabel}</label>
+                  <input type="date" value={draft.startsOn} aria-label={shape.startLabel}
                     onChange={(e) => up("terms", { startsOn: e.target.value })} />
                 </div>
                 <div>
-                  <label>Ends</label>
-                  <input type="date" value={draft.endsOn}
+                  <label>{shape.endLabel}</label>
+                  <input type="date" value={draft.endsOn} aria-label={shape.endLabel}
                     onChange={(e) => up("terms", { endsOn: e.target.value })} />
                 </div>
               </div>
 
-              <label>Tell me this many days before it ends</label>
-              <input type="number" min={0} max={3650} value={draft.renewNoticeDays} style={{ marginBottom: 8 }}
-                onChange={(e) => up("terms", { renewNoticeDays: e.target.value })} />
+              {/* An invoice does not lapse, it falls due - a renewal notice on
+                  one is a reminder about the wrong event. */}
+              {shape.renewal && (
+                <>
+                  <label htmlFor="ag-renew">Tell me this many days before it ends</label>
+                  <input id="ag-renew" type="number" min={0} max={3650} value={draft.renewNoticeDays}
+                    style={{ marginBottom: 8 }}
+                    onChange={(e) => up("terms", { renewNoticeDays: e.target.value })} />
+                </>
+              )}
             </div>
 
             {/* The paper the terms above were read off. Asked for here because
@@ -704,12 +764,20 @@ export default function AgreementsPanel({
               </div>
             </div>
 
+            {/* Entitlements are a CONTRACT's, and this is where that shows.
+                A PO, a quote and an invoice each have a figure and no
+                entitlements - and never did have any that anything read, since
+                both coverage sites gate on kind === "contract". See
+                lib/agreements.AGREEMENT_SHAPE. */}
             <div ref={section("included")}>
-              <div className="dialog-section">What&apos;s included</div>
+              <div className="dialog-section">{shape.amountSection}</div>
+              {shape.entitlements && (
               <div className="mut t-meta" style={{ marginBottom: 6 }}>
                 Leave one blank when it is not part of this agreement. Blank means untracked,
                 not zero - an unlimited contract and a nothing-included one are different things.
               </div>
+              )}
+              {shape.entitlements && (<>
               <div className="pf2" style={{ marginBottom: 8 }}>
                 <div>
                   <label>Parts allowance ($)</label>
@@ -816,8 +884,13 @@ export default function AgreementsPanel({
                   </div>
                 </div>
               </div>
-              <label>Contract value ($)</label>
-              <input value={draft.value} placeholder="18000" style={{ marginBottom: 8 }}
+              </>)}
+              {/* The one figure every kind has, under the word that kind uses
+                  for it. Kept as a label rather than a column of its own: a
+                  kind change then never strands a number somewhere nobody
+                  reads it. */}
+              <label htmlFor="ag-value">{shape.amountLabel}</label>
+              <input id="ag-value" value={draft.value} placeholder="18000" style={{ marginBottom: 8 }}
                 onChange={(e) => up("included", { value: e.target.value })} />
             </div>
 

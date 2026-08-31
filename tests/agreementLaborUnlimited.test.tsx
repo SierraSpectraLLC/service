@@ -89,7 +89,9 @@ describe("the form will not record a contradiction", () => {
        the required fields have to be satisfied before a rule further down the
        page is the thing it is complaining about. Filling them is also the
        honest path: this is the sequence somebody actually types. */
-    fireEvent.change(screen.getByPlaceholderText("PO-4417"), { target: { value: "SS-AC-1" } });
+    // The hints are per-kind now (lib/agreements.AGREEMENT_SHAPE); these are
+    // the contract's, which is the kind this form opens on.
+    fireEvent.change(screen.getByPlaceholderText("AGR-2026-01"), { target: { value: "SS-AC-1" } });
     fireEvent.change(screen.getByPlaceholderText(/Annual service contract/),
       { target: { value: "Annual Service Contract - All Systems" } });
     // "What's included" is both a rail button and a section heading; the rail

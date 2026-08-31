@@ -49,7 +49,7 @@ import { checkRows, type PartImportRow, type RowProblem } from "@/lib/partImport
 // which made every new agreement throw on its own audit line.
 import {
   AGREEMENT_KINDS, AGREEMENT_STATES, KIND_LABEL as AGREEMENT_KIND_LABEL,
-  serializeKits, type IncludedKit,
+  serializeKits, shapeOf, type IncludedKit,
 } from "@/lib/agreements";
 import {
   closeLine, moverOf, severityOf, woAcceptsWork, woMove, woOpen, WO_LABEL,
@@ -14806,6 +14806,13 @@ function cleanAgreement(d: AgreementInput): { error: string } | {
 } {
   const kind = (AGREEMENT_KINDS as readonly string[]).includes(d.kind) ? d.kind : "contract";
   const status = (AGREEMENT_STATES as readonly string[]).includes(d.status) ? d.status : "active";
+  /* What this kind of paper actually has - see lib/agreements.AGREEMENT_SHAPE.
+     Entitlements belong to a contract, and every reader already agreed: both
+     coverage sites gate on kind === "contract". Zeroed rather than merely
+     hidden, for the same reason unlimited zeroes its cap below - a number the
+     form no longer shows is a number nobody can correct, and one left behind
+     by a kind change would keep answering questions about a quote. */
+  const shape = shapeOf(kind);
   const startsOn = d.startsOn.trim();
   const endsOn = d.endsOn.trim();
   if (startsOn && !isIsoDay(startsOn)) return { error: "Start date should look like 2026-01-01" };
@@ -14822,22 +14829,26 @@ function cleanAgreement(d: AgreementInput): { error: string } | {
     number: d.number.trim().slice(0, 60),
     title: d.title.trim().slice(0, 160),
     startsOn, endsOn,
-    renewNoticeDays: whole(d.renewNoticeDays, 3650),
+    /* An invoice does not lapse, it falls due, so a renewal notice on one
+       points at the wrong event - and left at its default 60 it would quietly
+       drive `standing` to "Up for renewal" from a field the form no longer
+       shows. */
+    renewNoticeDays: shape.renewal ? whole(d.renewNoticeDays, 3650) : 0,
     // Unlimited beats a cap: the number is zeroed so nothing reads it as one.
-    visitsIncluded: d.visitsUnlimited ? 0 : whole(d.visitsIncluded, 10_000),
+    visitsIncluded: !shape.entitlements || d.visitsUnlimited ? 0 : whole(d.visitsIncluded, 10_000),
     // parseMoney returns null for "not money-shaped"; an allowance nobody typed
     // is 0, which lib/agreements reads as "not part of this agreement".
-    partsAllowanceCents: d.partsUnlimited ? 0 : parseMoney(d.partsAllowance) ?? 0,
+    partsAllowanceCents: !shape.entitlements || d.partsUnlimited ? 0 : parseMoney(d.partsAllowance) ?? 0,
     // Same rule as the two above: unlimited beats a cap, so the number is
     // zeroed and nothing downstream reads it as one.
-    laborIncludedMinutes: d.laborUnlimited
+    laborIncludedMinutes: !shape.entitlements || d.laborUnlimited
       ? 0 : Math.round((parseFloat(d.laborIncludedHours.trim()) || 0) * 60),
-    visitsUnlimited: d.visitsUnlimited ?? false,
-    partsUnlimited: d.partsUnlimited ?? false,
-    laborUnlimited: d.laborUnlimited ?? false,
-    pmPartsIncluded: d.pmPartsIncluded ?? false,
-    includedKits: serializeKits(d.includedKits ?? []),
-    hourlyRateCents: parseMoney(d.hourlyRate ?? ""),
+    visitsUnlimited: shape.entitlements && (d.visitsUnlimited ?? false),
+    partsUnlimited: shape.entitlements && (d.partsUnlimited ?? false),
+    laborUnlimited: shape.entitlements && (d.laborUnlimited ?? false),
+    pmPartsIncluded: shape.entitlements && (d.pmPartsIncluded ?? false),
+    includedKits: shape.entitlements ? serializeKits(d.includedKits ?? []) : "",
+    hourlyRateCents: shape.entitlements ? parseMoney(d.hourlyRate ?? "") : null,
     // Which of the client's systems this paper covers; [] = all of them.
     // Ownership is validated by usage-time scoping, not here - a system that
     // changes hands stops counting by itself.
