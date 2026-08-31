@@ -14,10 +14,12 @@ import ModelSpecsCard from "@/components/ModelSpecsCard";
 import PublishModelCard from "@/components/PublishModelCard";
 import { publishBlockers, publishWarnings } from "@/lib/publicCatalog";
 import { appUrl } from "@/lib/appUrl";
+import { makerNames } from "@/lib/makersData";
 import { getModules } from "@/lib/flags";
 import { parseModelSpecs, specNameSuggestions } from "@/lib/modelSpecs";
 import ProceduresPanel from "@/components/ProceduresPanel";
 import ReferencePanel from "@/components/ReferencePanel";
+import ModelPartsAdd from "@/components/ModelPartsAdd";
 import { RecordHero, Tabs, type HeroStat, type TabItem } from "@/components/ui";
 import { stockSrc } from "@/lib/photos";
 
@@ -92,6 +94,12 @@ export default async function ModelPage({ params, searchParams }: {
       ((modelsByCategory[t.assetType] ??= {})[c] ??= []).push(t.name);
     }
   }
+
+  /* The module types, and the maker book the dialog's manufacturer and vendor
+     fields suggest from - the same two the parts catalog hands its own copy of
+     this form. */
+  const assetTypeNames = terms.filter((t) => t.kind === "asset_type").map((t) => t.name);
+  const bookNames = await makerNames(tenant);
 
   // Parts that belong to this model: tagged to it by name, or tagged to the
   // module type with no model narrowing. Kits lead - a PM kit is the thing
@@ -242,7 +250,12 @@ export default async function ModelPage({ params, searchParams }: {
       {tab === "parts" && <div className="card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
           <div className="card-title">Parts &amp; consumables</div>
-          <Link href="/settings/parts" className="btn link" style={{ marginLeft: "auto" }}>Open the parts catalog</Link>
+          <Link href="/settings/parts" className="btn link">Open the parts catalog</Link>
+          {/* File one here rather than going and finding this model again in a
+              book of a thousand. Both doors open with Suits and Specific
+              models already set to it - see ModelPartsAdd. */}
+          <ModelPartsAdd assetType={term.assetType} model={term.name}
+            assetTypes={assetTypeNames} modelsByType={modelOptions} makers={bookNames} />
         </div>
         <div className="mut t-meta" style={{ marginBottom: 8 }}>
           Everything the parts catalog files under {term.name} - and under any {term.assetType.toLowerCase()} generally.
@@ -267,7 +280,7 @@ export default async function ModelPage({ params, searchParams }: {
         ))}
         {modelParts.length === 0 && (
           <div className="mut t-small">
-            Nothing filed yet. Tag parts to {term.name} in the parts catalog and they appear here.
+            Nothing filed yet - add the first one above, or tag parts to {term.name} in the parts catalog.
           </div>
         )}
         {maintenanceParts.length > 0 && (
