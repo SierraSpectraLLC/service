@@ -83,8 +83,24 @@ export function quadIsPlausible(q: Quad, width: number, height: number): boolean
   const frame = width * height;
   if (frame <= 0) return false;
   const area = quadArea(q);
-  if (area < frame * 0.18) return false;
-  if (area > frame * 0.995) return false;
+  /* 12%, not the 18% this started at. A phone held far enough back to get a
+     whole page in frame leaves real margin around it, and a page that filled
+     only a sixth of the picture was being thrown away as a floor tile. The
+     tile check still bites: a tile is a few percent, not a seventh. */
+  if (area < frame * 0.12) return false;
+  /* 90%, not the 99.5% this started at, and the gap between those two numbers
+     was a real misdetection: inverting the threshold on a receipt lying on a
+     dark floor made the FLOOR the blob, which is a flawless rectangle covering
+     94% of the picture and outscored the actual page. Past this much of the
+     frame there is nothing left to crop - the page's own edges would be at or
+     beyond the picture's - so a confident answer here is always a wrong one. */
+  if (area > frame * 0.9) return false;
+  // The same mistake shifted inward: four corners all sitting on the picture's
+  // border is the detector describing the photograph, not a page within it.
+  const near = Math.max(2, Math.min(width, height) * 0.02);
+  const onBorder = (p: Point) =>
+    p.x <= near || p.y <= near || p.x >= width - near || p.y >= height - near;
+  if (q.every(onBorder)) return false;
 
   // Convex: every cross product of consecutive edges must share a sign.
   let sign = 0;
@@ -108,6 +124,84 @@ export function quadIsPlausible(q: Quad, width: number, height: number): boolean
 export const wholeFrame = (width: number, height: number): Quad => [
   { x: 0, y: 0 }, { x: width, y: 0 }, { x: width, y: height }, { x: 0, y: height },
 ];
+
+/**
+ * The four extreme corners of a blob's outline.
+ *
+ * The reduction that makes a CRUMPLED page work. A receipt with a folded edge
+ * has a wavy outline that simplifies to five, six or seven points at any
+ * sensible tolerance and to four at none - so asking approxPolyDP for exactly
+ * four corners throws away every real receipt that has been in a pocket.
+ * Extremes do not care about the wobble between the corners: on any convex
+ * outline the top-left corner still has the smallest x+y and the bottom-right
+ * the largest, exactly as in orderCorners, and x-y still separates the other
+ * two.
+ *
+ * Null when the blob is a thin diagonal, where two of the four extremes land
+ * on the same point and the "quad" is a degenerate triangle.
+ */
+export function extremeQuad(points: Point[]): Quad | null {
+  if (points.length < 4) return null;
+  let tl = points[0], tr = points[0], br = points[0], bl = points[0];
+  for (const p of points) {
+    if (p.x + p.y < tl.x + tl.y) tl = p;
+    if (p.x + p.y > br.x + br.y) br = p;
+    if (p.x - p.y > tr.x - tr.y) tr = p;
+    if (p.x - p.y < bl.x - bl.y) bl = p;
+  }
+  const q: Quad = [tl, tr, br, bl];
+  for (let i = 0; i < 4; i++) {
+    for (let j = i + 1; j < 4; j++) {
+      if (q[i].x === q[j].x && q[i].y === q[j].y) return null;
+    }
+  }
+  return q;
+}
+
+/**
+ * How nearly a quad is a rectangle seen at an angle: 1 for a true rectangle,
+ * falling toward 0 as it turns into a wedge.
+ *
+ * Opposite sides, compared as ratios. A page is a planar rectangle, and
+ * perspective shortens the far edge but keeps the pairs within a fair fraction
+ * of each other; nothing else in a photograph of one is shaped like that.
+ * Deliberately not angles - a genuine perspective shot has corners well off 90
+ * degrees, and judging those would reject the very photographs this is for.
+ */
+export function rectangularity(q: Quad): number {
+  const side = (i: number) => dist(q[i], q[(i + 1) % 4]);
+  const pair = (a: number, b: number) => (Math.max(a, b) > 0 ? Math.min(a, b) / Math.max(a, b) : 0);
+  return pair(side(0), side(2)) * pair(side(1), side(3));
+}
+
+/**
+ * How page-like a candidate is, for choosing between the strategies below.
+ *
+ * RECTANGULARITY leads, and that ordering is the correction that made a real
+ * photograph come out right. Scoring on coverage first picks the WRONG answer
+ * by construction: an over-inclusive blob - the page welded to a sunlit patch
+ * of the floor - is bigger than the page, so "biggest" rewards exactly the
+ * mistake. On the receipt this was built against, the true quad and the welded
+ * one differed by four points of coverage and by a THIRD of their side-ratio
+ * symmetry.
+ *
+ * FILL - how much of the quad the blob occupies - keeps out an L of shadow
+ * along two edges, or two bright patches whose bounding quad happens to be
+ * large. A real page fills its own corners.
+ *
+ * COVERAGE stays, under a square root, because the page IS the subject of the
+ * photograph and a tenth of the frame is something else - but weakly, so it
+ * breaks ties rather than deciding.
+ */
+export function candidateScore(blobArea: number, q: Quad, width: number, height: number): number {
+  const frame = width * height;
+  const area = quadArea(q);
+  if (frame <= 0 || area <= 0) return 0;
+  const coverage = Math.min(1, area / frame);
+  const fill = Math.min(1, blobArea / area);
+  const rect = rectangularity(q);
+  return Math.sqrt(coverage) * fill * rect * rect;
+}
 
 /**
  * How big the flattened result should be.
@@ -245,67 +339,245 @@ export function loadOpenCv(): Promise<CvBox> {
 }
 
 /**
+ * The median byte of a single-channel image, by histogram.
+ *
+ * Counting into 256 bins rather than sorting: this runs on every frame of the
+ * live viewfinder, and sorting half a million bytes to find the middle one was
+ * a measurable slice of the frame budget for an answer 256 counters give in
+ * one pass.
+ */
+export function medianByte(data: ArrayLike<number>): number {
+  if (!data.length) return 128;
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < data.length; i++) hist[data[i] & 255]++;
+  const half = data.length >> 1;
+  let acc = 0;
+  for (let v = 0; v < 256; v++) {
+    acc += hist[v];
+    if (acc > half) return v;
+  }
+  return 128;
+}
+
+/** An odd kernel size proportional to the picture, for closing text and gaps. */
+const oddKernel = (width: number, height: number, divisor: number): number => {
+  const n = Math.round(Math.min(width, height) / divisor);
+  return Math.min(31, Math.max(3, n % 2 === 1 ? n : n + 1));
+};
+
+/**
+ * Reduce one blob's outline to four corners, trying hardest first.
+ *
+ * Three rungs, and the ladder is the point - a page photographed on a desk is
+ * a clean quadrilateral, a page that has been folded in a pocket is not, and
+ * refusing the second is refusing most real receipts.
+ *
+ *   1. A genuine quadrilateral, if the outline simplifies to one at any sane
+ *      tolerance. Most accurate, because it uses the real edges, and it is
+ *      what makes a perspective shot come out square rather than merely
+ *      cropped.
+ *   2. The hull's four extreme corners (extremeQuad) - indifferent to a wavy
+ *      edge between the corners.
+ *   3. The smallest rotated rectangle that holds the blob. Cannot represent
+ *      perspective, but it is never degenerate, and for the overhead shot
+ *      that most phone scanning actually is, it is very close to right.
+ */
+function cornersOf(cv: Cv, contour: Cv, width: number, height: number): Quad | null {
+  const hull = new cv.Mat();
+  try {
+    cv.convexHull(contour, hull);
+    if (hull.rows < 4) return null;
+    const pts: Point[] = [];
+    for (let p = 0; p < hull.rows; p++) {
+      pts.push({ x: hull.data32S[p * 2], y: hull.data32S[p * 2 + 1] });
+    }
+
+    const peri = cv.arcLength(hull, true);
+    for (const k of [0.02, 0.03, 0.04, 0.05, 0.07, 0.09]) {
+      const approx = new cv.Mat();
+      try {
+        cv.approxPolyDP(hull, approx, k * peri, true);
+        if (approx.rows === 4) {
+          const four: Point[] = [];
+          for (let p = 0; p < 4; p++) {
+            four.push({ x: approx.data32S[p * 2], y: approx.data32S[p * 2 + 1] });
+          }
+          const q = orderCorners(four);
+          if (quadIsPlausible(q, width, height)) return q;
+        }
+      } finally { approx.delete(); }
+    }
+
+    const ex = extremeQuad(pts);
+    if (ex && quadIsPlausible(ex, width, height)) return ex;
+
+    const box = cv.RotatedRect.points(cv.minAreaRect(hull)) as Point[] | undefined;
+    if (box && box.length === 4) {
+      const q = orderCorners(box.map((p) => ({ x: p.x, y: p.y })));
+      if (quadIsPlausible(q, width, height)) return q;
+    }
+    return null;
+  } finally { hull.delete(); }
+}
+
+/** Every page-shaped candidate a binary mask offers, scored. */
+function candidatesIn(
+  cv: Cv, mask: Cv, width: number, height: number,
+): { quad: Quad; score: number }[] {
+  const out: { quad: Quad; score: number }[] = [];
+  const contours = new cv.MatVector();
+  const hierarchy = new cv.Mat();
+  try {
+    cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+    const frame = width * height;
+    for (let i = 0; i < contours.size(); i++) {
+      const c = contours.get(i);
+      try {
+        const area = cv.contourArea(c);
+        if (area < frame * 0.1) continue;
+        const quad = cornersOf(cv, c, width, height);
+        if (quad) out.push({ quad, score: candidateScore(area, quad, width, height) });
+      } finally { c.delete(); }
+    }
+    return out;
+  } finally { contours.delete(); hierarchy.delete(); }
+}
+
+/**
  * Find the four corners of the paper, or null when nothing convincing is there.
  *
- * The pipeline is the standard one and worth reading as a sentence: blur away
- * the paper's texture, find edges, thicken them so a gap in a shadow does not
- * break a contour, take every closed contour, keep the biggest one that
- * simplifies to four points, and check it is plausible.
+ * THREE WAYS OF SEEING A PAGE, scored against each other, because the one this
+ * started with is the one that fails on the commonest photograph in the world.
+ * Edge-following alone found NOTHING on a real receipt shot on a beige stone
+ * floor - not a wrong rectangle, no page-sized contour at all - because white
+ * paper on a light surface gives a gradient too weak for Canny to close a loop
+ * around, and a boundary with gaps in it encloses no area to measure. Measured
+ * on that photograph: zero contours over 15% of the frame at any threshold,
+ * while a plain brightness split found the page at 41% of frame, which is what
+ * it actually occupies.
  *
- * Runs on a DOWNSCALED copy. Edge detection does not get better on a 12
- * megapixel image, it gets slower - several seconds on a mid-range phone
- * against a couple of hundred milliseconds here - and the corners it finds
- * scale back up exactly. The warp itself then runs on the full-resolution
- * original, so nothing is actually lost.
+ *   BRIGHT  Otsu's split, page as the light side. Paper is usually the
+ *           brightest thing in the picture, and this cares about the page's
+ *           TONE rather than its edge, so a soft boundary is no obstacle.
+ *   DARK    the same split inverted, for a page darker than what it lies on -
+ *           a white desk, a lightbox, a service manual on a steel bench.
+ *   EDGES   Canny, thresholds from the picture's own median rather than the
+ *           fixed 50/150 that assumed a dark background, closed hard enough to
+ *           bridge a shadow. Still the most accurate when it works, so it is
+ *           kept and allowed to win on score.
+ *
+ * Runs on a DOWNSCALED copy. Detection does not get better on a 12 megapixel
+ * image, it gets slower - several seconds on a mid-range phone against a
+ * couple of hundred milliseconds here - and the corners it finds scale back up
+ * exactly. The warp itself then runs on the full-resolution original, so
+ * nothing is actually lost.
  */
-export function detectQuad(cv: Cv, canvas: HTMLCanvasElement): Quad | null {
+export type PageCandidate = { quad: Quad; score: number; from: string };
+
+/**
+ * Every page-shaped candidate every strategy can see, best first.
+ *
+ * Split out from detectQuad so the choice between strategies is INSPECTABLE.
+ * Which mask won, and by how much, is the whole question when a photograph
+ * comes out cropped wrong, and it is not answerable from a function that
+ * returns one quad.
+ */
+export function detectCandidates(
+  cv: Cv, canvas: HTMLCanvasElement, opts: { fast?: boolean } = {},
+): PageCandidate[] {
+  const width = canvas.width, height = canvas.height;
   const src = cv.imread(canvas);
   const gray = new cv.Mat();
   const blurred = new cv.Mat();
-  const edges = new cv.Mat();
-  const contours = new cv.MatVector();
-  const hierarchy = new cv.Mat();
-  const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+  const paper = new cv.Mat();
+  const mask = new cv.Mat();
+  // Big enough to swallow the printing INSIDE the page: without it the page's
+  // own text punches holes in the mask and its outline follows the paragraphs.
+  const fill = oddKernel(width, height, 50);
+  const closer = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(fill, fill));
+  /* Severs the thin bright bridges between the page and whatever else in the
+     picture is pale - a sunlit patch of the floor it is lying on. Applied
+     BEFORE the close, which is the whole trick: closing first dilates the page
+     across a small gap and welds it to that patch, and no amount of opening
+     afterwards can tell the weld from the page. Opening first cuts a bridge
+     thinner than the kernel while leaving a page hundreds of pixels wide
+     untouched. Getting this order wrong put a corner out at the frame's edge
+     on the very first real photograph. */
+  const cut = oddKernel(width, height, 45);
+  const opener = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(cut, cut));
   try {
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
-    cv.Canny(blurred, edges, 50, 150);
-    cv.dilate(edges, edges, kernel);
-    cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
 
-    let best: Quad | null = null;
-    let bestArea = 0;
-    for (let i = 0; i < contours.size(); i++) {
-      const c = contours.get(i);
-      const approx = new cv.Mat();
-      try {
-        const peri = cv.arcLength(c, true);
-        cv.approxPolyDP(c, approx, 0.02 * peri, true);
-        if (approx.rows === 4) {
-          const pts: Point[] = [];
-          for (let p = 0; p < 4; p++) {
-            pts.push({ x: approx.data32S[p * 2], y: approx.data32S[p * 2 + 1] });
-          }
-          const quad = orderCorners(pts);
-          const area = quadArea(quad);
-          if (area > bestArea && quadIsPlausible(quad, canvas.width, canvas.height)) {
-            best = quad;
-            bestArea = area;
-          }
-        }
-      } finally {
-        approx.delete();
-        c.delete();
-      }
+    const found: PageCandidate[] = [];
+    const take = (from: string) => {
+      for (const c of candidatesIn(cv, mask, width, height)) found.push({ ...c, from });
+    };
+
+    /* PAPERNESS, and it is the strategy that rescued the first real photograph
+       this scanner ever saw: a receipt on a beige stone floor, in sun. Measured
+       there, paper read S=12 V=204 and the brightest floor S=60 V=177 - only
+       27 units darker, which is why a grey threshold welded them into one blob
+       and put a corner out at the frame's edge, but FIVE TIMES less saturated.
+       Grey throws away the one channel that separates them.
+
+       V - 2S is bright AND neutral in one number, which is what paper is and
+       what almost nothing it gets photographed on is: wood, stone, upholstery,
+       a desk and a car seat all carry colour. addWeighted rather than a pixel
+       loop, so it stays cheap enough for the live viewfinder. */
+    const rgb = new cv.Mat();
+    const hsv = new cv.Mat();
+    const chans = new cv.MatVector();
+    try {
+      cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB);
+      cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV);
+      cv.split(hsv, chans);
+      cv.addWeighted(chans.get(2), 1, chans.get(1), -2, 0, paper);
+      cv.GaussianBlur(paper, paper, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+      cv.threshold(paper, mask, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+      cv.morphologyEx(mask, mask, cv.MORPH_OPEN, opener);
+      cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, closer);
+      take("paperness");
+    } finally { rgb.delete(); hsv.delete(); chans.delete(); }
+
+    /* The live viewfinder runs several times a second on a phone that is also
+       decoding video, so it takes the two cheap strategies that between them
+       cover almost every real page and leaves the rest to the shutter. The
+       overlay is a HINT - it says "the camera can see it" - while the still
+       gets the full set, and the corners it finds are editable either way. */
+    for (const invert of opts.fast ? [false] : [false, true]) {
+      cv.threshold(blurred, mask, 0, 255,
+        (invert ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY) + cv.THRESH_OTSU);
+      cv.morphologyEx(mask, mask, cv.MORPH_OPEN, opener);
+      cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, closer);
+      take(invert ? "dark" : "bright");
     }
-    return best;
+
+    if (!opts.fast) {
+      // The median drives the thresholds: a dim photo and a bright one need
+      // different numbers, and 50/150 was only ever right for one of them.
+      const median = medianByte(blurred.data as Uint8Array);
+      cv.Canny(blurred, mask, Math.max(10, 0.66 * median), Math.min(255, 1.33 * median));
+      cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, closer);
+      take("edges");
+    }
+
+    found.sort((a, b) => b.score - a.score);
+    return found;
   } finally {
     // Emscripten has no garbage collector reaching into WASM memory: every Mat
     // is a manual allocation, and a scanner that leaks one per attempt walks a
     // phone into an out-of-memory crash after a dozen receipts.
-    src.delete(); gray.delete(); blurred.delete(); edges.delete();
-    contours.delete(); hierarchy.delete(); kernel.delete();
+    src.delete(); gray.delete(); blurred.delete(); paper.delete(); mask.delete();
+    closer.delete(); opener.delete();
   }
+}
+
+/** The best page-shaped thing in the picture, or null when nothing convinces. */
+export function detectQuad(
+  cv: Cv, canvas: HTMLCanvasElement, opts: { fast?: boolean } = {},
+): Quad | null {
+  return detectCandidates(cv, canvas, opts)[0]?.quad ?? null;
 }
 
 /**
