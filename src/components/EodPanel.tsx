@@ -86,7 +86,7 @@ const blankLog = (me: string, known: Set<string>) => ({
  * system's or asset's own page - anything written there shows up here.
  */
 export default function EodPanel({
-  clientName, orgId, entries, dateMDY, readOnly = false, canSend = false, recipientCount = 0, sentInfo = "",
+  clientName, orgId, entries, dateMDY, writeOn = "", canSend = false, recipientCount = 0, sentInfo = "",
   emailSubject = "", emailHtml = "", recipients = [], people = [], me = "",
 }: {
   clientName: string; orgId: number | null; entries: EodLine[]; dateMDY: string;
@@ -94,7 +94,16 @@ export default function EodPanel({
   people?: { name: string; org: string }[];
   /** The signed-in person, who did the work often enough to be the default. */
   me?: string;
-  readOnly?: boolean; canSend?: boolean; recipientCount?: number; sentInfo?: string;
+  /**
+   * The day these lines are about, when it is not today. Blank is today, which
+   * is what every save meant before a past day could be written.
+   *
+   * Replaces a readOnly flag: a past day used to be unwritable, so "which day"
+   * and "may I type" were the same question. They are not, and the date is the
+   * one the save has to carry.
+   */
+  writeOn?: string;
+  canSend?: boolean; recipientCount?: number; sentInfo?: string;
   /** The composed report, so the preview shows the bytes that would be sent. */
   emailSubject?: string; emailHtml?: string; recipients?: string[];
 }) {
@@ -142,7 +151,14 @@ export default function EodPanel({
     const d = draftsRef.current[k] ?? { systemUpdate: e.systemUpdate, actionItem: e.actionItem };
     setStatus((s) => ({ ...s, [k]: "saving" }));
     startTransition(async () => {
-      await saveEodUpdate(targetOf(e), d);
+      const res = await saveEodUpdate(targetOf(e), d, writeOn || undefined);
+      // A refusal used to be invisible here, which was survivable while every
+      // save was for today and could not be refused. A backdated one can.
+      if (res?.error) {
+        setStatus((s) => ({ ...s, [k]: "dirty" }));
+        toast({ message: res.error });
+        return;
+      }
       // Typed again mid-flight? Stay dirty; the newer edit's timer saves it.
       setStatus((s) => (s[k] === "dirty" ? s : { ...s, [k]: "saved" }));
     });
@@ -282,21 +298,26 @@ export default function EodPanel({
 
   return (
     <Panel title={clientName}
-      hint={<>{dateMDY}{sentInfo && <span style={{ color: "var(--t-good-fg)", fontWeight: 700 }}> · {sentInfo} ✓</span>}</>}
+      /* The date was decoration while a past day was read-only. It is now the
+         thing that says where what you type is going, so a backdated panel
+         says so in words rather than leaving the reader to notice a date. */
+      hint={<>
+        {dateMDY}
+        {writeOn && <span style={{ color: "var(--t-warn-fg)", fontWeight: 700 }}> · writing this day, not today</span>}
+        {sentInfo && <span style={{ color: "var(--t-good-fg)", fontWeight: 700 }}> · {sentInfo} ✓</span>}
+      </>}
       actions={
         <>
-          {!readOnly && (
+          {!writeOn && (
             <button className="btn sm accent" onClick={send} disabled={pending || anyUnsaved || !canSend || !filled.length}
               title={canSend ? `Emails ${clientName}'s recipients, with portal links per line` : `Add ${clientName}'s recipients in Settings first`}>
               {pending ? "..." : `Send to ${clientName}`}
             </button>
           )}
-          {!readOnly && (
-            <button className="btn sm" onClick={() => { setLog(blankLog(me, known)); setLogErr(""); setLogging(true); }}
-              title={`Something you did for ${clientName} that no system covers`}>
-              + Log work
-            </button>
-          )}
+          <button className="btn sm" onClick={() => { setLog(blankLog(me, known)); setLogErr(""); setLogging(true); }}
+            title={`Something you did for ${clientName} that no system covers`}>
+            + Log work
+          </button>
           <button className="btn sm primary" onClick={copy} disabled={!filled.length}>
             {copied ? "Copied ✓" : "Copy"}
           </button>
@@ -305,34 +326,21 @@ export default function EodPanel({
       {sendMsg && (
         <div className="t-small" style={{ marginBottom: 8, color: sendMsg.endsWith("✓") ? "#2E6B2E" : "#A32D2D" }}>{sendMsg}</div>
       )}
-      {!canSend && !readOnly && (
+      {!canSend && !writeOn && (
         <div className="mut t-meta" style={{ marginBottom: 8 }}>No recipients set for {clientName} yet - add them in Settings.</div>
       )}
 
-      {/* Read-only days never render the blanks, so their emptiness has to be
-          said out loud - an empty card reads as a broken page. */}
-      {filled.length === 0 && (readOnly || blanks.length === 0) && (
+      {/* A past day usually has nothing on it at all, so its emptiness has to
+          be said out loud - an empty card reads as a broken page. */}
+      {filled.length === 0 && blanks.length === 0 && (
         <div className="mut t-body">
-          {readOnly ? "Nothing was recorded for this client on this day." : "Nothing to report."}
+          {writeOn ? "Nothing was recorded for this client on this day." : "Nothing to report."}
         </div>
       )}
 
-      {filled.map((e, i) => (readOnly ? (
-        <div key={keyOf(e)} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 8, background: "#FAFBFD" }}>
-          <div className="t-body" style={{ fontWeight: 700, marginBottom: 6 }}>
-            {nounOf(e)} {i + 1}: <span className="mono">{e.label}</span>
-            {e.kind === "offsystem" && bylineOf(e) && <span className="mut t-meta" style={{ marginLeft: 8 }}>{bylineOf(e)}</span>}
-          </div>
-          <div className="t-body" style={{ marginBottom: 4 }}>
-            <span className="eyebrow" style={{ marginRight: 6 }}>Update</span>{e.systemUpdate || <span className="mut">(blank)</span>}
-          </div>
-          <div className="t-body">
-            <span className="eyebrow" style={{ marginRight: 6 }}>Action</span>{e.actionItem || <span className="mut">(blank)</span>}
-          </div>
-        </div>
-      ) : editable(e, i + 1)))}
+      {filled.map((e, i) => editable(e, i + 1))}
 
-      {!readOnly && blanks.length > 0 && (
+      {blanks.length > 0 && (
         <>
           <button className="btn link" style={{ marginTop: 4 }} onClick={() => setShowBlanks((v) => !v)}>
             {showBlanks ? "Hide" : "Show"} {blanks.length} with nothing written yet
@@ -347,20 +355,18 @@ export default function EodPanel({
           {skipped.map((e) => (
             <span key={keyOf(e)} className="pill neutral" style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
               {e.externalId}
-              {!readOnly && (
-                <button className="btn link" style={{ fontSize: 10 }} disabled={pending}
-                  onClick={() => startTransition(async () => {
-                    await setEodSkip(targetOf(e), false);
-                    toast({ message: `Included ${e.externalId}` });
-                  })}>include</button>
-              )}
+              <button className="btn link" style={{ fontSize: 10 }} disabled={pending}
+                onClick={() => startTransition(async () => {
+                  await setEodSkip(targetOf(e), false);
+                  toast({ message: `Included ${e.externalId}` });
+                })}>include</button>
             </span>
           ))}
         </div>
       )}
 
       <Dialog open={logging} onClose={() => setLogging(false)}
-        title="Log work done off-system"
+        title={`Log work done off-system${writeOn ? ` on ${dateMDY}` : ""}`}
         context={clientName}
         footer={
           <>
@@ -376,7 +382,7 @@ export default function EodPanel({
                   title: log.title, person: log.person,
                   minutes: parseInt(log.minutes, 10) || 0,
                   systemUpdate: log.systemUpdate, actionItem: log.actionItem,
-                });
+                }, writeOn || undefined);
                 if (res?.error) { setLogErr(res.error); return; }
                 setLogging(false);
                 toast({ message: `Logged "${log.title.trim()}"` });

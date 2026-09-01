@@ -4435,12 +4435,48 @@ async function eodRowFor(actor: Awaited<ReturnType<typeof requireStaff>>, eodId:
   return row;
 }
 
+/**
+ * WHICH DAY AN EOD LINE IS ABOUT.
+ *
+ * Blank is today, which is what both writers meant before a past day could be
+ * written at all. The future is refused rather than clamped: a line dated
+ * tomorrow is a claim about work that has not happened, and quietly filing it
+ * under today would hide the mistake instead of naming it.
+ *
+ * Shared by saveEodUpdate and logOffSystemWork because they are two ways of
+ * writing the same day, and a rule kept in one of them is a rule the other
+ * gets wrong.
+ */
+function eodDay(on?: string): { date: string } | { error: string } {
+  const today = shopToday();
+  const wanted = (on ?? "").trim();
+  if (!wanted) return { date: today };
+  if (!isIsoDay(wanted)) return { error: "That date should look like 2026-01-31" };
+  if (wanted > today) return { error: "That day hasn't happened yet" };
+  return { date: wanted };
+}
+
 export async function saveEodUpdate(
   target: EodTarget,
   data: { systemUpdate: string; actionItem: string },
-) {
+  /**
+   * THE DAY THIS IS ABOUT, when that is not today.
+   *
+   * It used to be shopToday() and nothing else, so a line could only ever be
+   * written for the day it was typed - and a shop that did the work on Friday
+   * and wrote it up on Monday had no way to say so. Editing an existing row
+   * already reached any date through target.eodId; only a NEW line was stuck.
+   *
+   * The future is refused rather than clamped. An EOD update dated tomorrow is
+   * a claim about work that has not happened, and silently filing it under
+   * today would hide the mistake instead of naming it.
+   */
+  on?: string,
+): Promise<{ error?: string } | undefined> {
   const u = await requireStaff();
-  const date = shopToday();
+  const day = eodDay(on);
+  if ("error" in day) return day;
+  const { date } = day;
   const systemUpdate = data.systemUpdate.trim();
   const actionItem = data.actionItem.trim();
   if (target.eodId != null) {
@@ -4494,8 +4530,12 @@ export async function saveEodUpdate(
 export async function logOffSystemWork(
   orgId: number | null,
   data: { title: string; person: string; minutes: number; systemUpdate: string; actionItem: string },
+  /** The day it happened, when that is not today. See eodDay. */
+  on?: string,
 ): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
+  const day = eodDay(on);
+  if ("error" in day) return day;
   const title = data.title.trim().slice(0, 160);
   if (!title) return { error: "Say what the work was" };
   // The picker is a convenience; this is the rule. A name typed past the
@@ -4513,7 +4553,7 @@ export async function logOffSystemWork(
   const [row] = await db.insert(eodUpdates).values({
     tenantOrgId: tenant,
     instrumentId: null, assetId: null,
-    date: shopToday(), ownerOrgId: orgId,
+    date: day.date, ownerOrgId: orgId,
     title, person,
     minutes: Math.max(0, Math.min(24 * 60, Math.round(data.minutes || 0))),
     systemUpdate: data.systemUpdate.trim(), actionItem: data.actionItem.trim(),
@@ -4521,7 +4561,8 @@ export async function logOffSystemWork(
   }).returning({ id: eodUpdates.id });
   await audit({
     actor: u.email, entityType: "eod", entityId: `offsystem:${row.id}`, tenantOrgId: tenant,
-    action: `logged off-system work: ${title}`,
+    action: `logged off-system work: ${title}`
+      + (day.date === shopToday() ? "" : ` (for ${day.date})`),
   });
   revalidatePath("/eod");
   return { id: row.id };
