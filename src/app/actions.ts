@@ -81,7 +81,7 @@ import {
   amendmentTitle, checkReportTitle, editableReport, mayWorkReport, reimbursementPool,
   reportTotalCents, settledReport,
 } from "@/lib/expenseReports";
-import { checkStipend } from "@/lib/stipends";
+import { cadenceOf, checkStipend, stipendCadenceLabel } from "@/lib/stipends";
 import { poProblem, usablePoLines } from "@/lib/backfill";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
@@ -9093,14 +9093,18 @@ export async function attachPoolExpenses(
  */
 export async function createStipend(data: {
   person: string; label: string; amount: string; kind: string;
-  everyMonths: number; dayOfMonth: number; startsOn: string; endsOn: string; note: string;
+  cadence?: string; everyMonths: number; dayOfMonth: number;
+  everyWeeks?: number; weekday?: number;
+  startsOn: string; endsOn: string; note: string;
 }): Promise<{ error?: string; id?: number }> {
   const u = await requireOwner();
   const t = readTenant(u);
   const cents = parseMoney(data.amount) ?? 0;
   const draft = {
     person: data.person.trim(), label: data.label.trim(), amountCents: cents,
+    cadence: cadenceOf(data.cadence),
     everyMonths: Math.round(data.everyMonths), dayOfMonth: Math.round(data.dayOfMonth),
+    everyWeeks: Math.round(data.everyWeeks ?? 1), weekday: Math.round(data.weekday ?? 1),
     startsOn: data.startsOn.trim(), endsOn: data.endsOn.trim(),
   };
   const problem = checkStipend(draft);
@@ -9116,14 +9120,18 @@ export async function createStipend(data: {
   const [row] = await db.insert(stipends).values({
     tenantOrgId: t, person: member.name, label: draft.label.slice(0, 80),
     amountCents: cents, kind: await cleanKind(data.kind, t),
+    cadence: draft.cadence,
     everyMonths: draft.everyMonths, dayOfMonth: draft.dayOfMonth,
+    everyWeeks: draft.everyWeeks, weekday: draft.weekday,
     startsOn: draft.startsOn, endsOn: draft.endsOn,
     note: data.note.trim().slice(0, 300), createdBy: u.email,
   }).returning();
   await audit({
     actor: u.email, entityType: "stipend", entityId: row.id, tenantOrgId: t,
+    // The cadence in the words the roster uses, so an owner reading the log a
+    // year later sees the schedule they set rather than three raw columns.
     action: `set up a ${formatCents(cents)} ${draft.label} for ${member.name}`
-      + `, every ${draft.everyMonths === 1 ? "month" : `${draft.everyMonths} months`} from ${draft.startsOn}`
+      + `, ${stipendCadenceLabel(draft)} from ${draft.startsOn}`
       + (draft.endsOn ? ` until ${draft.endsOn}` : ""),
   });
   revalidatePath("/people");

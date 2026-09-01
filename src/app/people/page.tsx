@@ -169,7 +169,8 @@ export default async function PeoplePage() {
 
   const standing: StipendRow[] = stipendRows.map((s) => ({
     id: s.id, person: s.person, label: s.label, amountCents: s.amountCents, kind: s.kind,
-    everyMonths: s.everyMonths, dayOfMonth: s.dayOfMonth,
+    cadence: s.cadence, everyMonths: s.everyMonths, dayOfMonth: s.dayOfMonth,
+    everyWeeks: s.everyWeeks, weekday: s.weekday,
     startsOn: s.startsOn, endsOn: s.endsOn, active: s.active, lastOn: s.lastOn,
     /* Asked of the same rule the cron obeys, so the row and the pass cannot
        disagree about when somebody next gets paid. */

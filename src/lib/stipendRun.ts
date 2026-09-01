@@ -108,7 +108,7 @@ export async function runStipends(now = new Date()): Promise<StipendResult> {
           tenantOrgId: s.tenantOrgId,
           workOrderId: null,
           kind: s.kind,
-          description: stipendDescription(s.label, on),
+          description: stipendDescription(s.label, on, s.cadence),
           amountCents: s.amountCents,
           incurredOn: on,
           // Nobody's client pays for our engineer's broadband.

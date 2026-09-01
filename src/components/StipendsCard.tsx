@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { createStipend, updateStipend } from "@/app/actions";
-import { checkStipend, previewFirstCycle } from "@/lib/stipends";
+import {
+  LAST_DAY, WEEKDAY_NAMES, checkStipend, monthlyEquivalentCents, previewFirstCycle,
+  stipendCadenceLabel,
+} from "@/lib/stipends";
 import { formatCents } from "@/lib/money";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
@@ -17,8 +20,12 @@ export type StipendRow = {
   label: string;
   amountCents: number;
   kind: string;
+  /** "months" | "weeks" - see lib/stipends. */
+  cadence: string;
   everyMonths: number;
   dayOfMonth: number;
+  everyWeeks: number;
+  weekday: number;
   startsOn: string;
   endsOn: string;
   active: boolean;
@@ -28,7 +35,27 @@ export type StipendRow = {
   note: string;
 };
 
-const cadence = (n: number) => (n === 1 ? "monthly" : n === 3 ? "quarterly" : n === 12 ? "yearly" : `every ${n} months`);
+/**
+ * The dropdown's options, flattened into one list.
+ *
+ * A cadence select and a separate day-of-month select is two decisions to
+ * express one, and the second one is meaningless in the weekly shape - which
+ * is how a form ends up with a disabled control nobody can explain. These are
+ * the schedules a shop actually asks for, written as sentences.
+ */
+const SHAPES: { key: string; label: string; cadence: string;
+  everyMonths: number; dayOfMonth: number; everyWeeks: number }[] = [
+  { key: "m1-1",    label: "Monthly, on the 1st",        cadence: "months", everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 1 },
+  { key: "m1-15",   label: "Monthly, on the 15th",       cadence: "months", everyMonths: 1,  dayOfMonth: 15,       everyWeeks: 1 },
+  { key: "m1-last", label: "Monthly, on the last day",   cadence: "months", everyMonths: 1,  dayOfMonth: LAST_DAY, everyWeeks: 1 },
+  { key: "m1-day",  label: "Monthly, on a day I pick",   cadence: "months", everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 1 },
+  { key: "m3",      label: "Every quarter",              cadence: "months", everyMonths: 3,  dayOfMonth: 1,        everyWeeks: 1 },
+  { key: "m6",      label: "Every 6 months",             cadence: "months", everyMonths: 6,  dayOfMonth: 1,        everyWeeks: 1 },
+  { key: "m12",     label: "Every year",                 cadence: "months", everyMonths: 12, dayOfMonth: 1,        everyWeeks: 1 },
+  { key: "w1",      label: "Every week",                 cadence: "weeks",  everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 1 },
+  { key: "w2",      label: "Every other week",           cadence: "weeks",  everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 2 },
+  { key: "w4",      label: "Every 4 weeks",              cadence: "weeks",  everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 4 },
+];
 
 /**
  * Standing reimbursements: the internet stipend, the phone allowance.
@@ -59,7 +86,7 @@ export default function StipendsCard({ rows, roster, categories, isOwner, today 
   const [editing, setEditing] = useState<StipendRow | null>(null);
   const [err, setErr] = useState("");
   const [draft, setDraft] = useState({
-    person: "", label: "", amount: "", kind: "", everyMonths: "1", dayOfMonth: "1",
+    person: "", label: "", amount: "", kind: "", shape: "m1-1", dayOfMonth: "1", weekday: "1",
     startsOn: "", endsOn: "", note: "",
   });
   const [edit, setEdit] = useState({ amount: "", endsOn: "", note: "", label: "" });
@@ -68,7 +95,7 @@ export default function StipendsCard({ rows, roster, categories, isOwner, today 
     setDraft({
       person: roster[0]?.name ?? "", label: "", amount: "",
       kind: categories.find((c) => /phone|internet/i.test(c)) ?? categories[0] ?? "Other",
-      everyMonths: "1", dayOfMonth: "1",
+      shape: "m1-1", dayOfMonth: "1", weekday: "1",
       // The 1st of the current month: "starting this month" is what somebody
       // setting one of these up almost always means, and lib/stipends pays the
       // month it was set up in rather than the month after.
@@ -79,16 +106,28 @@ export default function StipendsCard({ rows, roster, categories, isOwner, today 
   };
 
   const cents = Math.round(parseFloat(draft.amount.replace(/[^0-9.]/g, "")) * 100) || 0;
+  const shape = SHAPES.find((x) => x.key === draft.shape) ?? SHAPES[0];
+  // Only the "day I pick" shape reads the day box; every other one carries its
+  // own day, so switching to "on the last day" cannot be silently overridden
+  // by a number left behind in a field nobody is looking at.
+  const picksDay = shape.key === "m1-day";
+  const terms = {
+    cadence: shape.cadence,
+    everyMonths: shape.everyMonths,
+    dayOfMonth: picksDay ? parseInt(draft.dayOfMonth, 10) || 0 : shape.dayOfMonth,
+    everyWeeks: shape.everyWeeks,
+    weekday: parseInt(draft.weekday, 10),
+  };
   const problem = checkStipend({
     person: draft.person, label: draft.label, amountCents: cents,
-    everyMonths: parseInt(draft.everyMonths, 10) || 0,
-    dayOfMonth: parseInt(draft.dayOfMonth, 10) || 0,
-    startsOn: draft.startsOn, endsOn: draft.endsOn,
+    ...terms, startsOn: draft.startsOn, endsOn: draft.endsOn,
   });
-  const firstOn = previewFirstCycle(draft.startsOn, parseInt(draft.dayOfMonth, 10) || 1);
+  const firstOn = previewFirstCycle(draft.startsOn, terms.dayOfMonth, terms.cadence, terms.weekday);
 
+  // Averaged per cadence rather than divided by everyMonths: a weekly $12 is
+  // $26 a month, and this line read $12 the day weekly schedules shipped.
   const monthly = rows.filter((r) => r.active)
-    .reduce((n, r) => n + Math.round(r.amountCents / Math.max(1, r.everyMonths)), 0);
+    .reduce((n, r) => n + monthlyEquivalentCents(r), 0);
 
   return (
     <Panel
@@ -124,7 +163,7 @@ export default function StipendsCard({ rows, roster, categories, isOwner, today 
                 what: (
                   <>
                     <span>{r.label}</span>
-                    <div className="mut t-meta">{r.kind} · {cadence(r.everyMonths)}</div>
+                    <div className="mut t-meta">{r.kind} · {stipendCadenceLabel(r)}</div>
                   </>
                 ),
                 amount: <span style={{ fontWeight: 700 }}>{formatCents(r.amountCents)}</span>,
@@ -188,8 +227,7 @@ export default function StipendsCard({ rows, roster, categories, isOwner, today 
                 onClick={() => startTransition(async () => {
                   const res = await createStipend({
                     person: draft.person, label: draft.label, amount: draft.amount, kind: draft.kind,
-                    everyMonths: parseInt(draft.everyMonths, 10) || 1,
-                    dayOfMonth: parseInt(draft.dayOfMonth, 10) || 1,
+                    ...terms,
                     startsOn: draft.startsOn, endsOn: draft.endsOn, note: draft.note,
                   });
                   if (res?.error) { setErr(res.error); return; }
@@ -231,15 +269,33 @@ export default function StipendsCard({ rows, roster, categories, isOwner, today 
             </div>
             <div>
               <label>How often</label>
-              <select value={draft.everyMonths} aria-label="How often"
-                onChange={(e) => setDraft({ ...draft, everyMonths: e.target.value })}>
-                <option value="1">Every month</option>
-                <option value="3">Every quarter</option>
-                <option value="6">Every 6 months</option>
-                <option value="12">Every year</option>
+              <select value={draft.shape} aria-label="How often"
+                onChange={(e) => setDraft({ ...draft, shape: e.target.value })}>
+                {SHAPES.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
               </select>
             </div>
           </div>
+          {/* Only the shape that needs one asks for one. */}
+          {picksDay && (
+            <div style={{ marginBottom: 8 }}>
+              <label>Day of the month</label>
+              <input value={draft.dayOfMonth} aria-label="Day of the month" inputMode="numeric"
+                onChange={(e) => setDraft({ ...draft, dayOfMonth: e.target.value })} />
+              <div className="field-hint">
+                1 to 31. A 31 lands on the last day of every month - the 30th in April,
+                the 28th in February - so a short month is never skipped.
+              </div>
+            </div>
+          )}
+          {shape.cadence === "weeks" && (
+            <div style={{ marginBottom: 8 }}>
+              <label>Which day</label>
+              <select value={draft.weekday} aria-label="Which day"
+                onChange={(e) => setDraft({ ...draft, weekday: e.target.value })}>
+                {WEEKDAY_NAMES.map((d, i) => <option key={d} value={String(i)}>{d}</option>)}
+              </select>
+            </div>
+          )}
           <div className="pf2">
             <div>
               <label>Starting</label>
@@ -253,10 +309,14 @@ export default function StipendsCard({ rows, roster, categories, isOwner, today 
             </div>
           </div>
           <div className="field-hint" style={{ marginTop: 8 }}>
+            {/* The schedule said back as a sentence, plus the date it actually
+                lands on. "Every 2 weeks on Friday from the 3rd" can be misread
+                four ways, and the only thing that settles it is the date - so
+                it is shown before anybody commits standing company money. */}
             {firstOn
-              ? <>It pays on the {new Date(`${firstOn}T12:00:00Z`).getUTCDate()}
-                  {" "}of the month, first on <b>{firstOn}</b>. Leave the end date blank to run until you stop it.</>
-              : "Pick the month it starts."}
+              ? <>It pays <b>{stipendCadenceLabel(terms)}</b>, first on <b>{firstOn}</b>.
+                  {" "}Leave the end date blank to run until you stop it.</>
+              : "Pick the day it starts."}
           </div>
         </Dialog>
       )}

@@ -4221,3 +4221,17 @@ END $$;
 -- claim in its own right and outlives the paperwork it came from.
 ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "amends_id" integer;
 CREATE INDEX IF NOT EXISTS "expense_reports_amends_idx" ON "expense_reports" ("amends_id");
+
+-- A month is not the only thing that recurs. Standing reimbursements could
+-- only be scheduled as "every N months on day D", so "weekly parking" or
+-- "every other Friday" had no way to be written and got filed by hand every
+-- week - which is the work the feature exists to remove. Additive, and
+-- 'months' on every arrangement already on file, so nothing changes cadence
+-- on a deploy.
+--
+-- The last-day-of-the-month case needs no column: day_of_month 31 clamps to
+-- each month's length, so it already lands on the 30th in April and the 28th
+-- in February. See LAST_DAY in lib/stipends, which names it.
+ALTER TABLE "stipends" ADD COLUMN IF NOT EXISTS "cadence" text NOT NULL DEFAULT 'months';
+ALTER TABLE "stipends" ADD COLUMN IF NOT EXISTS "every_weeks" integer NOT NULL DEFAULT 1;
+ALTER TABLE "stipends" ADD COLUMN IF NOT EXISTS "weekday" integer NOT NULL DEFAULT 1;
