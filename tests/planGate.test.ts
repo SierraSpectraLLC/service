@@ -50,7 +50,7 @@ const DANA = (orgId: number): Who => ({
   orgId: null, operatorOrgId: orgId, rootOperatorOrgId: 3,
 });
 
-const { eq } = await import("drizzle-orm");
+const { and, eq } = await import("drizzle-orm");
 
 beforeAll(async () => {
   const notify = await import("@/lib/notify");
@@ -291,8 +291,14 @@ describe("lifting the limit", () => {
     who = DANA(org.id);
     const { addOrg, inviteHandoff } = await import("@/app/actions");
     expect((await addOrg("Bayview Diagnostics", "client")).error).toBeUndefined();
+    /* The client this workspace ARRIVED holding, by name.
+       It used to take whichever child org the select handed back first, and
+       by this point there are two - the one it was handed, which has systems,
+       and the Bayview the line above just typed in, which has none. An offer
+       needs systems to carry, so the assertion was a coin flip on row order,
+       and a column added to `orgs` was enough to land it the other way. */
     const [theirs] = await testDb.select().from(schema.orgs)
-      .where(eq(schema.orgs.parentOrgId, org.id));
+      .where(and(eq(schema.orgs.parentOrgId, org.id), eq(schema.orgs.name, "Emery Pharma")));
     expect((await inviteHandoff(theirs.id, {
       email: "someone@third.test", note: "", terms: FEE,
     } as never)).error).toBeUndefined();

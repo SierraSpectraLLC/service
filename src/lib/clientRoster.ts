@@ -11,11 +11,13 @@
 // site. Different columns, different readers; the one thing they share is the
 // verb, and both call the same addOrg.
 
+import { stageOf } from "@/lib/orgStage";
+
 /** An organization, as the orgs table holds it. */
 export type RosterOrg = {
   id: number; name: string; kind: string; themeColor: string;
-  /** Somebody we are selling to, not somebody we work for. See lib/prospects. */
-  prospect: boolean;
+  /** Where we stand with them: client | prospect | former. See lib/orgStage. */
+  stage: string;
 };
 
 /** What we look after for one of them. */
@@ -73,13 +75,18 @@ export function clientRoster(
 export function filterRoster(rows: ClientRow[], opts: { q?: string; kind?: string }): ClientRow[] {
   const needle = (opts.q ?? "").trim().toLowerCase();
   const kind = (opts.kind ?? "").trim();
-  /* "prospect" rides the same facet as the two kinds because to a reader it is
+  /* The stages ride the same facet as the two kinds because to a reader it is
      the same question - which of these companies is this list about - even
      though underneath it is a different column. A client facet that quietly
-     included the people we are still selling to would be the roster telling
-     the same lie the fleet was. */
+     included the people we are still selling to, or the ones who left, would
+     be the roster telling the same lie the fleet was.
+
+     So "client" means a client and nothing else: the facet and the fleet agree
+     about who that is, which is the whole reason either exists. */
   const matches = (r: ClientRow) =>
-    kind === "prospect" ? r.prospect : r.kind === kind && !r.prospect;
+    kind === "prospect" || kind === "former"
+      ? stageOf(r.stage) === kind
+      : r.kind === kind && stageOf(r.stage) === "client";
   return rows.filter((r) =>
     (!kind || matches(r)) && (!needle || r.name.toLowerCase().includes(needle)));
 }

@@ -51,6 +51,7 @@ import {
   AGREEMENT_KINDS, AGREEMENT_STATES, KIND_LABEL as AGREEMENT_KIND_LABEL,
   serializeKits, shapeOf, type IncludedKit,
 } from "@/lib/agreements";
+import { isOrgStage, stageOf, STAGE_WORD } from "@/lib/orgStage";
 import {
   closeLine, moverOf, severityOf, woAcceptsWork, woMove, woOpen, WO_LABEL,
   type Mover,
@@ -10815,7 +10816,7 @@ export async function addOrg(name: string, kind: string): Promise<{ error?: stri
 }
 
 /**
- * "We are selling to them" / "they are a client now."
+ * Where we stand with a company: selling to them, working for them, or used to.
  *
  * The state the app had no word for. Quoting a company means creating it and
  * its systems, and those systems then joined the working fleet - so one quote
@@ -10823,18 +10824,22 @@ export async function addOrg(name: string, kind: string): Promise<{ error?: stri
  * maintenance calendar, and the only way to keep them off was not to record
  * them.
  *
- * Nothing is moved, copied or deleted either way. This flips one boolean; what
- * it changes is which systems the fleet queries ask for - see lib/prospects,
- * which owns that rule. Converting is therefore complete by construction:
- * every system, site, quote and file they already had is theirs, and the day
- * they say yes it is all simply in the fleet.
+ * Nothing is moved, copied or deleted at any stage. This writes one word; what
+ * it changes is which systems the fleet queries ask for - see lib/fleetHold,
+ * which owns that rule. Every transition is therefore complete by
+ * construction, in both directions: every system, site, quote and file they
+ * had is still theirs, and the day they sign it is all simply in the fleet
+ * again. That is what makes "former client" safe to set - it hides nothing,
+ * and the service history it leaves intact is the thing that gets handed on
+ * when the machine changes hands.
  *
- * Not offered for a provider. "Prospect" is about somebody buying from us, and
- * a service company we subcontract to is a different relationship wearing the
- * same table.
+ * Not offered for a provider. These stages are about somebody buying from us,
+ * and a service company we subcontract to is a different relationship wearing
+ * the same table.
  */
-export async function setOrgProspect(orgId: number, prospect: boolean): Promise<{ error?: string }> {
+export async function setOrgStage(orgId: number, stage: string): Promise<{ error?: string }> {
   const u = await requireStaff();
+  if (!isOrgStage(stage)) return { error: "That isn't a stage we know" };
   const gate = await adminOrgGate(u, orgId);
   if ("error" in gate) return gate;
   const { org } = gate;
@@ -10842,14 +10847,15 @@ export async function setOrgProspect(orgId: number, prospect: boolean): Promise<
   if (org.kind === "provider") {
     return { error: "Providers are companies we work with, not companies we are selling to" };
   }
-  if (org.prospect === prospect) return {};
-  await db.update(orgs).set({ prospect }).where(eq(orgs.id, orgId));
+  const was = stageOf(org.stage);
+  if (was === stage) return {};
+  await db.update(orgs).set({ stage }).where(eq(orgs.id, orgId));
   await audit({
     actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: org.parentOrgId,
-    action: prospect
-      ? `marked "${org.name}" a prospect - their systems come off the working fleet until they are a client`
-      : `made "${org.name}" a client - their systems join the working fleet`,
-    field: "prospect", oldValue: String(org.prospect), newValue: String(prospect),
+    action: stage === "client"
+      ? `made "${org.name}" a client - their systems join the working fleet`
+      : `marked "${org.name}" a ${STAGE_WORD[stage]} - their systems come off the working fleet`,
+    field: "stage", oldValue: was, newValue: stage,
   });
   revalidatePath("/clients");
   revalidatePath("/settings");

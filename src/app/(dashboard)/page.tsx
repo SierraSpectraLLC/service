@@ -17,7 +17,7 @@ import { shopToday } from "@/lib/shopday";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { currentUser, requireUser, viewContext } from "@/lib/authz";
 import { forTenant, maySeeAgreements, maySeeOrgMoney, readTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
-import { notProspect, prospectHold } from "@/lib/prospects";
+import { notHeld, fleetHold } from "@/lib/fleetHold";
 import { clientOptions } from "@/lib/clientNames";
 import { shelveRecords } from "@/lib/records";
 import { severityOf, woOpen } from "@/lib/workOrders";
@@ -106,13 +106,13 @@ export default async function Home({ searchParams }: {
   const mine = (col: AnyColumn): SQL | undefined =>
     visible === null ? undefined : visible.length ? inArray(col, visible) : sql`false`;
 
-  const heldBack = await prospectHold(readTenant(user));
+  const heldBack = await fleetHold(readTenant(user));
   const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, peopleRows, taskRows, assetRows, allSystems, vocabCats] = await Promise.all([
     /* Not a prospect's. Quoting a company means creating its systems, and
        without this one quote puts a stranger's machines on the board - see
-       lib/prospects. */
+       lib/fleetHold. */
     db.select().from(instruments)
-      .where(and(eq(instruments.archived, false), mine(instruments.id), notProspect(instruments.id, heldBack.systems)))
+      .where(and(eq(instruments.archived, false), mine(instruments.id), notHeld(instruments.id, heldBack.systems)))
       .orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(parts).where(mine(parts.instrumentId)),
     db.select().from(instrumentGases).where(mine(instrumentGases.instrumentId)),

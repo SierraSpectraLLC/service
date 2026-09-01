@@ -4192,6 +4192,27 @@ CREATE INDEX IF NOT EXISTS "calendar_notes_org_idx" ON "calendar_notes" ("org_id
 -- organization on file stays the client it already was.
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "prospect" boolean NOT NULL DEFAULT false;
 
+-- ...and then "former client" arrived, which is a third state rather than the
+-- negation of either existing one: nothing is being sold, so it is not a
+-- prospect, and their machines are not the shop's week, so it is not a client.
+-- A boolean cannot hold three values, so the flag becomes a word. See
+-- lib/orgStage for the vocabulary and lib/fleetHold for the rule the two
+-- non-client stages share.
+--
+-- The backfill and the drop sit in one guarded block so re-running this file
+-- is a no-op rather than an error on the second pass - and so a prospect who
+-- has since become a client cannot be flipped back by a redeploy reading a
+-- stale copy of the old column. One source of truth, from the first run.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "stage" text NOT NULL DEFAULT 'client';
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'orgs' AND column_name = 'prospect') THEN
+    UPDATE "orgs" SET "stage" = 'prospect' WHERE "prospect";
+    ALTER TABLE "orgs" DROP COLUMN "prospect";
+  END IF;
+END $$;
+
 -- The report this one corrects. A settled claim is fixed on purpose - it has
 -- been approved, and in the paid case the money has already moved - so a
 -- receipt that turns up afterwards needs somewhere to go that is not "edit
