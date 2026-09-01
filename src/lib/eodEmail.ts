@@ -58,18 +58,39 @@ export type EodEntry = {
  * Today's list still reads current ownership, because a system nobody has
  * written about yet has no stamp to read.
  */
+/**
+ * WHICH SYSTEMS AND UNITS A DAY'S REPORT IS MADE OF.
+ *
+ *   live     - today: what this client owns and we are working on now.
+ *   history  - a past day, read only: exactly what was written, by the stamp
+ *              on each row, so an archived or handed-on system still shows
+ *              the line it had that day.
+ *   backfill - a past day being WRITTEN. The union of the two, because a shop
+ *              writing up Friday on Monday needs both the lines it already has
+ *              and the ones it never got to.
+ *
+ * A boolean used to carry this, which was fine while a past day could only be
+ * read. It cannot express the union, and the union is the whole of backdating.
+ */
+export type EodMode = "live" | "history" | "backfill";
+
 export function includesSystem(
   i: { id: number; ownerOrgId: number | null; archived: boolean; stages: string[]; lead: string },
   orgId: number | null,
-  historical: boolean,
+  mode: EodMode,
   recordedIds: Set<number>,
   clientLed: Set<string>,
 ): boolean {
   // History is driven by what was written, never by today's activity filters -
   // and never by today's owner.
-  if (historical) return recordedIds.has(i.id);
-  if ((i.ownerOrgId ?? null) !== orgId) return false;
-  return !i.archived && !i.stages.includes("Shipped") && !clientLed.has(i.lead);
+  if (mode === "history") return recordedIds.has(i.id);
+  const live = (i.ownerOrgId ?? null) === orgId
+    && !i.archived && !i.stages.includes("Shipped") && !clientLed.has(i.lead);
+  /* Backfill is the UNION, and it has to be. Recorded-only cannot take a line
+     that was never written - which is the whole point of writing up a day
+     afterwards - and live-only would drop what WAS written on a system since
+     archived or handed on, quietly rewriting the day being corrected. */
+  return mode === "backfill" ? live || recordedIds.has(i.id) : live;
 }
 
 /**
@@ -101,7 +122,7 @@ export const isOffSystem = (s: { instrumentId: number | null; assetId: number | 
  * today's filters would silently erase its entry.
  */
 export async function collectEodEntries(
-  date: string, orgId: number | null, historical = false,
+  date: string, orgId: number | null, mode: EodMode = "live",
   /**
    * The workspace this report is for. Load-bearing on the HOUSE edition:
    * includesSystem keeps a system when `(i.ownerOrgId ?? null) === orgId`, and
@@ -130,7 +151,7 @@ export async function collectEodEntries(
   const recorded = new Set(saved
     .filter((s) => s.instrumentId !== null && (s.ownerOrgId ?? null) === orgId && recordsSomething(s))
     .map((s) => s.instrumentId as number));
-  const mine = rows.filter((i) => includesSystem(i, orgId, historical, recorded, clientLed));
+  const mine = rows.filter((i) => includesSystem(i, orgId, mode, recorded, clientLed));
 
   const labels = await getSystemLabels(mine);
   const entries: EodEntry[] = mine.map((i) => {
@@ -151,12 +172,13 @@ export async function collectEodEntries(
   // system's); in history every recorded line stands, wherever the unit sits
   // now.
   const assetUpdates = saved.filter((s) => s.assetId !== null
-    && (historical ? (s.ownerOrgId ?? null) === orgId && recordsSomething(s) : true));
+    && (mode === "history" ? (s.ownerOrgId ?? null) === orgId && recordsSomething(s) : true));
   if (assetUpdates.length) {
     const ids = assetUpdates.map((s) => s.assetId!) as number[];
     const owned = (await db.select().from(assets).where(inArray(assets.id, ids)))
-      // History trusts the stamp already applied above; today reads live ownership.
-      .filter((a) => (historical || ((a.ownerOrgId ?? null) === orgId && a.instrumentId === null)));
+      /* History trusts the stamp already applied above; today reads live
+         ownership. Backfill takes either, for the same reason systems do. */
+      .filter((a) => (mode !== "live" || ((a.ownerOrgId ?? null) === orgId && a.instrumentId === null)));
     for (const a of owned) {
       const u = assetUpdates.find((s) => s.assetId === a.id)!;
       entries.push({
@@ -195,7 +217,7 @@ export async function collectEodEntries(
  * the client it was written for.
  */
 export async function eodGroups(
-  date: string, historical = false,
+  date: string, mode: EodMode = "live",
   // Whose report this is. One workspace's clients and one workspace's systems -
   // null only on an instance with a single operator, where there is nothing to
   // separate.
@@ -207,7 +229,7 @@ export async function eodGroups(
     db.select({ id: instruments.id, ownerOrgId: instruments.ownerOrgId, archived: instruments.archived, tenantOrgId: instruments.tenantOrgId }).from(instruments),
     db.select().from(orgs).orderBy(asc(orgs.name)),
     getBrand(),
-    historical ? Promise.resolve([]) : db.select({ id: assets.id, ownerOrgId: assets.ownerOrgId, tenantOrgId: assets.tenantOrgId }).from(assets)
+    mode === "history" ? Promise.resolve([]) : db.select({ id: assets.id, ownerOrgId: assets.ownerOrgId, tenantOrgId: assets.tenantOrgId }).from(assets)
       .where(and(
         isNull(assets.instrumentId),
         // A retired unit on tonight's client report is noise.
@@ -227,7 +249,7 @@ export async function eodGroups(
   // Off-system work has no equipment to be found through, so whichever way the
   // day is being read, the orgs it was logged against have to come off the rows.
   const offSystemOwners = saved.filter(isOffSystem).map((s) => s.ownerOrgId ?? null);
-  const owners = historical
+  const owners = mode === "history"
     // Straight off the rows: no join to who owns the equipment now, which is
     // what used to let a handoff move a past day's report between clients.
     ? new Set<number | null>(saved.filter(recordsSomething).map((s) => s.ownerOrgId ?? null))
@@ -235,6 +257,11 @@ export async function eodGroups(
         ...rows.filter((r) => !r.archived).map((r) => r.ownerOrgId ?? null),
         ...standalone.map((r) => r.ownerOrgId ?? null),
         ...offSystemOwners,
+        /* Backfill keeps whoever the day was written for as well, so a client
+           whose only system has since been archived is still a group somebody
+           can correct. */
+        ...(mode === "backfill"
+          ? saved.filter(recordsSomething).map((s) => s.ownerOrgId ?? null) : []),
       ]);
   const groups: { orgId: number | null; name: string; recipients: string }[] = [];
   // The operator's own group first: house-stewarded work, reported internally.
@@ -253,11 +280,14 @@ export async function composeEodEmail(
   // The workspace whose report this is: its name goes on the subject line, since
   // it is the company reporting the day's work.
   tenantOrgId: number | null = null,
+  /* The preview on a past day has to be composed the same way that day is
+     being SHOWN, or the mail underneath the page disagrees with the page. */
+  mode: EodMode = "live",
 ): Promise<{
   subject: string; html: string; filled: number; total: number;
 }> {
   const brand = await brandForTenant(tenantOrgId);
-  const entries = await collectEodEntries(date, orgId, false, tenantOrgId);
+  const entries = await collectEodEntries(date, orgId, mode, tenantOrgId);
   // Skipped is "not today"; internal is "not for them". Both leave the client's
   // report, and only the internal one stays on our own screen.
   const included = entries.filter((e) => !e.skipped && !e.internal);

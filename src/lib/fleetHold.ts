@@ -1,35 +1,39 @@
-// Somebody we are selling to, and what that means for their machines.
+// The systems the shop is NOT looking after this week, and how every fleet
+// query says so.
 //
-// Quoting a company means creating it and its systems - there is no other way
-// to put a system on a quote - and those systems then joined the working fleet
-// like any client's. So one quote to a stranger put their machines on the
-// board, into the metrics, onto the maintenance calendar and into the PM
-// queue, and the shop had no way to say "not ours yet" short of not recording
-// them at all.
+// This began as one rule about prospects. Quoting a company means creating it
+// and its systems - there is no other way to put a system on a quote - and
+// those systems then joined the working fleet like any client's. So one quote
+// to a stranger put their machines on the board, into the metrics, onto the
+// maintenance calendar and into the PM queue, and the shop had no way to say
+// "not ours yet" short of not recording them at all.
 //
-// orgs.prospect is that word. It is ORTHOGONAL to orgs.kind, which says which
-// side of the relationship an organization is on and is load-bearing for
-// personas, sharing and the provider queue - a prospect is still a client-kind
-// org, they simply have not bought anything.
+// It is now one rule about two stages. A former client's machines are in
+// exactly the same position for the opposite reason - not yet ours, versus no
+// longer ours - and both resolve to the same sentence: the fleet is what the
+// shop is working on, and neither of these is. See lib/orgStage, which owns
+// the vocabulary and the heldOutOfFleet predicate this reads.
 //
 // WHAT IS HELD OUT IS THE WORKING FLEET, and nothing else. Their record stays
 // complete: the systems are on their own client page, in the quote's coverage
-// picker, in search. The rule is about what the shop's own day is made of -
-// what it is looking after this week - and a company that has not said yes is
-// not part of that.
+// picker, in search, carrying their whole service history. For a former client
+// that history is the asset - it is what gets handed to whoever owns the
+// machine next - so holding the systems off the board must never be confused
+// with forgetting them.
 //
 // One rule, one place. The alternative was a condition written out at each of
 // the fleet queries, which is a rule the next page has to remember; this is
-// the id set they all exclude, and tests/prospectFleet checks that every one
-// of them asks for it.
+// the id set they all exclude, and tests/fleetPages checks that every one of
+// them asks for it.
 
 import { and, eq, inArray, isNull, notInArray, or, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { assets, instruments, orgs } from "@/db/schema";
+import { HELD_STAGES } from "@/lib/orgStage";
 import { forTenant } from "@/lib/tenancy";
 
 /** What the fleet is holding back: their systems, and the modules on them. */
-export type ProspectHold = {
+export type FleetHold = {
   systems: number[];
   /**
    * Assets sitting on those systems.
@@ -45,17 +49,24 @@ export type ProspectHold = {
 };
 
 /**
- * The systems a prospect owns, and the modules on them.
+ * The systems owned by anybody we are not currently working for, and the
+ * modules on them.
  *
  * Resolved as ids rather than as a join condition because the exclusion has to
  * work against four different columns - instruments.id, pm_schedules
  * .instrument_id, pm_schedules.asset_id, tasks.instrument_id - and an id list
  * reads the same at all of them. Empty is the ordinary case and costs nothing.
+ *
+ * The stage test names the held stages rather than testing `<> 'client'`, so
+ * this query and stageOf() cannot disagree about a value neither of them
+ * expected. They did, briefly: an empty string is a client to stageOf and was
+ * not a client to `<>`, which would have taken a machine off the board on the
+ * strength of a blank column. See HELD_STAGES.
  */
-export async function prospectHold(tenantOrgId: number | null): Promise<ProspectHold> {
+export async function fleetHold(tenantOrgId: number | null): Promise<FleetHold> {
   const systemRows = await db.select({ id: instruments.id }).from(instruments)
     .innerJoin(orgs, eq(orgs.id, instruments.ownerOrgId))
-    .where(and(eq(orgs.prospect, true), forTenant(instruments.tenantOrgId, tenantOrgId)));
+    .where(and(inArray(orgs.stage, HELD_STAGES), forTenant(instruments.tenantOrgId, tenantOrgId)));
   const systems = systemRows.map((r) => r.id);
   if (!systems.length) return { systems, assets: [] };
   const assetRows = await db.select({ id: assets.id }).from(assets)
@@ -75,6 +86,6 @@ export async function prospectHold(tenantOrgId: number | null): Promise<Prospect
  * PM in the shop the first time anybody marked a prospect. Passing the null
  * and testing the OTHER column is what makes both halves of the hold work.
  */
-export function notProspect(col: AnyColumn, ids: number[]): SQL | undefined {
+export function notHeld(col: AnyColumn, ids: number[]): SQL | undefined {
   return ids.length ? or(isNull(col), notInArray(col, ids)) : undefined;
 }

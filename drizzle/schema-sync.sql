@@ -4192,6 +4192,27 @@ CREATE INDEX IF NOT EXISTS "calendar_notes_org_idx" ON "calendar_notes" ("org_id
 -- organization on file stays the client it already was.
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "prospect" boolean NOT NULL DEFAULT false;
 
+-- ...and then "former client" arrived, which is a third state rather than the
+-- negation of either existing one: nothing is being sold, so it is not a
+-- prospect, and their machines are not the shop's week, so it is not a client.
+-- A boolean cannot hold three values, so the flag becomes a word. See
+-- lib/orgStage for the vocabulary and lib/fleetHold for the rule the two
+-- non-client stages share.
+--
+-- The backfill and the drop sit in one guarded block so re-running this file
+-- is a no-op rather than an error on the second pass - and so a prospect who
+-- has since become a client cannot be flipped back by a redeploy reading a
+-- stale copy of the old column. One source of truth, from the first run.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "stage" text NOT NULL DEFAULT 'client';
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'orgs' AND column_name = 'prospect') THEN
+    UPDATE "orgs" SET "stage" = 'prospect' WHERE "prospect";
+    ALTER TABLE "orgs" DROP COLUMN "prospect";
+  END IF;
+END $$;
+
 -- The report this one corrects. A settled claim is fixed on purpose - it has
 -- been approved, and in the paid case the money has already moved - so a
 -- receipt that turns up afterwards needs somewhere to go that is not "edit
@@ -4200,3 +4221,17 @@ ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "prospect" boolean NOT NULL DEFAULT 
 -- claim in its own right and outlives the paperwork it came from.
 ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "amends_id" integer;
 CREATE INDEX IF NOT EXISTS "expense_reports_amends_idx" ON "expense_reports" ("amends_id");
+
+-- A month is not the only thing that recurs. Standing reimbursements could
+-- only be scheduled as "every N months on day D", so "weekly parking" or
+-- "every other Friday" had no way to be written and got filed by hand every
+-- week - which is the work the feature exists to remove. Additive, and
+-- 'months' on every arrangement already on file, so nothing changes cadence
+-- on a deploy.
+--
+-- The last-day-of-the-month case needs no column: day_of_month 31 clamps to
+-- each month's length, so it already lands on the 30th in April and the 28th
+-- in February. See LAST_DAY in lib/stipends, which names it.
+ALTER TABLE "stipends" ADD COLUMN IF NOT EXISTS "cadence" text NOT NULL DEFAULT 'months';
+ALTER TABLE "stipends" ADD COLUMN IF NOT EXISTS "every_weeks" integer NOT NULL DEFAULT 1;
+ALTER TABLE "stipends" ADD COLUMN IF NOT EXISTS "weekday" integer NOT NULL DEFAULT 1;

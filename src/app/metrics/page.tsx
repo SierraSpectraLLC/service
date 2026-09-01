@@ -15,7 +15,7 @@ import { SLOW_PAY_DAYS } from "@/lib/costing";
 import { addDays } from "@/lib/pm";
 import { shopToday } from "@/lib/shopday";
 import { forTenant, readTenant, viewTenant } from "@/lib/tenancy";
-import { notProspect, prospectHold } from "@/lib/prospects";
+import { notHeld, fleetHold } from "@/lib/fleetHold";
 import { Panel, Pill } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -44,12 +44,12 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
   const tz = process.env.SHOP_TZ || "America/Los_Angeles";
   const dayOf = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: tz });
 
-  const heldBack = await prospectHold(readTenant(user));
+  const heldBack = await fleetHold(readTenant(user));
   const [rows, events, defs, allInsts, pmTasks, timeRows, partRows] = await Promise.all([
-    /* A prospect's machines are not this shop's throughput - see lib/prospects. */
+    /* A prospect's machines are not this shop's throughput - see lib/fleetHold. */
     db.select().from(instruments)
       .where(and(eq(instruments.archived, false), forTenant(instruments.tenantOrgId, readTenant(user)),
-        notProspect(instruments.id, heldBack.systems)))
+        notHeld(instruments.id, heldBack.systems)))
       .orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(stageEvents).orderBy(asc(stageEvents.at), asc(stageEvents.id)),
     getStageDefs(await viewTenant(user)),

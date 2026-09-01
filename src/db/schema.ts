@@ -203,25 +203,29 @@ export const orgs = pgTable("orgs", {
   name: text("name").notNull(),
   kind: text("kind").notNull().default("client"), // client | provider
   /**
-   * SOMEBODY WE ARE SELLING TO, not somebody we work for.
+   * WHERE WE STAND WITH THEM: client | prospect | former.
    *
    * Orthogonal to `kind`, which says which side of the relationship an
    * organization is on and is load-bearing for personas, sharing and the
-   * provider queue. This says whether they have bought anything yet, which is
-   * a different question and was not being asked at all: quoting a company
-   * means creating it and its systems, and those systems then joined the
-   * working fleet. One quote put a stranger's machines on the board, in the
-   * metrics and on the maintenance calendar.
+   * provider queue. This says whether we are selling to them, working for
+   * them, or used to - a different question, and one that was not being asked
+   * at all: quoting a company means creating it and its systems, and those
+   * systems then joined the working fleet. One quote put a stranger's machines
+   * on the board, in the metrics and on the maintenance calendar.
    *
-   * Their record is complete either way - the systems stay on file, on their
-   * own page and in the quote's coverage picker. What a prospect's systems are
-   * held out of is the WORKING FLEET; see lib/prospects, which owns that rule
-   * and is the only place that decides it.
+   * Was a boolean `prospect` until "former client" arrived, which is a third
+   * state and not the negation of either existing one. See lib/orgStage for
+   * why, and lib/fleetHold for the one rule the two non-client stages share.
    *
-   * False on every row that existed before this column, which is the point: an
-   * organization already on file is a client until somebody says otherwise.
+   * Their record is complete at every stage - the systems stay on file, on
+   * their own page, in the coverage picker, with their whole service history,
+   * which for a former client is the entire point. What is held back is the
+   * WORKING FLEET and nothing else.
+   *
+   * "client" on every row that existed before this column, which is the point:
+   * an organization already on file is a client until somebody says otherwise.
    */
-  prospect: boolean("prospect").notNull().default(false),
+  stage: text("stage").notNull().default("client"),
   // Does this organization run a workspace of its own - staff, documents it
   // signs, clients it creates? That is what makes it a TENANT, and it is the
   // difference between the company selling the service and the companies buying
@@ -3197,9 +3201,32 @@ export const stipends = pgTable("stipends", {
   amountCents: integer("amount_cents").notNull().default(0),
   /** Which expense category the raised row carries. Free text, like every kind. */
   kind: text("kind").notNull().default("Other"),
+  /**
+   * Which shape the schedule is: "months" or "weeks".
+   *
+   * Months was the only one, and is still the default, so every arrangement
+   * that existed before this column keeps behaving exactly as it did. Weeks
+   * arrived because a month is not the only thing that recurs - "weekly
+   * parking", "every other Friday" - and no amount of day-of-month arithmetic
+   * expresses a weekday.
+   */
+  cadence: text("cadence").notNull().default("months"),
   /** 1 = monthly. Reused from the retainer cadence so quarterly is free. */
   everyMonths: integer("every_months").notNull().default(1),
+  /**
+   * Which day it lands on, 1-31.
+   *
+   * 31 IS "the last day of the month", exactly and in every month: the cycle
+   * date clamps to the month's length, so 31 gives the 30th in April and the
+   * 28th in February. That is not a coincidence to rely on quietly - see
+   * LAST_DAY in lib/stipends, which names it so the form can offer it as the
+   * choice a person actually means.
+   */
   dayOfMonth: integer("day_of_month").notNull().default(1),
+  /** The weeks shape: every N weeks on `weekday`. Ignored when cadence is months. */
+  everyWeeks: integer("every_weeks").notNull().default(1),
+  /** 0 = Sunday, matching getUTCDay(). Ignored when cadence is months. */
+  weekday: integer("weekday").notNull().default(1),
   startsOn: text("starts_on").notNull().default(""),      // YYYY-MM-DD
   /** Blank = runs until somebody stops it. */
   endsOn: text("ends_on").notNull().default(""),

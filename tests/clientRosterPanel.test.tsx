@@ -19,8 +19,8 @@ afterEach(cleanup);
 beforeEach(() => addOrg.mockClear());
 
 const ROWS = [
-  { id: 1, name: "Lab Zen", kind: "client", themeColor: "", prospect: false, systems: 2, sites: 1, openWork: 0 },
-  { id: 2, name: "Testen", kind: "client", themeColor: "", prospect: false, systems: 0, sites: 0, openWork: 0 },
+  { id: 1, name: "Lab Zen", kind: "client", themeColor: "", stage: "client", systems: 2, sites: 1, openWork: 0 },
+  { id: 2, name: "Testen", kind: "client", themeColor: "", stage: "client", systems: 0, sites: 0, openWork: 0 },
 ];
 
 const draw = async (over: { canOpen?: boolean; canAdd?: boolean } = {}) => {
@@ -33,6 +33,57 @@ const draw = async (over: { canOpen?: boolean; canAdd?: boolean } = {}) => {
 
 /** The row a company's name sits in - a link, or a plain div. */
 const rowFor = (name: string) => screen.getByText(name).closest(".dt-row")!;
+
+describe("where we stand with each of them", () => {
+  const mixed = [
+    { id: 1, name: "Lab Zen", kind: "client", themeColor: "", stage: "client", systems: 2, sites: 1, openWork: 0 },
+    { id: 2, name: "Federon", kind: "client", themeColor: "", stage: "prospect", systems: 3, sites: 0, openWork: 0 },
+    { id: 3, name: "Bayline", kind: "client", themeColor: "", stage: "former", systems: 4, sites: 1, openWork: 0 },
+  ];
+  const drawMixed = async (kind = "") => {
+    const Panel = (await import("@/components/ClientRosterPanel")).default;
+    return render(<Panel rows={mixed} filter={{ q: "", kind }} canOpen={false} canAdd={false} />);
+  };
+
+  it("says the stage rather than the kind, when there is one", async () => {
+    // "client" on a row about a company that stopped buying two years ago is
+    // the roster telling the same lie the fleet was told before lib/fleetHold.
+    await drawMixed();
+    expect(screen.getByText("prospect")).toBeTruthy();
+    expect(screen.getByText("former client")).toBeTruthy();
+  });
+
+  it("says out loud that their systems are not in the fleet", async () => {
+    await drawMixed();
+    expect(screen.getAllByText(/not in the fleet/)).toHaveLength(2);
+  });
+
+  it("gives former clients their own facet", async () => {
+    await drawMixed();
+    expect(screen.getByRole("link", { name: /Former/ })).toBeTruthy();
+  });
+
+  it("hides that facet from a shop that has none", async () => {
+    /*
+     * A facet showing a bare zero is a filter that promises something and then
+     * shows an empty table. Most shops will never mark one, and the strip is
+     * read every time somebody looks somebody up.
+     */
+    await drawMixed().then(cleanup);
+    const Panel = (await import("@/components/ClientRosterPanel")).default;
+    render(<Panel rows={[mixed[0]]} filter={{ q: "", kind: "" }} canOpen={false} canAdd={false} />);
+    expect(screen.queryByRole("link", { name: /Former/ })).toBeNull();
+  });
+
+  it("keeps the facet on screen while it is the one being read", async () => {
+    // Filtering to Former makes the count zero on the FILTERED rows, and a
+    // facet that removed itself the moment you clicked it would be a strip
+    // that reorders under the cursor.
+    const Panel = (await import("@/components/ClientRosterPanel")).default;
+    render(<Panel rows={[mixed[0]]} filter={{ q: "", kind: "former" }} canOpen={false} canAdd={false} />);
+    expect(screen.getByRole("link", { name: /Former/ })).toBeTruthy();
+  });
+});
 
 describe("what an engineer gets", () => {
   it("lists the companies with what we look after for each", async () => {

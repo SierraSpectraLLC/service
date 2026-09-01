@@ -117,7 +117,9 @@ describe("a filter change goes back to the top", () => {
     const after = cards();
     expect(after.length).toBeGreaterThan(0);
     expect(after[0]).toBe("Model 0007");
-  });
+    // 1118 cards re-rendered eleven times is slow enough to trip the 5s default
+    // on a loaded machine. The assertion is unchanged; only the patience is.
+  }, 20000);
 
   it("does the same when a facet is picked", async () => {
     await draw(withBlanks(1118, 280));

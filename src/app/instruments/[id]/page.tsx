@@ -62,7 +62,6 @@ import PushToSheetButton from "@/components/PushToSheetButton";
 import ClientRequest from "@/components/ClientRequest";
 import AssetsPanel from "@/components/AssetsPanel";
 import CustodyPanel from "@/components/CustodyPanel";
-import QueuePanel from "@/components/QueuePanel";
 import PanelLayout from "@/components/PanelLayout";
 import StandingLine from "@/components/StandingLine";
 import { modeFor, standingTone } from "@/lib/panelMode";
@@ -75,7 +74,7 @@ import SystemCoverage from "@/components/SystemCoverage";
 import CoverageRecorder from "@/components/CoverageRecorder";
 import { HeroKebab, Pill, RecordHero, type HeroStat } from "@/components/ui";
 import { getUiLayout } from "@/app/actions";
-import { canKick, daysSince, queueView } from "@/lib/queue";
+import { canKick, daysSince, queueView, settledWait } from "@/lib/queue";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
 import { expiryAttention, packageComplete, packageForSystem, qualsOf, qualStanding } from "@/lib/gxp";
 import ValidationPanel from "@/components/ValidationPanel";
@@ -467,6 +466,34 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
      being reserved for something that needs an answer. Nothing is lost: every
      fact it carried is on the Queue panel one card down, permanently. */
   const handback = !isStaff && queueMine && !somethingPending;
+  /* The same question, asked about whoever is HOLDING it - which is the one
+     the shop's own screen needs and never asked.
+
+     somethingPending above is viewer-relative: it answers "is anything pending
+     on ME". On a staff screen that is almost always no, because a system
+     parked with a client is by definition not blocked on us - so the shop's
+     line read "Waiting on Modesto Irrigation District" in amber for nineteen
+     days about a machine we had finished, handed back, and had no further move
+     on. The banner was describing the shop as blocked by the one fact that
+     means it isn't. */
+  const pendingOnHolder = queueNeedsThem({
+    pmDue: pmDue > 0,
+    /* Against the HOLDER's org rather than the viewer's. Same column, same
+       meaning - blocked_org_id is chosen at the moment of blocking - only
+       now asked about the party who would have to unblock it. */
+    blockedOnThem: inst.stages.includes(BLOCKED_STAGE)
+      && inst.blockedOrgId !== null && inst.blockedOrgId === inst.queueOrgId,
+  });
+  /* Their court, and nothing owed from it. Not a wait at all: the job
+     finished, the machine went home, it is running. The days it has been there
+     stay on the hero and the whole chronology stays in Custody - what goes is
+     the alarm, because the top of a record is for things that need an answer
+     and an alarm that fires on the ordinary teaches people to skip it.
+
+     Staff only. A client whose machine is at the shop genuinely wants "with
+     Sierra Spectra" at the top of their record; that is the answer to where is
+     my instrument, not a chore. */
+  const settled = settledWait({ isStaff, isMine: queueMine, pendingOnHolder });
   /* Who services this one, and until when.
      A system's OWNER is who a contract is written with, so a house-stewarded
      system (no owner) has nobody to hold one and gets no coverage read at
@@ -531,7 +558,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     { value: openWos.length, label: `open WO${openWos.length === 1 ? "" : "s"}`, tone: openWos.length ? "warn" : undefined },
     { value: openTasks.length, label: "open tasks", tone: overdueTasks ? "bad" : undefined },
     ...(pmDue ? [{ value: pmDue, label: "PM due", tone: "warn" as const }] : []),
-    ...(!queueMine ? [{ value: `${queueDays}d`, label: `with ${partyName(inst.queueOrgId)}`, tone: "warn" as const }] : []),
+    // Amber only while somebody owes a move on it. Nineteen days with the
+    // owner of a working instrument is a fact, not a warning.
+    ...(!queueMine ? [{ value: `${queueDays}d`, label: `with ${partyName(inst.queueOrgId)}`,
+      tone: (settled ? undefined : "warn") as HeroStat["tone"] }] : []),
     ...(gxpStanding && gxpStanding.tone !== "ok"
       ? [{ value: "docs", label: "need attention", tone: (gxpStanding.tone === "bad" ? "bad" : "warn") as HeroStat["tone"] }]
       : []),
@@ -543,7 +573,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
        for the pane's rack rail to read it, and the standing line and the
        panels are siblings. One attribute, one source of tone. */
     <div className="container split"
-      data-tone={standingTone({ isMine: queueMine, overdue: overdueTasks > 0 })}>
+      data-tone={standingTone({ isMine: queueMine, overdue: overdueTasks > 0, settled })}>
       <div className="crumb">
         <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>Instruments</Link> › <b>{inst.externalId}</b>
       </div>
@@ -595,12 +625,14 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         }
       />
 
-      {/* Whose move it is, before anything else on the record. A system parked
-          with a client for three weeks used to look exactly like one being
-          worked on this morning - you had to scroll to the Queue card to find
-          out, and mostly nobody did. Its tone drives the rack spine down the
-          working pane, so the standing stays in view however far you scroll. */}
-      {!(handback && inst.queueAckAt) && (
+      {/* Whose move it is, before anything else on the record - WHEN somebody
+          owes one. A system parked with a client for three weeks used to look
+          exactly like one being worked on this morning, and that is what this
+          line is for; a system handed back and running is neither, and got the
+          same amber banner until settledWait(). Its tone drives the rack
+          spine down the working pane, so the standing stays in view however
+          far you scroll. */}
+      {!(handback && inst.queueAckAt) && !settled && (
       <StandingLine
         instrumentId={inst.id}
         holderName={inst.queueOrgId === null ? brand.operatorName : orgName.get(inst.queueOrgId) ?? "another organization"}
@@ -626,14 +658,20 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         viewKey="system"
         saved={panelLayout}
         // Balanced per TAB, not per page: each tab splits its own panels
-        // across the two columns, and the queue card rides beside the header
-        // so whose-move-is-it is visible whatever tab is open.
-        defaultRight={["queue", "workorders", "parts", "site", "custody", "photos", "reference", "hours", "update"]}
+        // across the two columns.
+        defaultRight={["workorders", "parts", "site", "custody", "photos", "reference", "hours", "update"]}
         // The identity card stays on screen; the other fourteen panels were
         // three screens of scroll, so they group into working contexts. Badges
         // are each tab's reason to be visited now, so flipping is navigation
         // rather than hunting.
-        pinned={["queue"]}
+        //
+        // Nothing is pinned any more. Custody used to ride beside the header on
+        // every tab so whose-move-is-it stayed visible - the same bet the
+        // standing line makes, made twice, and the shop's read on it was "I
+        // don't need the queue blasting in my face". The line above the record
+        // says it on the days it matters; a second permanent copy on the
+        // Configuration tab does not.
+        pinned={[]}
         // Six working contexts instead of four catch-alls: Now is whose move
         // it is and who holds it; Work is the jobs; Configuration is what the
         // system IS; Files and History split paper from log.
@@ -643,8 +681,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
            changes, so both sides of a conversation are looking at the same
            shape of page. */
         groups={groupsFor(isStaff, [
-          { key: "now", label: "Now", keys: ["queue", "coverage", "custody"],
-            badge: !queueMine ? `${queueDays}d` : undefined, badgeTone: "warn" },
+          { key: "now", label: "Now", keys: ["coverage", "custody"],
+            // Same rule as the hero stat and the standing line: a wait nobody
+            // owes a move on is not a reason to visit the tab.
+            badge: !queueMine && !settled ? `${queueDays}d` : undefined, badgeTone: "warn" },
           { key: "work", label: "Work",
             keys: ["workorders", "tasks", "hours", "parts", "discussion"],
             badge: openTasks.length || undefined,
@@ -737,31 +777,6 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
                   />
                 )
                 : undefined}
-            />
-          ) },
-          // Whose move it is. High on the page: on a parked system it's the first thing that explains why nothing is happening.
-          { key: "queue", label: "Queue", node: (
-            <QueuePanel
-              instrumentId={inst.id} externalId={inst.externalId}
-              holderName={inst.queueOrgId === null ? brand.operatorName : orgName.get(inst.queueOrgId) ?? "another organization"}
-              isMine={queueView(user, inst) === "mine"}
-              since={shopTime(inst.queueSince ?? inst.createdAt)}
-              days={daysSince(inst.queueSince ?? inst.createdAt, new Date())}
-              reason={inst.queueReason}
-              // Whether the handback landed with a human. The one thing the
-              // shop could never tell before: a system parked with a client
-              // and a note attached looked identical whether they had read it
-              // that afternoon or never opened the record at all.
-              seenBy={inst.queueAckBy}
-              seenAt={inst.queueAckAt ? shopTime(inst.queueAckAt) : ""}
-              legs={queueRows.map((q) => ({
-                id: q.id, fromName: q.fromName, toName: q.toName, reason: q.reason,
-                actor: q.actor, when: shopTime(q.at),
-              }))}
-              // Only organizations that can actually open the system.
-              options={shareRows.filter((s) => s.orgId !== inst.queueOrgId).map((s) => ({ id: s.orgId, name: s.name, kind: s.kind }))}
-              ourName={brand.operatorName}
-              canKick={canKick(user, inst)}
             />
           ) },
           { key: "assets", label: "Assets", node: (
@@ -917,18 +932,46 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               makers={parties} />
           ) },
           // Provenance, and the handoff that extends it - staff only, because a change of hands needs a witness at the operator.
-          { key: "custody", label: "Ownership history", node: (
+          /* Who has this machine, in both senses - whose move it is, and whose
+             machine it is. One card because they are one question: see
+             lib/custodyLine for why the two chronologies interleave rather
+             than sitting in two cards nobody could read together.
+
+             The ownership half is staff-only, which is what the second card
+             used to be. A client sees their own machine's queue, as always. */
+          { key: "custody", label: "Custody", node: (
             <CustodyPanel
               instrumentId={inst.id} externalId={inst.externalId}
+              holderName={inst.queueOrgId === null ? brand.operatorName : orgName.get(inst.queueOrgId) ?? "another organization"}
+              isMine={queueMine}
+              since={shopTime(inst.queueSince ?? inst.createdAt)}
+              days={queueDays}
+              reason={inst.queueReason}
+              // Whether the handback landed with a human. The one thing the
+              // shop could never tell before: a system parked with a client
+              // and a note attached looked identical whether they had read it
+              // that afternoon or never opened the record at all.
+              seenBy={inst.queueAckBy}
+              seenAt={inst.queueAckAt ? shopTime(inst.queueAckAt) : ""}
+              legs={queueRows.map((q) => ({
+                id: q.id, fromName: q.fromName, toName: q.toName, reason: q.reason,
+                actor: q.actor, when: shopTime(q.at), at: q.at.toISOString(),
+              }))}
+              // Only organizations that can actually open the system.
+              queueOptions={shareRows.filter((s) => s.orgId !== inst.queueOrgId)
+                .map((s) => ({ id: s.orgId, name: s.name, kind: s.kind }))}
+              ourName={brand.operatorName}
+              canKick={canKick(user, inst)}
               events={custodyRows.map((c) => ({
                 id: c.id, kind: c.kind, fromName: c.fromName, toName: c.toName, note: c.note,
-                when: shopTime(c.at), actor: c.actor,
+                when: shopTime(c.at), at: c.at.toISOString(), actor: c.actor,
               }))}
               ownerName={inst.ownerOrgId === null ? "nobody yet (house-stewarded)" : orgName.get(inst.ownerOrgId) ?? "an unknown organization"}
               providers={shareRows.filter((s) => s.orgId !== inst.ownerOrgId)
                 .map((s) => ({ name: s.name, kind: s.kind, access: s.access }))}
               orgOptions={orgRows.filter((o) => o.id !== inst.ownerOrgId)}
               canHandOff={isStaff}
+              showOwnership={isStaff}
             />
           ) },
           { key: "photos", label: "Photos", node: (

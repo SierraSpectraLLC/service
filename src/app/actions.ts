@@ -51,6 +51,7 @@ import {
   AGREEMENT_KINDS, AGREEMENT_STATES, KIND_LABEL as AGREEMENT_KIND_LABEL,
   serializeKits, shapeOf, type IncludedKit,
 } from "@/lib/agreements";
+import { isOrgStage, stageOf, STAGE_WORD } from "@/lib/orgStage";
 import {
   closeLine, moverOf, severityOf, woAcceptsWork, woMove, woOpen, WO_LABEL,
   type Mover,
@@ -80,7 +81,7 @@ import {
   amendmentTitle, checkReportTitle, editableReport, mayWorkReport, reimbursementPool,
   reportTotalCents, settledReport,
 } from "@/lib/expenseReports";
-import { checkStipend } from "@/lib/stipends";
+import { cadenceOf, checkStipend, stipendCadenceLabel } from "@/lib/stipends";
 import { poProblem, usablePoLines } from "@/lib/backfill";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
@@ -4435,12 +4436,48 @@ async function eodRowFor(actor: Awaited<ReturnType<typeof requireStaff>>, eodId:
   return row;
 }
 
+/**
+ * WHICH DAY AN EOD LINE IS ABOUT.
+ *
+ * Blank is today, which is what both writers meant before a past day could be
+ * written at all. The future is refused rather than clamped: a line dated
+ * tomorrow is a claim about work that has not happened, and quietly filing it
+ * under today would hide the mistake instead of naming it.
+ *
+ * Shared by saveEodUpdate and logOffSystemWork because they are two ways of
+ * writing the same day, and a rule kept in one of them is a rule the other
+ * gets wrong.
+ */
+function eodDay(on?: string): { date: string } | { error: string } {
+  const today = shopToday();
+  const wanted = (on ?? "").trim();
+  if (!wanted) return { date: today };
+  if (!isIsoDay(wanted)) return { error: "That date should look like 2026-01-31" };
+  if (wanted > today) return { error: "That day hasn't happened yet" };
+  return { date: wanted };
+}
+
 export async function saveEodUpdate(
   target: EodTarget,
   data: { systemUpdate: string; actionItem: string },
-) {
+  /**
+   * THE DAY THIS IS ABOUT, when that is not today.
+   *
+   * It used to be shopToday() and nothing else, so a line could only ever be
+   * written for the day it was typed - and a shop that did the work on Friday
+   * and wrote it up on Monday had no way to say so. Editing an existing row
+   * already reached any date through target.eodId; only a NEW line was stuck.
+   *
+   * The future is refused rather than clamped. An EOD update dated tomorrow is
+   * a claim about work that has not happened, and silently filing it under
+   * today would hide the mistake instead of naming it.
+   */
+  on?: string,
+): Promise<{ error?: string } | undefined> {
   const u = await requireStaff();
-  const date = shopToday();
+  const day = eodDay(on);
+  if ("error" in day) return day;
+  const { date } = day;
   const systemUpdate = data.systemUpdate.trim();
   const actionItem = data.actionItem.trim();
   if (target.eodId != null) {
@@ -4494,8 +4531,12 @@ export async function saveEodUpdate(
 export async function logOffSystemWork(
   orgId: number | null,
   data: { title: string; person: string; minutes: number; systemUpdate: string; actionItem: string },
+  /** The day it happened, when that is not today. See eodDay. */
+  on?: string,
 ): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
+  const day = eodDay(on);
+  if ("error" in day) return day;
   const title = data.title.trim().slice(0, 160);
   if (!title) return { error: "Say what the work was" };
   // The picker is a convenience; this is the rule. A name typed past the
@@ -4513,7 +4554,7 @@ export async function logOffSystemWork(
   const [row] = await db.insert(eodUpdates).values({
     tenantOrgId: tenant,
     instrumentId: null, assetId: null,
-    date: shopToday(), ownerOrgId: orgId,
+    date: day.date, ownerOrgId: orgId,
     title, person,
     minutes: Math.max(0, Math.min(24 * 60, Math.round(data.minutes || 0))),
     systemUpdate: data.systemUpdate.trim(), actionItem: data.actionItem.trim(),
@@ -4521,7 +4562,8 @@ export async function logOffSystemWork(
   }).returning({ id: eodUpdates.id });
   await audit({
     actor: u.email, entityType: "eod", entityId: `offsystem:${row.id}`, tenantOrgId: tenant,
-    action: `logged off-system work: ${title}`,
+    action: `logged off-system work: ${title}`
+      + (day.date === shopToday() ? "" : ` (for ${day.date})`),
   });
   revalidatePath("/eod");
   return { id: row.id };
@@ -9051,14 +9093,18 @@ export async function attachPoolExpenses(
  */
 export async function createStipend(data: {
   person: string; label: string; amount: string; kind: string;
-  everyMonths: number; dayOfMonth: number; startsOn: string; endsOn: string; note: string;
+  cadence?: string; everyMonths: number; dayOfMonth: number;
+  everyWeeks?: number; weekday?: number;
+  startsOn: string; endsOn: string; note: string;
 }): Promise<{ error?: string; id?: number }> {
   const u = await requireOwner();
   const t = readTenant(u);
   const cents = parseMoney(data.amount) ?? 0;
   const draft = {
     person: data.person.trim(), label: data.label.trim(), amountCents: cents,
+    cadence: cadenceOf(data.cadence),
     everyMonths: Math.round(data.everyMonths), dayOfMonth: Math.round(data.dayOfMonth),
+    everyWeeks: Math.round(data.everyWeeks ?? 1), weekday: Math.round(data.weekday ?? 1),
     startsOn: data.startsOn.trim(), endsOn: data.endsOn.trim(),
   };
   const problem = checkStipend(draft);
@@ -9074,14 +9120,18 @@ export async function createStipend(data: {
   const [row] = await db.insert(stipends).values({
     tenantOrgId: t, person: member.name, label: draft.label.slice(0, 80),
     amountCents: cents, kind: await cleanKind(data.kind, t),
+    cadence: draft.cadence,
     everyMonths: draft.everyMonths, dayOfMonth: draft.dayOfMonth,
+    everyWeeks: draft.everyWeeks, weekday: draft.weekday,
     startsOn: draft.startsOn, endsOn: draft.endsOn,
     note: data.note.trim().slice(0, 300), createdBy: u.email,
   }).returning();
   await audit({
     actor: u.email, entityType: "stipend", entityId: row.id, tenantOrgId: t,
+    // The cadence in the words the roster uses, so an owner reading the log a
+    // year later sees the schedule they set rather than three raw columns.
     action: `set up a ${formatCents(cents)} ${draft.label} for ${member.name}`
-      + `, every ${draft.everyMonths === 1 ? "month" : `${draft.everyMonths} months`} from ${draft.startsOn}`
+      + `, ${stipendCadenceLabel(draft)} from ${draft.startsOn}`
       + (draft.endsOn ? ` until ${draft.endsOn}` : ""),
   });
   revalidatePath("/people");
@@ -10774,7 +10824,7 @@ export async function addOrg(name: string, kind: string): Promise<{ error?: stri
 }
 
 /**
- * "We are selling to them" / "they are a client now."
+ * Where we stand with a company: selling to them, working for them, or used to.
  *
  * The state the app had no word for. Quoting a company means creating it and
  * its systems, and those systems then joined the working fleet - so one quote
@@ -10782,18 +10832,22 @@ export async function addOrg(name: string, kind: string): Promise<{ error?: stri
  * maintenance calendar, and the only way to keep them off was not to record
  * them.
  *
- * Nothing is moved, copied or deleted either way. This flips one boolean; what
- * it changes is which systems the fleet queries ask for - see lib/prospects,
- * which owns that rule. Converting is therefore complete by construction:
- * every system, site, quote and file they already had is theirs, and the day
- * they say yes it is all simply in the fleet.
+ * Nothing is moved, copied or deleted at any stage. This writes one word; what
+ * it changes is which systems the fleet queries ask for - see lib/fleetHold,
+ * which owns that rule. Every transition is therefore complete by
+ * construction, in both directions: every system, site, quote and file they
+ * had is still theirs, and the day they sign it is all simply in the fleet
+ * again. That is what makes "former client" safe to set - it hides nothing,
+ * and the service history it leaves intact is the thing that gets handed on
+ * when the machine changes hands.
  *
- * Not offered for a provider. "Prospect" is about somebody buying from us, and
- * a service company we subcontract to is a different relationship wearing the
- * same table.
+ * Not offered for a provider. These stages are about somebody buying from us,
+ * and a service company we subcontract to is a different relationship wearing
+ * the same table.
  */
-export async function setOrgProspect(orgId: number, prospect: boolean): Promise<{ error?: string }> {
+export async function setOrgStage(orgId: number, stage: string): Promise<{ error?: string }> {
   const u = await requireStaff();
+  if (!isOrgStage(stage)) return { error: "That isn't a stage we know" };
   const gate = await adminOrgGate(u, orgId);
   if ("error" in gate) return gate;
   const { org } = gate;
@@ -10801,14 +10855,15 @@ export async function setOrgProspect(orgId: number, prospect: boolean): Promise<
   if (org.kind === "provider") {
     return { error: "Providers are companies we work with, not companies we are selling to" };
   }
-  if (org.prospect === prospect) return {};
-  await db.update(orgs).set({ prospect }).where(eq(orgs.id, orgId));
+  const was = stageOf(org.stage);
+  if (was === stage) return {};
+  await db.update(orgs).set({ stage }).where(eq(orgs.id, orgId));
   await audit({
     actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: org.parentOrgId,
-    action: prospect
-      ? `marked "${org.name}" a prospect - their systems come off the working fleet until they are a client`
-      : `made "${org.name}" a client - their systems join the working fleet`,
-    field: "prospect", oldValue: String(org.prospect), newValue: String(prospect),
+    action: stage === "client"
+      ? `made "${org.name}" a client - their systems join the working fleet`
+      : `marked "${org.name}" a ${STAGE_WORD[stage]} - their systems come off the working fleet`,
+    field: "stage", oldValue: was, newValue: stage,
   });
   revalidatePath("/clients");
   revalidatePath("/settings");

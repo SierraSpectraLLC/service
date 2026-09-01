@@ -1,11 +1,11 @@
-// Every room that draws the working fleet asks who is a prospect.
+// Every room that draws the working fleet asks who is held out of it.
 //
-// The rule lives in lib/prospects, but a rule in a library is not a rule until
+// The rule lives in lib/fleetHold, but a rule in a library is not a rule until
 // the call sites use it - and the failure mode is silent and slow: somebody
 // adds a fleet page next year, writes the archived/tenant filters everybody
 // writes, and a stranger's machines are back on the board with nothing
 // throwing. Nobody notices until a shop asks why it is being nagged to PM a
-// company that never signed.
+// company that never signed, or one that left two years ago.
 //
 // So this is a textual check over the pages that draw the fleet, the same
 // posture tests/tenantStamp takes to the tenant column. Adding a room to the
@@ -18,9 +18,11 @@ import { describe, expect, it } from "vitest";
  * after this week.
  *
  * Deliberately not every page that mentions a system. A client's own record,
- * the document picker and the agreement's coverage picker all name a
- * prospect's systems on purpose: the record is complete, and quoting them is
- * the whole reason the systems exist. What is held back is the fleet.
+ * the document picker and the agreement's coverage picker all name a held-back
+ * company's systems on purpose: the record is complete, quoting them is the
+ * whole reason a prospect's systems exist, and a former client's history is
+ * the thing that gets handed on when a machine is sold. What is held back is
+ * the fleet.
  */
 const FLEET_ROOMS = [
   "src/app/(dashboard)/page.tsx",
@@ -34,14 +36,14 @@ const strip = (file: string) =>
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
 
-describe("the fleet rooms hold a prospect's systems back", () => {
+describe("the fleet rooms hold a non-client's systems back", () => {
   for (const file of FLEET_ROOMS) {
-    it(`${file} asks lib/prospects`, () => {
+    it(`${file} asks lib/fleetHold`, () => {
       const src = strip(file);
       // Comments stripped first: each of these files EXPLAINS the rule in
       // prose, and a check over raw text would pass on the explanation while
       // the query underneath had lost it.
-      const asks = /prospectHold\s*\(/.test(src) && /notProspect\s*\(/.test(src);
+      const asks = /fleetHold\s*\(/.test(src) && /notHeld\s*\(/.test(src);
       expect(`${file}: ${asks ? "asks" : "MISSING the prospect rule"}`).toBe(`${file}: asks`);
     });
   }
@@ -50,11 +52,11 @@ describe("the fleet rooms hold a prospect's systems back", () => {
     /*
      * The other way this decays: a page reads orgs.prospect itself and builds
      * its own condition, which is how the NULL-instrument bug gets reinvented
-     * one page at a time. The flag is lib/prospects' to read.
+     * one page at a time. The flag is lib/fleetHold' to read.
      */
     for (const file of FLEET_ROOMS) {
       const src = strip(file);
-      expect(`${file}: ${/orgs\.prospect/.test(src) ? "open-coded" : "clean"}`).toBe(`${file}: clean`);
+      expect(`${file}: ${/orgs\.stage/.test(src) ? "open-coded" : "clean"}`).toBe(`${file}: clean`);
     }
   });
 });

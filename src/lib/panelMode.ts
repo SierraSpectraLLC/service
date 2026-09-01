@@ -49,8 +49,15 @@ export const modeFor = (viewKey: string, saved: { mode?: unknown } | null): Pane
  * calm. Somebody else's is amber from the first day: it is not wrong, it is
  * just not moving, and staying visible is the entire point. Either becomes red
  * once something behind the wait is already past a date somebody committed to.
+ *
+ * Unless the wait is SETTLED, which is the third state and the one this got
+ * wrong for a year. A system handed back after a finished job sits with its
+ * owner indefinitely and correctly - it is in their lab, running, and nobody
+ * owes anybody a move. Amber for nineteen days of that is the record crying
+ * about the ordinary, and a page that cries about the ordinary is a page whose
+ * colour nobody reads. See queueNeedsThem for what counts as owing one.
  */
 export const standingTone = (
-  s: { isMine: boolean; overdue: boolean },
+  s: { isMine: boolean; overdue: boolean; settled?: boolean },
 ): "good" | "warn" | "bad" =>
-  s.overdue ? "bad" : s.isMine ? "good" : "warn";
+  s.overdue ? "bad" : s.isMine || s.settled ? "good" : "warn";

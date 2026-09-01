@@ -23,6 +23,7 @@ import { usageForAll } from "@/lib/agreementUsage";
 import { shopToday } from "@/lib/shopday";
 import { getAppearance } from "@/lib/appearanceData";
 import { isHouse, maySeeAgreements, readTenant, tenantOfOrg } from "@/lib/tenancy";
+import { stageOf } from "@/lib/orgStage";
 import { siteLabel } from "@/lib/sites";
 import { tempState } from "@/lib/tempPassword";
 import { DataTable, Pill, RecordHero, Tabs, type HeroStat, type TabItem } from "@/components/ui";
@@ -237,7 +238,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
           storageLimitMb: org.storageLimitMb, quota,
           remoteAccessEnabled: org.remoteAccessEnabled,
           resaleEnabled: org.resaleEnabled, remoteDevices: deviceCount,
-          prospect: org.prospect, ownedSystems: ownedSystems.length,
+          stage: stageOf(org.stage), ownedSystems: ownedSystems.length,
           isOperator: s?.operatorOrgId === org.id, isSheetOrg: s?.sheetOrgId === org.id,
         }}
         people={allowRows.map((r) => {

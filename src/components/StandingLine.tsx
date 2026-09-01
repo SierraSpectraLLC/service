@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import { ackQueueHandback } from "@/app/actions";
-import { QUEUE_EVENT } from "@/components/QueuePanel";
+import { QUEUE_EVENT } from "@/components/CustodyPanel";
 import StatusLine from "@/components/ui/StatusLine";
 import { toast } from "@/components/ui/Toast";
 import { standingTone } from "@/lib/panelMode";
@@ -11,8 +11,8 @@ import { standingTone } from "@/lib/panelMode";
  * Whose move it is, in one sentence, above everything else on the record.
  *
  * The question this answers is "why is nothing happening on this machine",
- * and the banded page made you scroll past four cards to a Queue panel to find
- * it. A system parked with a client for three weeks looked exactly like one
+ * and the banded page made you scroll past four cards to the Custody panel to
+ * find it. A system parked with a client for three weeks looked exactly like one
  * being worked on this morning, which is how a system sits parked for three
  * weeks.
  *
@@ -86,8 +86,8 @@ export default function StandingLine({
     <StatusLine tone={tone} actions={dismissible ? (
       /* Not "Hand it back": nothing is pending, so there is nothing to hand
          back. The only thing left to do with this sentence is finish reading
-         it. Moving it is still one card down, on the Queue panel, along with
-         every fact this line is repeating. */
+         it. Moving it is still one card down, on the Custody panel, along
+         with every fact this line is repeating. */
       <button className="btn sm" onClick={dismiss} disabled={busy}>
         {busy ? "Dismissing…" : "Dismiss"}
       </button>
@@ -97,8 +97,8 @@ export default function StandingLine({
          it is in their lab, it is their instrument, and there is nowhere to
          hand it. What a client actually wants from here is service, and
          Request service is on the record's header where it always was. The
-         queue is still movable a card down for anybody who genuinely means
-         to send it in - that panel says "Move it" and names both ends,
+         queue is still movable on the Custody panel for anybody who genuinely
+         means to send it in - it says "Move it" and names both ends,
          which is the honest version of this button. */
       <button className={`btn sm${isMine ? "" : " accent"}`}
         onClick={() => window.dispatchEvent(new Event(QUEUE_EVENT))}>

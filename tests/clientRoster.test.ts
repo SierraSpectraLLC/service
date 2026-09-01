@@ -7,8 +7,8 @@
 import { describe, expect, it } from "vitest";
 import { clientRoster, filterRoster, rosterSummary, type RosterOrg } from "@/lib/clientRoster";
 
-const org = (id: number, name: string, kind = "client", prospect = false): RosterOrg =>
-  ({ id, name, kind, themeColor: "", prospect });
+const org = (id: number, name: string, kind = "client", stage = "client"): RosterOrg =>
+  ({ id, name, kind, themeColor: "", stage });
 
 const ORGS = [org(1, "Lab Zen"), org(2, "Testen"), org(3, "Cascade Instrument", "provider")];
 
@@ -85,5 +85,50 @@ describe("filtering the list", () => {
 
   it("applies both at once", () => {
     expect(filterRoster(rows, { kind: "client", q: "cascade" })).toEqual([]);
+  });
+});
+
+describe("the stages ride the same facet as the kinds", () => {
+  /*
+   * To a reader it is one question - which of these companies is this list
+   * about - even though underneath it is a different column. What must not
+   * happen is a Clients facet that quietly includes the people we are still
+   * selling to or the ones who have left: that would be the roster telling the
+   * same lie the fleet was told before lib/fleetHold.
+   */
+  const MIXED = clientRoster(
+    [org(1, "Lab Zen"), org(2, "Federon", "client", "prospect"),
+     org(3, "Bayline", "client", "former"), org(4, "Cascade", "provider")],
+    [], [], []);
+
+  it("keeps a prospect out of Clients", () => {
+    expect(filterRoster(MIXED, { kind: "client" }).map((r) => r.name)).toEqual(["Lab Zen"]);
+  });
+
+  it("keeps a former client out of Clients too", () => {
+    // The half that arrived second, and the one a boolean could not express.
+    expect(filterRoster(MIXED, { kind: "client" }).map((r) => r.name)).not.toContain("Bayline");
+  });
+
+  it("gives each stage its own facet", () => {
+    expect(filterRoster(MIXED, { kind: "prospect" }).map((r) => r.name)).toEqual(["Federon"]);
+    expect(filterRoster(MIXED, { kind: "former" }).map((r) => r.name)).toEqual(["Bayline"]);
+  });
+
+  it("does not let a stage leak across the kind axis", () => {
+    // A provider is a provider whatever else is true of them. The two columns
+    // are independent and the facet must not conflate them.
+    expect(filterRoster(MIXED, { kind: "provider" }).map((r) => r.name)).toEqual(["Cascade"]);
+  });
+
+  it("still shows everybody when no facet is picked", () => {
+    expect(filterRoster(MIXED, {})).toHaveLength(4);
+  });
+
+  it("reads a row with no stage set as a client", () => {
+    // Every row that existed before the column did. An organization already on
+    // file is a client until somebody says otherwise.
+    const legacy = clientRoster([{ id: 9, name: "Old", kind: "client", themeColor: "", stage: "" }], [], [], []);
+    expect(filterRoster(legacy, { kind: "client" })).toHaveLength(1);
   });
 });

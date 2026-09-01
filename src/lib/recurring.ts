@@ -54,13 +54,40 @@ export function addMonths(iso: string, n: number, dayOfMonth: number): string {
   return cycleDay(Math.floor(total / 12), (total % 12) + 1, dayOfMonth);
 }
 
-/** Shift a plain day by n days. Used only for the lead time. */
+/** Shift a plain day by n days. Used for the lead time and the weekly walk. */
 export function addDays(iso: string, n: number): string {
   if (!isDay(iso)) return "";
   const d = new Date(`${iso}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() + Math.round(n));
   return d.toISOString().slice(0, 10);
 }
+
+/**
+ * Which weekday a date falls on, 0 = Sunday, matching getUTCDay().
+ *
+ * Anchored at UTC noon like every other date here, so a machine in Auckland
+ * and one in Los Angeles agree about what day the 1st is.
+ */
+export function weekdayOf(iso: string): number {
+  if (!isDay(iso)) return -1;
+  return new Date(`${iso}T12:00:00Z`).getUTCDay();
+}
+
+/**
+ * The first `weekday` on or after `iso`.
+ *
+ * The weekly counterpart of firstCycle: a schedule that starts on a Wednesday
+ * and pays on Fridays pays on the Friday, not on the Wednesday.
+ */
+export function alignWeekday(iso: string, weekday: number): string {
+  if (!isDay(iso)) return "";
+  const want = ((Math.round(weekday) % 7) + 7) % 7;
+  const have = weekdayOf(iso);
+  return addDays(iso, (want - have + 7) % 7);
+}
+
+/** Move a weekly cycle forward n weeks. The weekday is preserved by construction. */
+export const addWeeks = (iso: string, n: number): string => addDays(iso, Math.round(n) * 7);
 
 /** Is this agreement actually set up to bill on its own? */
 export const recurring = (a: Pick<RecurringTerms, "billEveryMonths" | "billAmountCents" | "status">): boolean =>

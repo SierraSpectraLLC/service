@@ -7,12 +7,13 @@ import {
   setOrgAppearance, updateEodRecipients, updateDigestRecipients, setDigestHour, sendDigestNow,
   addClientAccess, addClientPerson, removeClientAccess,
   setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit,
-  setOrgRemoteAccess, setOrgProspect, setOrgResale, setClientTempPassword, clearClientTempPassword, setClientSeesPayroll,
+  setOrgRemoteAccess, setOrgStage, setOrgResale, setClientTempPassword, clearClientTempPassword, setClientSeesPayroll,
   resendInvite,
   setClientSeesMoney,
   setStartView,
 } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
+import { heldOutOfFleet, ORG_STAGES, stageHint, STAGE_WORD, type OrgStage } from "@/lib/orgStage";
 import { TEMP_DAYS_DEFAULT, TEMP_DAYS_MAX } from "@/lib/tempPassword";
 import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
@@ -71,9 +72,9 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
     storageLimitMb: number; quota: Quota;
     remoteAccessEnabled: boolean; remoteDevices: number;
     resaleEnabled: boolean;
-    /** Somebody we are selling to. See lib/prospects. */
-    prospect: boolean;
-    /** Systems they OWN - what the fleet holds back while they are a prospect.
+    /** Where we stand with them: client | prospect | former. See lib/orgStage. */
+    stage: OrgStage;
+    /** Systems they OWN - what the fleet holds back at a non-client stage.
         Not `systems` above, which counts what has been shared with them. */
     ownedSystems: number;
   };
@@ -152,8 +153,8 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
   // The fleet pages read the flag server-side, so the switch has to make the
   // app go and look again rather than just repaint this card.
   const router = useRouter();
-  const [prospectOn, setProspectOn] = useState(org.prospect);
-  const [prospectMsg, setProspectMsg] = useState("");
+  const [stage, setStage] = useState<OrgStage>(org.stage);
+  const [stageMsg, setStageMsg] = useState("");
   const [remoteOn, setRemoteOn] = useState(org.remoteAccessEnabled);
   // Resale: off unless this organization is actually in that business.
   const [resaleOn, setResaleOn] = useState(org.resaleEnabled);
@@ -855,40 +856,57 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
         </Panel>
       )}
 
-      {/* The state the app had no word for. Quoting a company means creating it
-          and its systems, and those systems then joined the working fleet - so
-          one quote put a stranger's machines on the board, in the metrics and
-          on the maintenance calendar. Nothing here moves or deletes anything;
+      {/* The state the app had no word for, and then the second one. Quoting a
+          company means creating it and its systems, and those systems joined
+          the working fleet - so one quote put a stranger's machines on the
+          board, in the metrics and on the maintenance calendar. A company that
+          STOPPED buying left its machines there for the opposite reason.
+
+          Three buttons rather than a toggle, because there are three states
+          and a toggle can only hold two - which is what sent the shop asking
+          for the third. Nothing here moves or deletes anything at any stage;
           it changes which systems the fleet queries ask for. */}
       {isOwner && !org.isOperator && org.kind === "client" && (
-        <Panel title="Where we stand with them"
-          hint={prospectOn
-            ? `We are selling to ${org.name}. Their ${org.ownedSystems === 1 ? "system is" : "systems are"} on file and on their own page, and stay off the board, the metrics and the maintenance calendar until they are a client.`
-            : `${org.name} is a client. Everything of theirs is in the working fleet.`}>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <button className={`btn sm${prospectOn ? " accent" : ""}`} disabled={pending}
-              onClick={() => {
-                const next = !prospectOn;
-                setProspectOn(next); setProspectMsg("");
-                startTransition(async () => {
-                  const res = await setOrgProspect(org.id, next);
-                  if (res?.error) { setProspectOn(!next); setProspectMsg(res.error); }
-                  else router.refresh();
-                });
-              }}>
-              {prospectOn ? "They are a client now" : "Mark as a prospect"}
-            </button>
-            <span className={`pill ${prospectOn ? "warn" : "good"}`}>
-              {prospectOn ? "prospect" : "client"}
-            </span>
+        <Panel title="Where we stand with them" hint={stageHint(stage, org.name, org.ownedSystems)}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            {ORG_STAGES.map((k) => (
+              <button key={k} className={`btn sm${stage === k ? " accent" : ""}`}
+                disabled={pending || stage === k}
+                onClick={() => {
+                  const was = stage;
+                  setStage(k); setStageMsg("");
+                  startTransition(async () => {
+                    const res = await setOrgStage(org.id, k);
+                    if (res?.error) { setStage(was); setStageMsg(res.error); }
+                    else router.refresh();
+                  });
+                }}>
+                {STAGE_WORD[k]}
+              </button>
+            ))}
+            {/* No pill. The accented button and the sentence above it already
+                say which stage this is, and a third copy beside them was just
+                the word twice in a row. The roster keeps its pill, where it
+                is the only thing saying so. */}
             {org.ownedSystems > 0 && (
               <span className="mut t-meta">
                 {org.ownedSystems} system{org.ownedSystems === 1 ? "" : "s"} on file
-                {prospectOn ? ", held out of the fleet" : ""}
+                {heldOutOfFleet(stage) ? ", held out of the fleet" : ""}
               </span>
             )}
           </div>
-          {prospectMsg && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{prospectMsg}</div>}
+          {/* The half of "former client" that is not about hiding anything.
+              Said here because the button is where somebody decides, and the
+              worry it answers - that marking them former loses the history -
+              is the reason a shop would leave a dead account in the fleet. */}
+          {stage === "former" && (
+            <div className="mut t-small" style={{ marginTop: 8 }}>
+              Their records are untouched and stay editable: you can still file what you
+              learn about those machines, and hand the provenance on with them if they
+              are sold. Making them a client again puts everything straight back.
+            </div>
+          )}
+          {stageMsg && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{stageMsg}</div>}
         </Panel>
       )}
 
