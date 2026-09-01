@@ -256,7 +256,11 @@ export const CLIENT_PANELS = [
   // "coverage" is theirs before it is ours: who services this machine and
   // until when is the client's own question, and the page used to answer it
   // by counting what they could see.
-  "queue", "coverage", "system", "assets", "site", "workorders", "maintenance",
+  /* "custody" was "queue" until the two cards merged. What a client gets from
+     it is unchanged - whose move it is, and the handovers - because the
+     ownership half is behind showOwnership, which the page sets from isStaff.
+     The panel key had to move with the panel; the visibility did not. */
+  "custody", "coverage", "system", "assets", "site", "workorders", "maintenance",
   // "tasks" was left out on the reasoning that a task is how an engineer
   // breaks a job into steps - true of most of them, and false of the ones that
   // matter here. Work gets assigned ACROSS the wall: a shop hands the client's

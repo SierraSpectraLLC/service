@@ -51,6 +51,33 @@ export function canKick(
   return viewer.orgId === system.queueOrgId || viewer.orgId === system.ownerOrgId;
 }
 
+/**
+ * A wait nobody owes a move on.
+ *
+ * The shop's own screen had no word for this. queueView says who HOLDS it and
+ * queueNeedsThem says whether anything is owed, but the record's top line only
+ * ever asked the first - so a system we had finished, handed back, and had no
+ * further move on was announced as "Waiting on Modesto Irrigation District" in
+ * amber, and stayed there for nineteen days. The banner described the shop as
+ * blocked by the one fact that means it isn't.
+ *
+ * Staff only, and deliberately. A client whose machine is at the shop wants
+ * "with Sierra Spectra" at the top of their record: that is the answer to
+ * where is my instrument, not a chore they are being nagged about. The
+ * mirror-image case on their side is the dismissible handback line.
+ *
+ * `pendingOnHolder` is queueNeedsThem asked about the HOLDER rather than the
+ * viewer - see the call site, which is the only place that can resolve it.
+ */
+export function settledWait(s: {
+  isStaff: boolean;
+  /** The viewer holds it - queueView() === "mine". */
+  isMine: boolean;
+  pendingOnHolder: boolean;
+}): boolean {
+  return s.isStaff && !s.isMine && !s.pendingOnHolder;
+}
+
 export type QueueLeg = { toOrgId: number | null; at: Date };
 
 /**
