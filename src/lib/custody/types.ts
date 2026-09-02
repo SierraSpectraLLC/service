@@ -127,7 +127,21 @@ export type Epoch = {
   instrumentId: number;
   /** 1-based, dense, per instrument. The anchor comparison is on this number. */
   n: number;
-  custodianOrgId: OrgId;
+  /**
+   * Null is HOUSE STEWARDSHIP - a machine the operator runs directly, or one a
+   * provider logged before its real owner joined the platform. Widened from the
+   * Phase 0 shape because instruments.owner_org_id has always been nullable and
+   * has always meant this; an epoch model that could not express it would have
+   * had to invent a custodian for every unclaimed system on the instance.
+   * Nobody is ever a party to a null custodian - see view.epochParties.
+   */
+  custodianOrgId: OrgId | null;
+  /**
+   * The custodian's name as it stood. Kept as text beside the id for the reason
+   * custody_events keeps fromName/toName: an org row can be deleted and a
+   * custody record has to stay readable forever.
+   */
+  custodianName: string;
   openedByEventId: EventId | null;
   closedByEventId: EventId | null;
   closeKind: CloseKind;
@@ -186,11 +200,12 @@ export type SystemEvent = {
   kind: EventKind;
   occurredAt: Date;
   recordedAt: Date;
-  authorOrgId: OrgId;
+  /** Null is the operator's own staff, who hold no org row of their own. */
+  authorOrgId: OrgId | null;
   /** Who asked for the work. A broker commissioning an exam is a party to it. */
   commissionerOrgId: OrgId | null;
   /** Who held the machine at occurredAt. Not derived at read: custody moves. */
-  custodianOrgId: OrgId;
+  custodianOrgId: OrgId | null;
   whoGrade: WhoGrade;
   howGrade: HowGrade;
   procedureKeys: ProcedureKeyEntry[];

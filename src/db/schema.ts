@@ -4613,3 +4613,86 @@ export const featureFlags = pgTable("feature_flags", {
   updatedBy: text("updated_by").notNull().default(""),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+/**
+ * ONE ROW PER THING THAT HAPPENED TO ONE MACHINE. Append-only, hash-chained.
+ *
+ * History in this app is reconstructed at read time from tasks, work orders,
+ * pm_schedules, service_visits, stage_events, asset_events, custody_events and
+ * audit_log - lib/serviceHistory says so in its own header, and the reason
+ * "0 VISITS THIS YEAR" once meant "no closed work orders" is that there are
+ * three places a PM can land and one of them was being counted. Nothing can be
+ * hashed, graded, scored or shown to an outside buyer while the answer depends
+ * on which table the work happened to fall into.
+ *
+ * NOT TENANT-STAMPED, and that is the whole point. A machine outlives the
+ * workspace that typed it in; stamping its history is what forked it into two
+ * rows for one EP-001 in the first place. Access is decided by lib/custody/view
+ * from epochs and grants, never by a stamp.
+ *
+ * TWO PAYLOADS, SPLIT AT WRITE. `provenance` travels with the machine forever;
+ * `private` stays with the parties to the event. lib/redact is a read filter
+ * keyed to the record's tenant, and a read filter cannot answer "may a stranger
+ * who buys this in 2031 see this sentence" - the person who knew is the person
+ * who typed it, and they will not be reachable. Same bet lib/provenance makes
+ * about catalog text, for the same reason.
+ */
+export const systemEvents = pgTable("system_events", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }),
+  /** Which span of custody it fell in. Null until Phase 3's backfill places it. */
+  epochId: integer("epoch_id"),
+  // pm | repair | inspection | tune | qualification | config | intake |
+  // attested | transfer | claim | release | note
+  kind: text("kind").notNull().default("note"),
+  /**
+   * WHEN IT HAPPENED, which is not when it was typed. A PM done in March and
+   * logged in June is March's work and June's paperwork, and a chain that
+   * conflated them would report a two-year-old machine as freshly serviced.
+   */
+  occurredAt: timestamp("occurred_at").notNull(),
+  recordedAt: timestamp("recorded_at").notNull().defaultNow(),
+  /** Null = the operator's own staff, who hold no org row of their own. */
+  authorOrgId: integer("author_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  /** Who asked for the work. A broker paying for a pre-sale exam is a party to it. */
+  commissionerOrgId: integer("commissioner_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  /** Who held it at occurred_at - stamped, never derived later. Custody moves. */
+  custodianOrgId: integer("custodian_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  /** attested | self_reported | third_party - see lib/custody/grades. */
+  whoGrade: text("who_grade").notNull().default("self_reported"),
+  /** procedure_run | typed | document_only. */
+  howGrade: text("how_grade").notNull().default("typed"),
+  /** [{ key, state: done|skip|na, reading?, unit?, condition?, reason?, partNumber? }] */
+  procedureKeys: jsonb("procedure_keys").notNull().default([]),
+  /** Travels forever. `findings` is the free text and the only withholdable field. */
+  provenance: jsonb("provenance").notNull().default({}),
+  /** Stays with the parties to this event. Never hashed, so redaction is safe. */
+  private: jsonb("private").notNull().default({}),
+  /** Free text held back at seal, or by its author during a claim window. */
+  withheld: boolean("withheld").notNull().default(false),
+  // work_order | task | pm_schedule | checkout_verdict | custody_event |
+  // manual | scan | backfill
+  sourceKind: text("source_kind").notNull().default("manual"),
+  /**
+   * The source row's id, as text. Unique with source_kind, and that unique is
+   * what makes every emitter and the backfill safe to run twice - which they
+   * will be, because the backfill exists to repair emitters that failed.
+   */
+  sourceId: text("source_id"),
+  /**
+   * '' is genesis, never NULL - NULLs do not collide in a unique index, and the
+   * unique on (instrument_id, prev_hash) is what actually serializes appends.
+   * The neon-http driver has no interactive transactions, so a SELECT ... FOR
+   * UPDATE is not available; two racing appends both read the same last hash
+   * and the second INSERT loses on that index instead. Strictly stronger than a
+   * lock: it holds even for a future code path that forgets to take one.
+   */
+  prevHash: text("prev_hash").notNull().default(""),
+  hash: text("hash").notNull().default(""),
+}, (t) => [
+  index("system_events_instrument_recorded_idx").on(t.instrumentId, t.recordedAt),
+  index("system_events_instrument_occurred_idx").on(t.instrumentId, t.occurredAt),
+  unique("system_events_source_unique").on(t.sourceKind, t.sourceId),
+  unique("system_events_chain_unique").on(t.instrumentId, t.prevHash),
+]);

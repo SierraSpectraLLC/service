@@ -64,6 +64,12 @@ import {
 import { parseProcParts, partQty, partsForModel, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { cleanItem, parseChecklist, serializeChecklist } from "@/lib/checklist";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
+// The machine's own chain. Every emitter is idempotent and none of them may
+// fail a user's write - see lib/custody/emit.emitSafely. Nothing reads these
+// yet; writing runs ahead of reading so the stream has a history to show.
+import {
+  emitCheckoutVerdict, emitCustodyEvent, emitPmTask, emitSafely, emitWorkOrderClosed,
+} from "@/lib/custody/emit";
 import { completionBlocked, evaluateResult, needsResult, parseAcceptance, resultIsRecorded, serializeAcceptance, type Acceptance } from "@/lib/testResult";
 import { TIME_CATEGORIES } from "@/lib/rates";
 import { sellPrice, EXPENSE_KINDS, LINE_KINDS, linesTotal } from "@/lib/billing";
@@ -1971,6 +1977,7 @@ export async function setTaskState(taskId: number, state: string): Promise<{ err
       });
     }
   }
+  if (state === "Done") await emitSafely(`task ${taskId}`, () => emitPmTask(taskId));
   revWork(t);
   return {};
 }
@@ -2134,12 +2141,13 @@ export async function alignMaintenance(
       // Asset-hosted schedules file against the system too - the alignment was
       // asked for from the system, and that is where the history reads.
       const onSystem = s.instrumentId ?? target.instrumentId;
-      await db.insert(tasks).values({
+      const [filed] = await db.insert(tasks).values({
         tenantOrgId: s.tenantOrgId, instrumentId: onSystem, assetId: s.assetId,
         title: s.title, body: `Backfilled - done ${date} (PM visit).`,
         state: "Done", origin: "pm", pmScheduleId: s.id, procedureId: s.procedureId,
         dueDate: date, completedAt: new Date(`${date}T12:00:00Z`),
-      });
+      }).returning();
+      await emitSafely(`aligned PM ${filed.id}`, () => emitPmTask(filed.id));
     }
   }
   // Tasks generated off the old anchor claim work that this correction says is
@@ -2331,8 +2339,8 @@ export async function logPastPm(
         ? ` (next due ${advancePm(date, sched.everyDays)})` : ""),
     field: "lastDone", newValue: date,
   });
+  await emitSafely(`backfilled PM ${t.id}`, () => emitPmTask(t.id));
   revWork(sched);
-  void t;
   return {};
 }
 
@@ -2449,6 +2457,7 @@ export async function completePmNow(
       + (s.nextDue !== today ? ` (was due ${s.nextDue})` : ""),
     field: "nextDue", oldValue: s.nextDue, newValue: nextDue,
   });
+  await emitSafely(`PM ${t.id}`, () => emitPmTask(t.id));
   revWork(s);
   return { taskId: t.id };
 }
@@ -6632,6 +6641,7 @@ export async function logPastWorkOrder(
     entityType: "work_order", entityId: wo.id,
     action: `logged past work ${wo.number} (${date}): ${title}`,
   });
+  await emitSafely(`work order ${wo.number}`, () => emitWorkOrderClosed(wo.id));
   revWo(wo);
   return { id: wo.id, number: wo.number };
 }
@@ -6793,6 +6803,9 @@ export async function setWorkOrderState(woId: number, state: string): Promise<{ 
     action: `${wo.number} is now ${WO_LABEL[move.next].toLowerCase()}`,
     field: "state", oldValue: wo.state, newValue: move.next,
   });
+  if (move.next === "closed") {
+    await emitSafely(`work order ${wo.number}`, () => emitWorkOrderClosed(woId));
+  }
   revWo(wo);
   return {};
 }
@@ -9873,12 +9886,13 @@ export async function handOffSystem(instrumentId: number, toOrgId: number, opts?
     }
   }
 
-  await db.insert(custodyEvents).values({
+  const [moved] = await db.insert(custodyEvents).values({
     instrumentId, kind: "transfer",
     fromOrgId: from?.id ?? null, toOrgId,
     fromName: from?.name ?? "", toName: to.name,
     note, actor: u.email,
-  });
+  }).returning();
+  await emitSafely(`handoff ${moved.id}`, () => emitCustodyEvent(moved.id));
 
   // Who's left with access, named in the audit line: after a handoff the first
   // question is always "so who can still see this?"
@@ -19943,11 +19957,12 @@ export async function recordCheckoutVerdict(
     }).returning();
     reportAttachmentId = att.id;
   }
-  await db.insert(checkoutVerdicts).values({
+  const [verdict] = await db.insert(checkoutVerdicts).values({
     tenantOrgId: p.tenantOrgId, projectId, instrumentId: p.instrumentId,
     phase: data.phase, verdict: data.verdict, source: "manual",
     summary: data.summary.trim(), reportAttachmentId, recordedBy: u.email,
-  });
+  }).returning();
+  await emitSafely(`checkout verdict ${verdict.id}`, () => emitCheckoutVerdict(verdict.id));
   await audit({
     actor: u.email, instrumentId: p.instrumentId, entityType: "restoration", entityId: projectId,
     tenantOrgId: p.tenantOrgId, field: `${data.phase}_verdict`, newValue: data.verdict,

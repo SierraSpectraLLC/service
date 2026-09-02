@@ -4286,3 +4286,126 @@ ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "set_version" integer NOT NULL
 CREATE INDEX IF NOT EXISTS "procedures_key_idx" ON "procedures" ("tenant_org_id", "key");
 
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "procedure_set_id" integer;
+
+-- ═══ CUSTODY AND PROVENANCE, phase 2 ═══════════════════════════════════════
+-- One row per thing that happened to one machine. Append-only, hash-chained,
+-- NOT tenant-stamped. See docs/adr/0001-custody-and-provenance.md.
+CREATE TABLE IF NOT EXISTS "system_events" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "asset_id" integer,
+  "epoch_id" integer,
+  "kind" text NOT NULL DEFAULT 'note',
+  "occurred_at" timestamp NOT NULL,
+  "recorded_at" timestamp NOT NULL DEFAULT now(),
+  "author_org_id" integer,
+  "commissioner_org_id" integer,
+  "custodian_org_id" integer,
+  "who_grade" text NOT NULL DEFAULT 'self_reported',
+  "how_grade" text NOT NULL DEFAULT 'typed',
+  "procedure_keys" jsonb NOT NULL DEFAULT '[]'::jsonb,
+  "provenance" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "private" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "withheld" boolean NOT NULL DEFAULT false,
+  "source_kind" text NOT NULL DEFAULT 'manual',
+  "source_id" text,
+  "prev_hash" text NOT NULL DEFAULT '',
+  "hash" text NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS "system_events_instrument_recorded_idx" ON "system_events" ("instrument_id", "recorded_at");
+CREATE INDEX IF NOT EXISTS "system_events_instrument_occurred_idx" ON "system_events" ("instrument_id", "occurred_at");
+-- Emitter idempotence. Every emitter and the backfill write the same
+-- (source_kind, source_id), so running either twice is a no-op - which they
+-- will be, because the backfill exists to repair emitters that failed.
+CREATE UNIQUE INDEX IF NOT EXISTS "system_events_source_unique" ON "system_events" ("source_kind", "source_id");
+-- WHAT SERIALIZES APPENDS. The neon-http driver has no interactive
+-- transactions, so SELECT ... FOR UPDATE is not available to the app; two
+-- racing appends both read the same last hash and the second INSERT loses here
+-- instead, and lib/custody/append retries. Strictly stronger than a lock: it
+-- holds for a future code path that forgets to take one, and it makes a forked
+-- chain unrepresentable rather than merely unlikely.
+CREATE UNIQUE INDEX IF NOT EXISTS "system_events_chain_unique" ON "system_events" ("instrument_id", "prev_hash");
+
+-- Guarded the way every other constraint in this file is. The instrument FK
+-- cascades on purpose: a chain belongs to a machine, and deleting the machine
+-- is the one sanctioned way for its history to end. Every org reference sets
+-- null instead - a custody record has to stay readable after an organization
+-- is offboarded, which is why custody_events keeps the names as text too.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'system_events_instrument_id_fk') THEN
+    ALTER TABLE "system_events" ADD CONSTRAINT "system_events_instrument_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'system_events_asset_id_fk') THEN
+    ALTER TABLE "system_events" ADD CONSTRAINT "system_events_asset_id_fk"
+      FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'system_events_author_org_id_fk') THEN
+    ALTER TABLE "system_events" ADD CONSTRAINT "system_events_author_org_id_fk"
+      FOREIGN KEY ("author_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'system_events_commissioner_org_id_fk') THEN
+    ALTER TABLE "system_events" ADD CONSTRAINT "system_events_commissioner_org_id_fk"
+      FOREIGN KEY ("commissioner_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'system_events_custodian_org_id_fk') THEN
+    ALTER TABLE "system_events" ADD CONSTRAINT "system_events_custodian_org_id_fk"
+      FOREIGN KEY ("custodian_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'procedure_sets_tenant_org_id_fk') THEN
+    ALTER TABLE "procedure_sets" ADD CONSTRAINT "procedure_sets_tenant_org_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pm_schedules_procedure_set_id_fk') THEN
+    ALTER TABLE "pm_schedules" ADD CONSTRAINT "pm_schedules_procedure_set_id_fk"
+      FOREIGN KEY ("procedure_set_id") REFERENCES "procedure_sets"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- APPEND-ONLY, ENFORCED BELOW THE APP.
+--
+-- The chain is worth exactly what it costs to edit around, and an application
+-- rule is worth one forgotten call site. Two columns may still change, and both
+-- are deliberate holes: `withheld` because free text is held back at seal and
+-- during a claim window (the marker still shows - see lib/custody/view), and
+-- `epoch_id` because Phase 3 places events into spans that did not exist when
+-- they were written. Neither is hashed, so neither can rewrite what happened.
+CREATE OR REPLACE FUNCTION "system_events_no_mutation"() RETURNS trigger AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    -- A cascade from deleting the MACHINE is allowed; a delete of one line out
+    -- of a machine's history is not. The referential-integrity cascade removes
+    -- the parent row first, so by the time this fires for a real instrument
+    -- deletion the instrument is already gone and the EXISTS is false. Without
+    -- this, the chain would quietly make deleting a system impossible - which
+    -- is a regression dressed up as an invariant.
+    IF EXISTS (SELECT 1 FROM instruments WHERE id = OLD.instrument_id) THEN
+      RAISE EXCEPTION 'system_events is append-only: event % cannot be deleted', OLD.id;
+    END IF;
+    RETURN OLD;
+  END IF;
+  -- Compared as jsonb minus the allowed keys, so a column added by a later
+  -- phase is protected the day it lands rather than the day somebody
+  -- remembers to add it here.
+  IF (to_jsonb(NEW) - 'withheld' - 'epoch_id') IS DISTINCT FROM (to_jsonb(OLD) - 'withheld' - 'epoch_id') THEN
+    RAISE EXCEPTION 'system_events is append-only: only withheld and epoch_id may change (event %)', OLD.id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Guarded rather than DROP-and-recreate: this file never drops anything, and
+-- the function body above is CREATE OR REPLACE, so re-running still heals the
+-- rule itself.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+    WHERE t.tgname = 'system_events_no_mutation' AND c.relname = 'system_events'
+  ) THEN
+    CREATE TRIGGER "system_events_no_mutation"
+      BEFORE UPDATE OR DELETE ON "system_events"
+      FOR EACH ROW EXECUTE FUNCTION "system_events_no_mutation"();
+  END IF;
+END $$;

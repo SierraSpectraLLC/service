@@ -5,6 +5,8 @@ import Link from "next/link";
 import { clientAllowlist, instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, orgSites, attachments, workOrders, users, pmSchedules, agreements } from "@/db/schema";
 import { coverageOf, coverageSummary, type CoverageAgreement } from "@/lib/coverage";
 import { dayOf, lastVisitBy, visitsOf, visitsThisYear, type Completion } from "@/lib/serviceHistory";
+import { completionsFromEvents } from "@/lib/custody/history";
+import { flagOn } from "@/lib/custody/flags";
 import { daysSince, queueView } from "@/lib/queue";
 import { brandForTenant, getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
@@ -375,19 +377,25 @@ export default async function Home({ searchParams }: {
        Still nothing inferred: a completion is a row somebody wrote saying work
        finished, never an audit line, which would count a field edit as an
        engineer standing in the room. See lib/serviceHistory. */
-    const completions: Completion[] = [
-      ...woRows.flatMap((w) => (w.instrumentId === null || w.closedAt === null ? [] : [{
-        instrumentId: w.instrumentId,
-        day: dayOf(w.closedAt),
-        planned: w.severity === "Planned",
-      }])),
-      ...taskRows.flatMap((t) => (
-        t.instrumentId === null || t.state !== "Done" || t.completedAt === null
-          || (t.origin !== "pm" && t.origin !== "pm_request")
-          ? []
-          : [{ instrumentId: t.instrumentId, day: dayOf(t.completedAt), planned: true }]
-      )),
-    ];
+    const completions: Completion[] = await flagOn("custody.readPath")
+      /* The same days, read off the machine's own chain instead of reassembled
+         from the two tables below. Flagged rather than swapped: the chain is
+         backfilled by a script, and until that has run on an instance the old
+         path is the one that has the history. See lib/custody/history. */
+      ? await completionsFromEvents(rows.map((r) => r.id))
+      : [
+        ...woRows.flatMap((w) => (w.instrumentId === null || w.closedAt === null ? [] : [{
+          instrumentId: w.instrumentId,
+          day: dayOf(w.closedAt),
+          planned: w.severity === "Planned",
+        }])),
+        ...taskRows.flatMap((t) => (
+          t.instrumentId === null || t.state !== "Done" || t.completedAt === null
+            || (t.origin !== "pm" && t.origin !== "pm_request")
+            ? []
+            : [{ instrumentId: t.instrumentId, day: dayOf(t.completedAt), planned: true }]
+        )),
+      ];
     const visits = visitsOf(completions);
     const lastVisitBySys = new Map([...lastVisitBy(visits)]
       .map(([id, day]) => [id, shopMonthDay(new Date(`${day}T12:00:00Z`))] as const));

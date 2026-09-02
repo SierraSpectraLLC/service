@@ -22,8 +22,8 @@ const org = (id: number, name: string, kind: OrgRef["kind"], over: Partial<OrgRe
 });
 
 const epoch = (over: Partial<Epoch> & Pick<Epoch, "id" | "n" | "custodianOrgId">): Epoch => ({
-  instrumentId: 1, openedByEventId: null, closedByEventId: null, closeKind: "open",
-  sealedAt: null, sealHash: null, brokerOrgId: null, ...over,
+  instrumentId: 1, custodianName: "", openedByEventId: null, closedByEventId: null,
+  closeKind: "open", sealedAt: null, sealHash: null, brokerOrgId: null, ...over,
 });
 
 const grant = (over: Partial<Grant> & Pick<Grant, "id" | "epochId" | "granteeOrgId">): Grant => ({
@@ -306,6 +306,34 @@ describe("withheld free text", () => {
     const keys = [{ key: "hplc/replace-lamp", state: "done" as const }];
     const v = eventVisibility(NORTHBAY, { ...withheld, procedureKeys: keys }, e1, chain);
     expect(v.procedureKeys).toEqual(keys);
+  });
+});
+
+describe("a machine nobody on the platform holds", () => {
+  // instruments.owner_org_id has always been nullable and has always meant
+  // house stewardship - the operator's own bench, or a system logged before its
+  // owner joined. The rule that matters is that the hole is not a party: an org
+  // with no id must never match an epoch with no custodian.
+  const chain = (): SystemChain => ({
+    instrumentId: 3,
+    epochs: [epoch({ id: 1, n: 1, custodianOrgId: null, custodianName: "house stewardship",
+      closeKind: "sealed", instrumentId: 3 })],
+    grants: [grant({ id: 1, epochId: 1, granteeOrgId: SIERRA, instrumentId: 3 })],
+    events: [event({ id: 1, epochId: 1, authorOrgId: null, custodianOrgId: null, instrumentId: 3,
+      kind: "intake", provenance: { findings: "Arrived on the bench." } })],
+  });
+
+  it("makes nobody a party to it", () => {
+    expect(epochParties(chain().epochs[0], chain().events, chain().grants)).toEqual(new Set([SIERRA]));
+  });
+
+  it("still gives the org that worked on it its full view", () => {
+    expect(matrix(SIERRA, chain())).toEqual({ 1: "full" });
+  });
+
+  it("tells a stranger nothing, rather than matching null to null", () => {
+    expect(viewOf(STRANGER, chain())).toEqual({ epochs: [] });
+    expect(viewOf(null, chain())).toEqual({ epochs: [] });
   });
 });
 
