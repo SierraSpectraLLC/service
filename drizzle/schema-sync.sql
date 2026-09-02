@@ -4235,3 +4235,54 @@ CREATE INDEX IF NOT EXISTS "expense_reports_amends_idx" ON "expense_reports" ("a
 ALTER TABLE "stipends" ADD COLUMN IF NOT EXISTS "cadence" text NOT NULL DEFAULT 'months';
 ALTER TABLE "stipends" ADD COLUMN IF NOT EXISTS "every_weeks" integer NOT NULL DEFAULT 1;
 ALTER TABLE "stipends" ADD COLUMN IF NOT EXISTS "weekday" integer NOT NULL DEFAULT 1;
+
+-- ═══ CUSTODY AND PROVENANCE, phase 1 ═══════════════════════════════════════
+-- Vocabulary. See docs/adr/0001-custody-and-provenance.md.
+--
+-- Two shops that do the same job must produce the same key, or a machine's
+-- history is a pile of free text in fourteen house styles and nothing can be
+-- counted, scored, or come due. procedure_types is the platform's word for the
+-- job; procedures.key is one shop's writeup of it.
+CREATE TABLE IF NOT EXISTS "procedure_types" (
+  "key" text PRIMARY KEY NOT NULL,
+  "label" text NOT NULL,
+  "asset_types" jsonb NOT NULL DEFAULT '[]'::jsonb,
+  "family" text NOT NULL DEFAULT '',
+  "sort_order" integer NOT NULL DEFAULT 0,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "procedure_types_family_idx" ON "procedure_types" ("family");
+
+CREATE TABLE IF NOT EXISTS "procedure_sets" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "asset_type" text NOT NULL DEFAULT '',
+  "model_scope" text[] NOT NULL DEFAULT '{}',
+  "version" integer NOT NULL DEFAULT 1,
+  "procedure_ids" jsonb NOT NULL DEFAULT '[]'::jsonb,
+  "published_at" timestamp,
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "procedure_sets_tenant_idx" ON "procedure_sets" ("tenant_org_id", "asset_type");
+
+-- Absent reads as OFF, which is what makes this safe to deploy ahead of the
+-- code that reads it: a database nobody has flipped behaves exactly as before.
+CREATE TABLE IF NOT EXISTS "feature_flags" (
+  "key" text PRIMARY KEY NOT NULL,
+  "enabled" boolean NOT NULL DEFAULT false,
+  "note" text NOT NULL DEFAULT '',
+  "updated_by" text NOT NULL DEFAULT '',
+  "updated_at" timestamp NOT NULL DEFAULT now()
+);
+
+-- Not a UNIQUE index, on purpose: real workspaces hold genuine duplicates, and
+-- a unique index here would fail the deploy instead of showing them to anybody.
+-- scripts/backfill-procedure-keys.ts reports collisions; uniqueness lands once
+-- that list is empty.
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "key" text NOT NULL DEFAULT '';
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "type_key" text NOT NULL DEFAULT '';
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "set_version" integer NOT NULL DEFAULT 1;
+CREATE INDEX IF NOT EXISTS "procedures_key_idx" ON "procedures" ("tenant_org_id", "key");
+
+ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "procedure_set_id" integer;

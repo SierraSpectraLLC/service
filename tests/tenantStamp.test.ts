@@ -62,6 +62,11 @@ const STAMPED = [
   // myTenantOrgId would be null for every note they ever left - unreadable to
   // the shop they left it for, which is the whole point of writing one.
   "calendarNotes",
+  // A shop's published set of procedures for one model. Stamped because the
+  // WRITE-UP is the shop's - the machine's history is not, which is why
+  // system_events, custody_epochs and grants alongside it carry no stamp at
+  // all. See docs/adr/0001-custody-and-provenance.md.
+  "procedureSets",
 ];
 
 const walk = (dir: string): string[] =>

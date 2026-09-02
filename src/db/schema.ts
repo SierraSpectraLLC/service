@@ -1236,8 +1236,28 @@ export const procedures = pgTable("procedures", {
    * manufacturer's manual is not. See lib/provenance.
    */
   provenance: text("provenance").notNull().default(""),
+  /**
+   * THE SAME WORK, WRITTEN DOWN TWICE, HAS THE SAME KEY.
+   *
+   * Identity used to be `name` plus whatever scope happened to be set, so two
+   * shops - or one shop across two models - produced "Replace lamp", "Lamp
+   * replacement" and "Replace the D2 lamp" for one job, and nothing could ask
+   * when it was last done. Derived once by scripts/backfill-procedure-keys and
+   * owned by the row from then on: renaming the procedure does NOT re-slug it,
+   * because the key is already written into events that have travelled.
+   *
+   * Not unique in the database yet, on purpose. Real workspaces have genuine
+   * duplicates (the same procedure entered twice under two models), and a
+   * unique index would fail the deploy rather than showing them to anybody.
+   * The backfill REPORTS collisions; uniqueness lands after that list is empty.
+   */
+  key: text("key").notNull().default(""),
+  /** Which platform procedure_types this is an instance of. '' = unclassified. */
+  typeKey: text("type_key").notNull().default(""),
+  /** Which version of its model's set this text belongs to. See procedure_sets. */
+  setVersion: integer("set_version").notNull().default(1),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [index("procedures_key_idx").on(t.tenantOrgId, t.key)]);
 
 // RETIRED: merged into `procedures` (see the procedures-merge migration).
 // The table stays because the sync pipeline is additive-only; nothing reads it.
@@ -1294,6 +1314,10 @@ export const pmSchedules = pgTable("pm_schedules", {
   // template_id predates the procedures merge and is no longer written.
   templateId: integer("template_id").references(() => pmTemplates.id, { onDelete: "set null" }),
   procedureId: integer("procedure_id").references(() => procedures.id, { onDelete: "set null" }),
+  // Which published set this schedule works through, once sets exist. Null is
+  // every schedule that predates them and stays valid forever: a schedule
+  // written by hand is one job on one unit and belongs to no model's set.
+  procedureSetId: integer("procedure_set_id").references((): AnyPgColumn => procedureSets.id, { onDelete: "set null" }),
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("pm_instrument_idx").on(t.instrumentId), index("pm_asset_idx").on(t.assetId)]);
@@ -4505,3 +4529,87 @@ export const safetyHolds = pgTable("safety_holds", {
   clearedBy: text("cleared_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("safety_holds_device_idx").on(t.deviceId)]);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CUSTODY AND PROVENANCE. See docs/adr/0001-custody-and-provenance.md.
+//
+// Everything below serves one machine's history rather than one workspace's
+// records, so almost none of it carries tenantStamp() - a machine outlives the
+// workspace that typed it in, and stamping its history is exactly what forked
+// it in the first place (two rows for one EP-001, see lib/clientShare).
+//
+// NOT lib/provenance (catalog publishability), NOT lib/custodyLine (queue
+// custody), NOT lib/handoff (client-share invites). Those three names were
+// taken first and mean other things.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * WHAT A PIECE OF WORK IS, in words two shops can both use.
+ *
+ * The platform taxonomy, not a tenant's. `procedures` is a shop's own writeup
+ * of how it replaces a lamp; this is the fact that "replacing the lamp" is a
+ * thing, so that when the machine changes hands the next holder can read "lamp
+ * replaced, Mar 2024" off a chain written by somebody they have never met.
+ * Without it, provenance is a pile of free text in fourteen house styles and
+ * nothing can be counted, scored, or come due.
+ *
+ * Deliberately coarse. Two shops disagreeing about whether their teardown is
+ * the same teardown is a real disagreement; two shops both calling it
+ * `replace-ion-source-consumables` is the most agreement this can buy, and it
+ * is enough for "when was this last done".
+ */
+export const procedureTypes = pgTable("procedure_types", {
+  /** Stable, lowercase, hyphenated. NEVER renamed - it is written into events. */
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  /** Which asset types it can apply to. [] = any. jsonb array of strings. */
+  assetTypes: jsonb("asset_types").notNull().default([]),
+  /** Grouping for pickers: the family of work ("Consumables", "Calibration"). */
+  family: text("family").notNull().default(""),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("procedure_types_family_idx").on(t.family)]);
+
+/**
+ * A published set of procedures for one model at one version.
+ *
+ * The unit a PM sheet is printed from and a run is worked through. Versioned
+ * because a sheet printed in March and scanned in June must be read against the
+ * steps that were on it, not against the steps somebody added in April - a
+ * scan parsed against the wrong layout files the wrong readings under the right
+ * names, which is the failure mode paper has that a screen does not.
+ */
+export const procedureSets = pgTable("procedure_sets", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  assetType: text("asset_type").notNull().default(""),
+  /** [] = every model of this asset type. */
+  modelScope: text("model_scope").array().notNull().default([]),
+  version: integer("version").notNull().default(1),
+  /** Ordered procedures.id list. jsonb, because order is part of the set. */
+  procedureIds: jsonb("procedure_ids").notNull().default([]),
+  /** Null = a draft. A set is only printable and runnable once published. */
+  publishedAt: timestamp("published_at"),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("procedure_sets_tenant_idx").on(t.tenantOrgId, t.assetType)]);
+
+/**
+ * Feature flags, by name.
+ *
+ * app_settings is one row of typed columns and is the right shape for settings
+ * somebody chooses; a rollout flag is neither typed nor chosen, and adding six
+ * boolean columns for switches that get deleted three phases later would leave
+ * six dead columns behind (this file cannot drop them). Names are dotted -
+ * `custody.readPath` - which a column name cannot be.
+ *
+ * Absent means OFF. That is the whole point: a flag nobody has created yet, on
+ * a database nobody has migrated yet, reads as "the old behavior".
+ */
+export const featureFlags = pgTable("feature_flags", {
+  key: text("key").primaryKey(),
+  enabled: boolean("enabled").notNull().default(false),
+  note: text("note").notNull().default(""),
+  updatedBy: text("updated_by").notNull().default(""),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
