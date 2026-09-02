@@ -1,3 +1,5 @@
+// Catalog publishability. System provenance - who held a machine and what was
+// done to it - is a different thing entirely and lives in lib/custody/.
 // Where a piece of reference material came from, and therefore whether it may
 // be licensed to another service provider.
 //
