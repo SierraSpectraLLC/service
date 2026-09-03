@@ -33,13 +33,15 @@ export type WorkOrderRow = {
  * the question this panel answers is "what is outstanding" - the archive is one
  * click below it for the day somebody asks what happened in March.
  */
-export default function WorkOrdersPanel({ target, orders, today, canEdit, people = [] }: {
+export default function WorkOrdersPanel({ target, orders, today, canEdit, people = [], twoBox = false }: {
   target: { instrumentId: number | null; assetId: number | null };
   orders: WorkOrderRow[];
   today: string;
   canEdit: boolean;
   /** Who a job can be dispatched to, right at intake - the phone-call flow. */
   people?: string[];
+  /** custody.twoBox: a past job's close-out splits into what travels and what stays. */
+  twoBox?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -48,7 +50,7 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
   const [assignee, setAssignee] = useState("");
   // Backfilling: work that already happened, filed closed on its real date.
   const [past, setPast] = useState(false);
-  const [pastDraft, setPastDraft] = useState({ title: "", summary: "", date: "", reference: "", doneBy: "" });
+  const [pastDraft, setPastDraft] = useState({ title: "", summary: "", date: "", reference: "", doneBy: "", privateNotes: "" });
   const [error, setError] = useState("");
   // The entitlement heads-up that rode back on the filing - "out of included
   // visits". Amber, persistent until the next action: it must outlive the
@@ -133,7 +135,7 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
                 onClick={() => startTransition(async () => {
                   const res = await logPastWorkOrder(target, pastDraft);
                   if (res?.error) { setError(res.error); return; }
-                  setPast(false); setPastDraft({ title: "", summary: "", date: "", reference: "", doneBy: "" });
+                  setPast(false); setPastDraft({ title: "", summary: "", date: "", reference: "", doneBy: "", privateNotes: "" });
                   toast({ message: "Filed the past job, closed" });
                 })}>
                 {pending ? "Filing..." : "File it, closed"}
@@ -154,9 +156,22 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
             </div>
           </div>
           <div className="dialog-section">The close-out</div>
-          <label>What was done *</label>
+          <label>{twoBox ? "Findings *" : "What was done *"}</label>
           <textarea value={pastDraft.summary} onChange={(e) => setPastDraft({ ...pastDraft, summary: e.target.value })}
-            rows={3} placeholder="The close-out, as it would have been written that day" style={{ width: "100%", marginBottom: 8 }} />
+            rows={3} placeholder="The close-out, as it would have been written that day" style={{ width: "100%", marginBottom: twoBox ? 4 : 8 }} />
+          {twoBox && (
+            <>
+              <div className="field-hint" style={{ marginBottom: 8 }}>
+                Written for whoever owns this instrument next - it travels if the machine changes hands.
+              </div>
+              <div className="field">
+                <label>Private notes <span className="field-opt">(stays with the shop)</span></label>
+                <textarea value={pastDraft.privateNotes}
+                  onChange={(e) => setPastDraft({ ...pastDraft, privateNotes: e.target.value })} rows={2}
+                  placeholder="Site, contact, cost - never leaves this workspace." style={{ width: "100%" }} />
+              </div>
+            </>
+          )}
           <div className="dialog-section">Paper trail</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <div style={{ flex: "1 1 140px" }}>

@@ -20,6 +20,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { custodyEpochs, systemEvents } from "@/db/schema";
 import { GENESIS, eventHash } from "@/lib/custody/hash";
+import { provenanceLeaks } from "@/lib/custody/policy";
 import type {
   EventKind, HowGrade, OrgId, ProcedureKeyEntry, SourceKind, WhoGrade,
 } from "@/lib/custody/types";
@@ -73,7 +74,34 @@ async function existingBySource(sourceKind: string, sourceId: string): Promise<n
  * the expected case, not an error, and making callers distinguish would put the
  * decision in twelve places instead of one.
  */
+/**
+ * The rules an event has to pass before it exists, in one place.
+ *
+ * Thrown rather than returned: a caller that tried to file a machine's history
+ * with a customer's site address on the travelling half has a bug, and a bug
+ * that gets a polite { error } back gets ignored. Every one of these is a test
+ * failure in development and an incident in production, in that order.
+ */
+export function checkEvent(input: Pick<AppendInput, "kind" | "provenance" | "procedureKeys">): void {
+  if (!input.kind || !String(input.kind).trim()) {
+    throw new Error("appendEvent: an event needs a kind - a line with no kind is a date, not history");
+  }
+  const leaks = provenanceLeaks(input.provenance ?? {});
+  if (leaks.length) {
+    throw new Error(`appendEvent: provenance carries keys that must not travel: ${leaks.join(", ")}`);
+  }
+  for (const k of input.procedureKeys ?? []) {
+    if (!k.key) throw new Error("appendEvent: a procedure entry needs its key");
+    // A skipped step with no reason is a hole the next holder cannot price:
+    // "still due" only means something if it says why. The reason travels.
+    if (k.state === "skip" && !(k.reason ?? "").trim()) {
+      throw new Error(`appendEvent: skipping ${k.key} needs a reason, and the reason travels`);
+    }
+  }
+}
+
 export async function appendEvent(input: AppendInput): Promise<AppendResult> {
+  checkEvent(input);
   const sourceId = input.sourceId ?? null;
   if (sourceId !== null) {
     const already = await existingBySource(input.sourceKind, sourceId);

@@ -2297,7 +2297,7 @@ export async function runPmNow(scheduleId: number): Promise<{ error?: string; ta
  */
 export async function logPastPm(
   scheduleId: number,
-  data: { date: string; note: string; doneBy?: string; advanceSchedule: boolean },
+  data: { date: string; note: string; doneBy?: string; advanceSchedule: boolean; findings?: string },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [sched] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, scheduleId));
@@ -2320,6 +2320,8 @@ export async function logPastPm(
     instrumentId: onSystem, assetId: sched.assetId,
     title: sched.title,
     body: [data.note.trim(), `Backfilled - done ${date} by ${doneBy}.`].filter(Boolean).join("\n"),
+    // What was found, for whoever holds the machine next. The note above stays.
+    findings: (data.findings ?? "").trim().slice(0, 4000),
     state: "Done", origin: "pm", pmScheduleId: sched.id, procedureId: sched.procedureId,
     assignee: doneBy, dueDate: date,
     completedAt: new Date(`${date}T12:00:00Z`),
@@ -2396,7 +2398,7 @@ export async function undoRunPmNow(scheduleId: number): Promise<{ error?: string
  * measurement, and the refusal names the way that work is meant to go.
  */
 export async function completePmNow(
-  scheduleId: number, note?: string,
+  scheduleId: number, note?: string, findings?: string,
 ): Promise<{ error?: string; taskId?: number; viaOpenTask?: boolean }> {
   const u = await requireEditor();
   const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, scheduleId));
@@ -2408,6 +2410,11 @@ export async function completePmNow(
     .where(and(eq(tasks.pmScheduleId, scheduleId), ne(tasks.state, "Done")))
     .limit(1);
   if (open) {
+    // Findings ride on the task before it closes, so the emitter that fires
+    // inside setTaskState sees them.
+    if ((findings ?? "").trim()) {
+      await db.update(tasks).set({ findings: findings!.trim().slice(0, 4000) }).where(eq(tasks.id, open.id));
+    }
     const res = await setTaskState(open.id, "Done");
     if (res?.error) return res;
     return { taskId: open.id, viaOpenTask: true };
@@ -2433,6 +2440,7 @@ export async function completePmNow(
     instrumentId: onSystem, assetId: s.assetId,
     title: s.title,
     body: [(note ?? "").trim(), `Completed on the spot by ${doneBy}.`].filter(Boolean).join("\n"),
+    findings: (findings ?? "").trim().slice(0, 4000),
     state: "Done", origin: "pm", pmScheduleId: s.id, procedureId: s.procedureId,
     assignee: doneBy,
     /* The day the cycle FELL due, same as a generated task would carry - the
@@ -6294,6 +6302,30 @@ export async function setOrgResale(orgId: number, on: boolean): Promise<{ error?
 }
 
 /**
+ * Whether this organization's name follows its work when a machine it serviced
+ * changes hands. Off by policy (ADR 0001, decision 1) and the org's own to turn
+ * on: free advertising for a national, a re-identification for a shop that
+ * services four instruments in one county. Nobody else gets to make that call
+ * for them, which is why it takes the same gate as the rest of their settings.
+ */
+export async function setOrgShowNameDownstream(orgId: number, on: boolean): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const gate = await adminOrgGate(u, orgId);
+  if ("error" in gate) return gate;
+  const { org } = gate;
+  await db.update(orgs).set({ showNameDownstream: on }).where(eq(orgs.id, orgId));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: orgId,
+    action: on
+      ? `${org.name}'s name now travels with its work when a machine changes hands`
+      : `${org.name}'s name is withheld downstream again`,
+    field: "showNameDownstream", oldValue: String(org.showNameDownstream), newValue: String(on),
+  });
+  revalidatePath("/settings");
+  return {};
+}
+
+/**
  * An installer link that joins one organization's device group. Staff-only: this
  * is a capability to enroll a machine, and handing it out is our act, not a
  * client's. Short-lived by construction on the engine side.
@@ -6600,7 +6632,7 @@ export async function openWorkOrder(
  */
 export async function logPastWorkOrder(
   target: WorkTarget,
-  data: { title: string; summary: string; date: string; reference?: string; doneBy?: string },
+  data: { title: string; summary: string; date: string; reference?: string; doneBy?: string; privateNotes?: string },
 ): Promise<{ error?: string; id?: number; number?: string }> {
   const u = await requireEditor();
   const title = data.title.trim().slice(0, 160);
@@ -6633,6 +6665,7 @@ export async function logPastWorkOrder(
     orgId, requestedBy: doneBy, requestedByEmail: u.email,
     title, body: "", severity: "Planned", state: "closed",
     openedOn: date, closeSummary: summary, closedBy: doneBy,
+    privateNotes: (data.privateNotes ?? "").trim().slice(0, 4000),
     // Noon, so the calendar date survives every timezone's midnight.
     closedAt: new Date(`${date}T12:00:00Z`), resolvedAt: new Date(`${date}T12:00:00Z`),
   }).returning();
@@ -6817,7 +6850,9 @@ export async function setWorkOrderState(woId: number, state: string): Promise<{ 
  * the sentence somebody writes is the part only a person can write, and the rest
  * is added up here.
  */
-export async function resolveWorkOrder(woId: number, summary: string): Promise<{ error?: string }> {
+export async function resolveWorkOrder(
+  woId: number, summary: string, privateNotes = "",
+): Promise<{ error?: string }> {
   const u = await requireUser();
   const found = await loadWorkOrder(u, woId);
   if ("error" in found) return found;
@@ -6854,8 +6889,12 @@ export async function resolveWorkOrder(woId: number, summary: string): Promise<{
     parts: partRows.length,
   });
 
+  // The close-out travels with the machine; the aside stays. Split here at the
+  // keystroke rather than filtered later, because the person typing is the
+  // only one who knows which sentence names the client's site. See
+  // lib/custody/emit for where each half lands.
   await db.update(workOrders)
-    .set({ state: "resolved", closeSummary: line, resolvedAt: new Date() })
+    .set({ state: "resolved", closeSummary: line, privateNotes: privateNotes.trim().slice(0, 4000), resolvedAt: new Date() })
     .where(eq(workOrders.id, woId));
   await audit({
     actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,

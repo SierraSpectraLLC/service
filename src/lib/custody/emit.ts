@@ -139,7 +139,10 @@ export async function emitWorkOrderClosed(woId: number): Promise<AppendResult | 
       results: 0, checklistDone: doneTasks.length, written: wo.closeSummary.length,
     }),
     provenance: {
-      summary: wo.closeSummary,
+      // `findings` is THE free-text key: the one lib/custody/view can withhold
+      // at seal. The close-out is already written for somebody else - it goes
+      // on the client's thread - which is what makes it the travelling half.
+      findings: wo.closeSummary,
       // Scheduled upkeep or something that broke. The single most useful bit a
       // buyer can have about a line, and it travels.
       planned,
@@ -147,6 +150,8 @@ export async function emitWorkOrderClosed(woId: number): Promise<AppendResult | 
     },
     private: {
       number: wo.number, title: wo.title, ask: wo.body, severity: wo.severity,
+      // The aside the two-box form kept back. Blank on every job before it.
+      notes: wo.privateNotes,
       requestedBy: wo.requestedBy, requestedByEmail: wo.requestedByEmail,
       closedBy: wo.closedBy, assignee: wo.assignee,
       parts: fitted.map((p) => ({ partNumber: p.partNumber, name: p.name, cost: p.cost, po: p.po })),
@@ -208,6 +213,9 @@ export async function emitPmTask(taskId: number): Promise<AppendResult | null> {
     provenance: {
       title: t.title,
       planned: true,
+      // Written for the next holder, by somebody who knew that when they typed
+      // it. Absent rather than empty when nobody wrote one.
+      ...(t.findings.trim() ? { findings: t.findings.trim() } : {}),
       ...(result ? { result: { value: result.value, passed: result.passed, target: result.target } } : {}),
     },
     private: {

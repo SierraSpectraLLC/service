@@ -388,6 +388,33 @@ export const orgs = pgTable("orgs", {
    * or turning it off would strand a listing with no way to end it.
    */
   resaleEnabled: boolean("resale_enabled").notNull().default(false),
+  /**
+   * CAPABILITIES, NOT KINDS. `kind` says which side of a relationship an org is
+   * on and stays for UI defaults; these say what it may DO with a machine's
+   * history, which is a different question and one `kind` kept answering
+   * wrong - a reseller is a client that also brokers, a lab that runs its own
+   * service is a provider to itself. See docs/adr/0001-custody-and-provenance.
+   *
+   * All false on a fresh row and backfilled once by
+   * scripts/backfill-org-capabilities from kind and resaleEnabled. Nothing
+   * reads them yet; Phase 5 gates transfers on canCustody and canBroker.
+   */
+  canCustody: boolean("can_custody").notNull().default(false),
+  canService: boolean("can_service").notNull().default(false),
+  canBroker: boolean("can_broker").notNull().default(false),
+  /**
+   * WHETHER THIS ORG'S NAME FOLLOWS ITS WORK DOWNSTREAM. Off, and the
+   * provider owns the switch: free advertising for a national, a
+   * re-identification for a shop that services four instruments in one
+   * county. Policy decision 1 in the ADR; lib/custody/view reads it.
+   */
+  showNameDownstream: boolean("show_name_downstream").notNull().default(false),
+  /**
+   * When the platform verified this org. Gates the third_party grade - an org
+   * grading its own subsidiary as third-party is the obvious way to buy a
+   * score. What it certifies is lib/custody/policy.VERIFICATION_REQUIRES.
+   */
+  verifiedAt: timestamp("verified_at"),
   // The engine's device group for this organization, created the first time a
   // machine is enrolled for them. One group per org is what keeps one client's
   // machines invisible to another. Blank = no group yet.
@@ -1375,6 +1402,13 @@ export const tasks = pgTable("tasks", {
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   body: text("body").notNull().default(""),
+  /**
+   * THE HALF THAT TRAVELS. `body` is the shop's own working note and stays
+   * private; this is what was found, written for whoever holds the machine
+   * next. Filled by the two-box PM forms (lib/custody/emit reads it into
+   * system_events.provenance.findings); blank on every task before them.
+   */
+  findings: text("findings").notNull().default(""),
   // Open | In progress | Blocked | Done
   state: text("state").notNull().default("Open"),
   assignee: text("assignee").notNull().default(""),
@@ -2328,6 +2362,15 @@ export const workOrders = pgTable("work_orders", {
   // column: a job closed with nothing written on it is how service history turns
   // into a list of dates.
   closeSummary: text("close_summary").notNull().default(""),
+  /**
+   * THE HALF THAT STAYS. closeSummary is written for somebody else - it goes
+   * on the client's thread and, once the machine is sold, to a stranger. This
+   * is the aside that does not: the site, who to call, what it cost, what
+   * nearly went wrong. Split at the keystroke by the resolve form, because the
+   * person who knows which sentence may travel is the person typing it.
+   * Lands in system_events.private via lib/custody/emit.
+   */
+  privateNotes: text("private_notes").notNull().default(""),
   closedBy: text("closed_by").notNull().default(""),
   // The restoration project this job serves - the Commission install is a
   // Ridgeline job like any other, and this is how the project finds it.

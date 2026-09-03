@@ -535,6 +535,9 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
      a Done task and never a work order - so a panel reading only closed work
      orders said "nothing closed on this record yet" about an annual PM we had
      just performed. Same rule as the landing: see lib/serviceHistory. */
+  // custody.twoBox: the close-out and PM forms split what travels from what
+  // stays. Read once here; the panels are client components.
+  const twoBox = await flagOn("custody.twoBox");
   const lastClosed: { day: string; number: string; title: string } | undefined = (
     await flagOn("custody.readPath")
       /* The same answer, read off the machine's own chain. Every custody read
@@ -852,7 +855,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           { key: "workorders", label: "Work orders", node: (
             <WorkOrdersPanel
               target={{ instrumentId: inst.id, assetId: null }}
-              today={shopToday()} canEdit={canEdit}
+              today={shopToday()} canEdit={canEdit} twoBox={twoBox}
               people={isStaff ? directoryNames(peopleRows) : []}
               orders={woRows.map((w) => {
                 /* Deliberately every task on the job, not just the ones this
@@ -903,7 +906,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               </div>
             )}
             <MaintenancePanel target={{ instrumentId: inst.id, assetId: null }} today={shopToday()} canEdit={canEdit}
-              catalogHint={isStaff}
+              catalogHint={isStaff} twoBox={twoBox}
               // Scheduled vs advisory (lib/pmPosture): a reseller's systems
               // carry their calendar as reference. The toggle is the house's -
               // it changes what the cron does, which is operator machinery.

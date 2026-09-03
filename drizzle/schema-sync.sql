@@ -4509,3 +4509,16 @@ BEGIN
       FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- ═══ CUSTODY AND PROVENANCE, phase 4 ═══════════════════════════════════════
+-- Capabilities, not kinds; a provider's say over its own name; and the two
+-- halves of a note split at the keystroke. See docs/adr/0001 (Policy).
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "can_custody" boolean NOT NULL DEFAULT false;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "can_service" boolean NOT NULL DEFAULT false;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "can_broker" boolean NOT NULL DEFAULT false;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "show_name_downstream" boolean NOT NULL DEFAULT false;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "verified_at" timestamp;
+-- The aside that does not travel. close_summary is already client-facing.
+ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "private_notes" text NOT NULL DEFAULT '';
+-- What was found, written for the next holder. body stays the shop's own.
+ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "findings" text NOT NULL DEFAULT '';

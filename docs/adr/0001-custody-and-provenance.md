@@ -146,13 +146,22 @@ lifecycle. `procedures.provenance` and `catalog_refs.provenance` are
 publishability strings. System custody lives in `src/lib/custody/` and nowhere
 else.
 
-## Open — decide before Phase 4, do not guess
+## Policy — decided 2026-09-03
 
-1. Default for `showNameDownstream`. Proposed: off.
-2. Date granularity in the downstream projection. Proposed: exact dates.
-3. Whether region (state) travels with an anonymized party. Proposed: no —
-   "Service provider, California" re-identifies a regional shop in one guess.
-4. Notice window for claims. Proposed: 14 days.
-5. Minimum bar for `orgs.verifiedAt`, which gates `third_party`. Proposed:
-   business registration, email domain, and one grant from an unrelated
-   verified org.
+All five proposals accepted as written. Encoded as named constants in
+`src/lib/custody/policy.ts`, which is the one place a surface may read them.
+
+1. `showNameDownstream` defaults to **off**. A provider's name travelling with
+   its work is free advertising for a national and a re-identification for a
+   shop that services four instruments in one county; the provider owns the
+   switch.
+2. Dates travel **exact**. A PM done on a Tuesday is provenance about the
+   machine, not about the shop, and rounding it would corrupt the plan
+   recomputation for no privacy gain.
+3. Region does **not** travel. "Service provider, California" re-identifies a
+   regional shop in one guess.
+4. The claim notice window is **14 days**.
+5. `orgs.verifiedAt` requires business registration, an email domain the org
+   controls, and at least one grant from an unrelated verified org. It gates
+   the `third_party` grade: an org grading its own subsidiary as third-party is
+   the obvious way to buy a score.

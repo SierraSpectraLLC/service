@@ -7,7 +7,7 @@ import {
   setOrgAppearance, updateEodRecipients, updateDigestRecipients, setDigestHour, sendDigestNow,
   addClientAccess, addClientPerson, removeClientAccess,
   setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit,
-  setOrgRemoteAccess, setOrgStage, setOrgResale, setClientTempPassword, clearClientTempPassword, setClientSeesPayroll,
+  setOrgRemoteAccess, setOrgStage, setOrgResale, setOrgShowNameDownstream, setClientTempPassword, clearClientTempPassword, setClientSeesPayroll,
   resendInvite,
   setClientSeesMoney,
   setStartView,
@@ -72,6 +72,8 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
     storageLimitMb: number; quota: Quota;
     remoteAccessEnabled: boolean; remoteDevices: number;
     resaleEnabled: boolean;
+    /** Whether their name follows their work downstream. Off by policy; theirs to turn on. */
+    showNameDownstream: boolean;
     /** Where we stand with them: client | prospect | former. See lib/orgStage. */
     stage: OrgStage;
     /** Systems they OWN - what the fleet holds back at a non-client stage.
@@ -159,6 +161,9 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
   // Resale: off unless this organization is actually in that business.
   const [resaleOn, setResaleOn] = useState(org.resaleEnabled);
   const [resaleMsg, setResaleMsg] = useState("");
+  // Name downstream: the provider's own call, off until they make it.
+  const [nameOn, setNameOn] = useState(org.showNameDownstream);
+  const [nameMsg, setNameMsg] = useState("");
   const [remoteMsg, setRemoteMsg] = useState("");
 
   // Storage ceiling
@@ -853,6 +858,43 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
             </span>
           </div>
           {resaleMsg && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{resaleMsg}</div>}
+        </Panel>
+      )}
+
+      {/* THE PROVIDER'S NAME, THEIR CALL. When a machine they serviced changes
+          hands, the record of that work goes with it. The holder is anonymized
+          by rule; whether the shop that did the work is named is the shop's
+          decision, and nobody makes it for them. Off is the policy default
+          (ADR 0001) because a shop that services four instruments in one
+          county is identified by its own name in one guess. */}
+      {isOwner && (
+        <Panel title="Your name travels with your work"
+          hint={<>When an instrument {org.name} has worked on is sold, the record of that work goes
+            with it. The owner at the time is never named. Whether {org.name} is - as the author
+            of those service lines - is up to {org.name}.</>}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <button className={`btn sm${nameOn ? "" : " accent"}`} disabled={pending}
+              onClick={() => {
+                const next = !nameOn;
+                setNameOn(next); setNameMsg("");
+                startTransition(async () => {
+                  const res = await setOrgShowNameDownstream(org.id, next);
+                  if (res?.error) { setNameOn(!next); setNameMsg(res.error); }
+                });
+              }}>
+              {nameOn ? "Withhold our name" : "Let our name travel"}
+            </button>
+            <span className={`pill ${nameOn ? "good" : "neutral"}`}>
+              {nameOn ? "named on work that changes hands" : "shown as \u201cService provider (name withheld)\u201d"}
+            </span>
+          </div>
+          <div className="field-hint" style={{ marginTop: 8 }}>
+            Worth knowing before turning it on: a shop that services a handful of instruments in one
+            area can be identified from its name alone, even with every customer anonymized. A
+            national outfit gets free advertising; a regional one gets found. The choice is yours
+            and can be changed any time - it applies to records that travel from then on.
+          </div>
+          {nameMsg && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{nameMsg}</div>}
         </Panel>
       )}
 

@@ -304,7 +304,7 @@ describe("the split at write", () => {
     const prov = row.provenance as Record<string, unknown>;
     const priv = row.private as Record<string, unknown>;
 
-    expect(prov.summary).toBe("Replaced the lamp and rebaselined.");
+    expect(prov.findings).toBe("Replaced the lamp and rebaselined.");
     // The part NUMBER travels - it is what the next holder needs to buy one.
     expect(prov.parts).toEqual([{ partNumber: "G1314-60101", name: "D2 lamp" }]);
     for (const leak of ["ask", "requestedBy", "price", "cost", "po", "number", "title"]) {

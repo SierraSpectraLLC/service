@@ -53,6 +53,7 @@ import { HeroKebab, RecordHero, type HeroStat } from "@/components/ui";
 import { getUiLayout } from "@/app/actions";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
 import { mentionableOn } from "@/lib/mentionAudience";
+import { flagOn } from "@/lib/custody/flags";
 
 export const dynamic = "force-dynamic";
 
@@ -144,6 +145,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     : []).map((o) => [o.id, o.name]));
 
   const canEdit = access.edit;
+  // custody.twoBox: the panels below split what travels from what stays.
+  const twoBox = await flagOn("custody.twoBox");
   const isStaff = user.role === "owner" || user.role === "staff";
   // Resale controls only where somebody actually resells - see lib/owner.
   const resaleOrgs = await db.select({ id: orgs.id, resaleEnabled: orgs.resaleEnabled }).from(orgs).catch(() => []);
@@ -403,7 +406,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           // before it goes back on a system - and they close like any other.
           { key: "workorders", label: "Work orders", node: (
             <WorkOrdersPanel
-              target={target} today={shopToday()} canEdit={canEdit}
+              target={target} today={shopToday()} canEdit={canEdit} twoBox={twoBox}
               people={isStaff ? directoryNames(peopleRows) : []}
               orders={woRows.map((w) => {
                 const mine = fullTasks.filter((t) => t.workOrderId === w.id);
@@ -424,7 +427,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           ) },
           { key: "maintenance", label: "Maintenance", node: (
             <MaintenancePanel target={target} today={shopToday()} canEdit={canEdit}
-              catalogHint={isStaff}
+              catalogHint={isStaff} twoBox={twoBox}
               // The unit follows the system it sits on today (lib/pmPosture);
               // the toggle lives on the system page, so no instrumentId here.
               posture={homeOwner ? {

@@ -23,7 +23,7 @@ import { WO_LABEL, WO_SEVERITIES, woMoves, type Mover } from "@/lib/workOrders";
  * a service history turns into a list of dates.
  */
 export default function WorkOrderControls({
-  id, number, state, mover, title, body, severity, assignee, people, systems = [],
+  id, number, state, mover, title, body, severity, assignee, people, systems = [], twoBox = false,
 }: {
   id: number;
   number: string;
@@ -41,10 +41,16 @@ export default function WorkOrderControls({
    * ordinary case: the job is already on something.
    */
   systems?: { id: number; externalId: string; label: string }[];
+  /**
+   * custody.twoBox: the close-out splits into what travels with the machine
+   * and what stays with the shop. Off leaves the single field exactly as it was.
+   */
+  twoBox?: boolean;
 }) {
   const [mode, setMode] = useState<"" | "resolve" | "edit">("");
   const [systemId, setSystemId] = useState(0);
   const [summary, setSummary] = useState("");
+  const [privateNotes, setPrivateNotes] = useState("");
   const [form, setForm] = useState({ title, body, severity, assignee });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
@@ -157,19 +163,34 @@ export default function WorkOrderControls({
               <DialogStatus error={error} problem={resolveProblem} />
               <button className="btn" onClick={() => setMode("")} disabled={pending}>Cancel</button>
               <button className="btn accent" disabled={pending || !!resolveProblem}
-                onClick={() => run(() => resolveWorkOrder(id, summary), `Resolved ${number}`)}>
+                onClick={() => run(() => resolveWorkOrder(id, summary, twoBox ? privateNotes : ""), `Resolved ${number}`)}>
                 {pending ? "Saving..." : `Resolve ${number}`}
               </button>
             </>
           }>
-          <label>What was done? *</label>
+          <label>{twoBox ? "Findings *" : "What was done? *"}</label>
           <textarea value={summary} onChange={(e) => setSummary(e.target.value)} rows={3} autoFocus
             placeholder="Replaced the deuterium lamp and re-ran the baseline - back in spec."
             style={{ width: "100%", marginBottom: 6 }} />
           <div className="mut t-meta" style={{ marginBottom: 8 }}>
-            This is what {number} leaves behind. The tasks, hours and parts on it are counted and
-            added for you, and it goes on the system&apos;s discussion where the client will see it.
+            {twoBox
+              ? <>Written for whoever owns this instrument next. It goes on the system&apos;s
+                  discussion now, and travels with the machine if it ever changes hands - so
+                  no site, no contact, no prices.</>
+              : <>This is what {number} leaves behind. The tasks, hours and parts on it are counted and
+                  added for you, and it goes on the system&apos;s discussion where the client will see it.</>}
           </div>
+          {/* THE SPLIT, MADE AT THE KEYSTROKE. A read filter cannot tell which
+              sentence names the client's site; the person typing can, and this
+              is the only moment anybody asks them. */}
+          {twoBox && (
+            <div className="field">
+              <label>Private notes <span className="field-opt">(stays with the shop)</span></label>
+              <textarea value={privateNotes} onChange={(e) => setPrivateNotes(e.target.value)} rows={2}
+                placeholder="Who to call, what it cost, what nearly went wrong - never leaves this workspace."
+                style={{ width: "100%" }} />
+            </div>
+          )}
         </Dialog>
       )}
 

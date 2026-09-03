@@ -66,8 +66,14 @@ const doneToday = (s: PmRow, today: string) => !s.paused && s.lastDone === today
  * UI state: it is lastDone === today, read off the same rows, so a phone that
  * dies mid-PM picks the run back up exactly where the work stands.
  */
-export default function MaintenancePanel({ target, schedules, people, today, canEdit, catalogHint = false, posture }: {
+export default function MaintenancePanel({ target, schedules, people, today, canEdit, catalogHint = false, posture, twoBox = false }: {
   target: WorkTarget; schedules: PmRow[]; people: string[]; today: string; canEdit: boolean;
+  /**
+   * custody.twoBox: completing or backfilling a PM asks for findings (which
+   * travel with the machine) and a private note (which does not) instead of
+   * one note. Off leaves the one-tap and the single note exactly as they were.
+   */
+  twoBox?: boolean;
   /** Staff only: point at the catalog, where per-model upkeep is defined ONCE. */
   catalogHint?: boolean;
   /**
@@ -117,7 +123,11 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   const [logging, setLogging] = useState<number | null>(null);
   const [booking, setBooking] = useState<number | null>(null);
   const [bookDraft, setBookDraft] = useState({ date: "", note: "" });
-  const [logDraft, setLogDraft] = useState({ date: "", note: "", doneBy: "", advanceSchedule: true });
+  const [logDraft, setLogDraft] = useState({ date: "", note: "", doneBy: "", advanceSchedule: true, findings: "" });
+  /* Under twoBox a completion is not one tap: the tap opens this, and filing
+     is the second tap. Two words that travel are worth one more press. */
+  const [finishing, setFinishing] = useState<number | null>(null);
+  const [finishDraft, setFinishDraft] = useState({ findings: "", note: "" });
   const [pending, startTransition] = useTransition();
 
   if (!canEdit && schedules.length === 0) return null;
@@ -166,10 +176,19 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   };
 
   /** The one-tap complete. The whole run is this, once per wrench. */
-  const complete = (s: PmRow) =>
+  const complete = (s: PmRow, split?: { findings: string; note: string }) => {
+    if (twoBox && !split) {
+      // First tap opens the two boxes; the File button below calls back here
+      // with them. The calendar is not touched until then.
+      setFinishing(s.id); setFinishDraft({ findings: "", note: "" });
+      setTaskOpen((m) => ({ ...m, [s.id]: true }));
+      return;
+    }
     startTransition(async () => {
       setError("");
-      const res = await completePmNow(s.id);
+      // Flag off: the identical call it always made, so nothing about the
+      // one-tap changes for anybody who has not turned the split on.
+      const res = split ? await completePmNow(s.id, split.note, split.findings) : await completePmNow(s.id);
       if (res?.error) { setError(res.error); setTaskOpen((m) => ({ ...m, [s.id]: true })); return; }
       if (!res.viaOpenTask && res.taskId) {
         setUndoable((m) => ({
@@ -181,8 +200,10 @@ export default function MaintenancePanel({ target, schedules, people, today, can
         }));
       }
       setTaskOpen((m) => ({ ...m, [s.id]: false }));
+      setFinishing(null);
       toast({ message: `Logged: ${s.title}` });
     });
+  };
 
   const undoComplete = (s: PmRow) => {
     const u = undoable[s.id];
@@ -344,7 +365,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                     title="File a completion that happened before the software was watching"
                     onClick={() => {
                       setLogging(logging === s.id ? null : s.id);
-                      setLogDraft({ date: "", note: "", doneBy: "", advanceSchedule: true });
+                      setLogDraft({ date: "", note: "", doneBy: "", advanceSchedule: true, findings: "" });
                     }}>Log past</button>
                 )}
                 {/* An early start that nobody has touched can simply be taken
@@ -436,6 +457,26 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                 </span>
               </div>
             )}
+            {finishing === s.id && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#FAFBFD" }}>
+                <div className="field" style={{ flex: "2 1 220px", marginBottom: 0 }}>
+                  <label>Findings</label>
+                  <input value={finishDraft.findings} placeholder="What was found - travels with the machine"
+                    onChange={(ev) => setFinishDraft({ ...finishDraft, findings: ev.target.value })}
+                    className="t-small" style={{ width: "100%" }} />
+                </div>
+                <div className="field" style={{ flex: "2 1 220px", marginBottom: 0 }}>
+                  <label>Private note <span className="field-opt">(stays)</span></label>
+                  <input value={finishDraft.note} placeholder="Lot, cost, who to call - never leaves here"
+                    onChange={(ev) => setFinishDraft({ ...finishDraft, note: ev.target.value })}
+                    className="t-small" style={{ width: "100%" }} />
+                </div>
+                <button className="btn sm accent" disabled={pending} onClick={() => complete(s, finishDraft)}>
+                  File it
+                </button>
+                <button className="btn sm" disabled={pending} onClick={() => setFinishing(null)}>Cancel</button>
+              </div>
+            )}
             {logging === s.id && (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#FAFBFD" }}>
                 <input type="date" value={logDraft.date} aria-label="Date it was done"
@@ -444,7 +485,13 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                 <input value={logDraft.doneBy} placeholder="By (vendor or engineer, optional)"
                   onChange={(ev) => setLogDraft({ ...logDraft, doneBy: ev.target.value })}
                   className="t-small" style={{ width: "auto", flex: "1 1 130px" }} />
-                <input value={logDraft.note} placeholder="Note (optional)"
+                {twoBox && (
+                  <input value={logDraft.findings} placeholder="Findings - travels with the machine"
+                    aria-label="Findings, which travel with the machine"
+                    onChange={(ev) => setLogDraft({ ...logDraft, findings: ev.target.value })}
+                    className="t-small" style={{ width: "auto", flex: "2 1 150px" }} />
+                )}
+                <input value={logDraft.note} placeholder={twoBox ? "Private note (stays)" : "Note (optional)"}
                   onChange={(ev) => setLogDraft({ ...logDraft, note: ev.target.value })}
                   className="t-small" style={{ width: "auto", flex: "2 1 150px" }} />
                 <label className="t-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontWeight: 400 }}>

@@ -53,6 +53,7 @@ import { mentionableOn } from "@/lib/mentionAudience";
 import PanelLayout from "@/components/PanelLayout";
 import { HeroKebab, Id, Panel, Pill, RecordHero, type HeroStat } from "@/components/ui";
 import { getUiLayout } from "@/app/actions";
+import { flagOn } from "@/lib/custody/flags";
 
 export const dynamic = "force-dynamic";
 
@@ -107,6 +108,8 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
   }
 
   const staff = isHouse(user.role);
+  // custody.twoBox: the resolve form splits what travels from what stays.
+  const twoBox = await flagOn("custody.twoBox");
   const mover = moverOf(
     { isHouse: staff, orgId: user.orgId, houseOrgId: staff ? readTenant(user) : null },
     wo, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null,
@@ -461,7 +464,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         )}
 
         <WorkOrderControls
-          id={wo.id} number={wo.number} state={wo.state} mover={mover}
+          id={wo.id} number={wo.number} state={wo.state} mover={mover} twoBox={twoBox}
           title={wo.title} body={wo.body} severity={wo.severity} assignee={wo.assignee}
           people={directoryNames(people)}
           systems={adoptable}
