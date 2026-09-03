@@ -2,8 +2,11 @@
 // The rules are lib/clientShare and stay pure; this is the fetching and the
 // one write that crosses a workspace boundary in the whole application.
 
-import { and, asc, eq, inArray, ne, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { db } from "@/db";
+// The one-row acceptance path (attachInstead) reaches custody tables the copy
+// path never needed.
+import { custodyEpochs, grants, orgInstrumentTags, systemShares } from "@/db/schema";
 import {
   assets, catalogRefs, clientShares, instruments, invoiceLines, invoices, orgSites, orgs,
   parts, pmSchedules, providerProfiles,
@@ -574,4 +577,80 @@ export async function sharesFor(tenantOrgId: number | null): Promise<{
     sent: sent.map((r) => ({ ...shape(r, r.toOrgId), inviteToken: r.inviteToken })),
     inbox: inbox.map((r) => blindly(shape(r, r.tenantOrgId))),
   };
+}
+
+/**
+ * The same acceptance WITHOUT the copy. Behind custody.transfers.
+ *
+ * materialize above is the write that forked history: a client handed from
+ * one shop to another became two instrument rows for one machine, and from
+ * that moment each shop wrote a history the other could not see. This does
+ * what the handoff actually means on one row: the client relationship is the
+ * recipient's (their org row, their sites), the recipient may work the
+ * machines (a service grant on each open epoch, and the share row every
+ * existing surface reads), and the recipient's own tag for each machine lives
+ * in org_instrument_tags. The instrument rows do not move and are not copied.
+ *
+ * Schedules and parts are not copied either: they are on the row already, and
+ * the recipient reads them through the share. Costs stay blank to them by the
+ * ordinary tenant rule in lib/redact.
+ */
+export async function attachInstead(opts: {
+  payload: SharePayload;
+  senderTenantOrgId: number | null;
+  destTenantOrgId: number;
+  actor: string;
+}): Promise<{ orgId: number; systems: number; tagged: number; untracked: number }> {
+  const p = opts.payload;
+  const [org] = await db.insert(orgs).values({
+    name: p.client.name, kind: "client", parentOrgId: opts.destTenantOrgId,
+  }).returning();
+  if (p.sites.length) {
+    await db.insert(orgSites).values(p.sites.map((s) => ({
+      tenantOrgId: opts.destTenantOrgId, orgId: org.id,
+      name: s.name, address: s.address, accessNotes: s.accessNotes,
+      contactName: s.contactName, contactPhone: s.contactPhone, contactEmail: s.contactEmail,
+    })));
+  }
+
+  const taken = (await db.select({ externalId: instruments.externalId }).from(instruments)).map((r) => r.externalId);
+  const tagsTaken = (await db.select({ externalId: orgInstrumentTags.externalId }).from(orgInstrumentTags)
+    .where(eq(orgInstrumentTags.orgId, opts.destTenantOrgId))).map((r) => r.externalId);
+  let systems = 0, tagged = 0, untracked = 0;
+  for (const s of p.systems) {
+    if (!s.sourceRef) continue;
+    const [inst] = await db.select({ id: instruments.id, tenantOrgId: instruments.tenantOrgId })
+      .from(instruments).where(eq(instruments.externalId, s.sourceRef)).limit(1);
+    // The sender's tag names the sender's row and nobody else's.
+    if (!inst || (opts.senderTenantOrgId !== null && inst.tenantOrgId !== opts.senderTenantOrgId)) continue;
+    systems++;
+
+    await db.insert(systemShares).values({ instrumentId: inst.id, orgId: opts.destTenantOrgId, access: "edit", addedBy: opts.actor })
+      .onConflictDoUpdate({ target: [systemShares.instrumentId, systemShares.orgId], set: { access: "edit" } });
+
+    const [open] = await db.select({ id: custodyEpochs.id, custodianOrgId: custodyEpochs.custodianOrgId })
+      .from(custodyEpochs).where(and(eq(custodyEpochs.instrumentId, inst.id), eq(custodyEpochs.closeKind, "open"))).limit(1);
+    if (open) {
+      const [have] = await db.select({ id: grants.id }).from(grants)
+        .where(and(eq(grants.epochId, open.id), eq(grants.granteeOrgId, opts.destTenantOrgId), isNull(grants.endedAt))).limit(1);
+      if (!have) {
+        await db.insert(grants).values({
+          instrumentId: inst.id, epochId: open.id, granteeOrgId: opts.destTenantOrgId,
+          grantedByOrgId: open.custodianOrgId, kind: "service",
+          scope: { from: "client_share", handoff: true }, createdBy: opts.actor,
+        });
+      }
+    } else {
+      // No custody recorded yet: the share still lets them work; the grant is
+      // written by the epoch backfill when the machine gets a tenure.
+      untracked++;
+    }
+
+    const tag = freeTag(s.sourceRef, [...taken, ...tagsTaken]);
+    tagsTaken.push(tag);
+    await db.insert(orgInstrumentTags).values({ orgId: opts.destTenantOrgId, instrumentId: inst.id, externalId: tag, createdBy: opts.actor })
+      .onConflictDoNothing();
+    tagged++;
+  }
+  return { orgId: org.id, systems, tagged, untracked };
 }

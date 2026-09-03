@@ -7,6 +7,7 @@ import { coverageOf, coverageSummary, type CoverageAgreement } from "@/lib/cover
 import { dayOf, lastVisitBy, visitsOf, visitsThisYear, type Completion } from "@/lib/serviceHistory";
 import { completionsFromEvents } from "@/lib/custody/history";
 import { flagOn } from "@/lib/custody/flags";
+import { sealsSince } from "@/lib/custody/transfer";
 import { daysSince, queueView } from "@/lib/queue";
 import { brandForTenant, getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
@@ -196,6 +197,11 @@ export default async function Home({ searchParams }: {
   // Systems the client's sheet dropped but we still track (flagged by sheet-sync).
   // Internal parity detail, so staff eyes only.
   const isStaff = user.role === "owner" || user.role === "staff";
+  // Operators only, and only with the flag: seals in the last day in this
+  // workspace. See lib/custody/transfer.sealsSince.
+  const custodyChanges = isStaff && await flagOn("custody.transfers")
+    ? await sealsSince(new Date(Date.now() - 24 * 3600 * 1000), user.operatorOrgId ?? null)
+    : null;
   const seesBooks = isStaff && await seesBooksFor(user);
   const droppedFromSheet = new Set(
     isStaff ? openRowDiffs.filter((d) => d.sheetValue === "(missing from sheet)").map((d) => d.externalId) : []
@@ -708,6 +714,25 @@ export default async function Home({ searchParams }: {
            with, never what the company is. */
         showShipping={isStaff || (user.orgId !== null && (orgNames.find((o) => o.id === user.orgId)?.resaleEnabled ?? false))}
       />
+      {/* custody.transfers: what left the board since yesterday, and why. A
+          seal removes a system from whoever held it; without a line saying
+          so, a machine simply vanishing from the fleet reads as a bug. */}
+      {custodyChanges !== null && (
+        <div className="container" style={{ paddingTop: 0 }}>
+          <div className="card" style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+            <div className="card-title" style={{ margin: 0 }}>Custody changes</div>
+            <span className={`pill ${custodyChanges.length ? "warn" : "neutral"}`}>
+              {custodyChanges.length ? `${custodyChanges.length} sealed since yesterday` : "none since yesterday"}
+            </span>
+            {custodyChanges.map((c) => (
+              <span key={c.instrumentId} className="t-small">
+                <Link href={`/instruments/${c.instrumentId}`} className="mono" style={{ fontWeight: 700 }}>{c.externalId}</Link>
+                <span className="mut"> {c.toName ? `to ${c.toName}` : "sealed to nobody"}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       {(pastEngagements.length > 0 || previouslyOwned.length > 0) && (
         <div className="container" style={{ paddingTop: 0 }}>
           {pastEngagements.length > 0 && (

@@ -14,6 +14,7 @@ import {
   engagementRecords, accessRequests, assetShares, pmPlans, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
+  transfers,
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
   awards, shareLinkSystems, providerProfiles, providerLinks, clientShares, referralFees,
   leads, leadOffers, calendarNotes,
@@ -70,6 +71,9 @@ import { signoffGate, snapshotOf } from "@/lib/signoff";
 import {
   emitCheckoutVerdict, emitCustodyEvent, emitPmTask, emitSafely, emitWorkOrderClosed,
 } from "@/lib/custody/emit";
+import * as custodyTransfer from "@/lib/custody/transfer";
+import { flagOn } from "@/lib/custody/flags";
+import { attachInstead } from "@/lib/clientShareData";
 import { completionBlocked, evaluateResult, needsResult, parseAcceptance, resultIsRecorded, serializeAcceptance, type Acceptance } from "@/lib/testResult";
 import { TIME_CATEGORIES } from "@/lib/rates";
 import { sellPrice, EXPENSE_KINDS, LINE_KINDS, linesTotal } from "@/lib/billing";
@@ -9874,6 +9878,92 @@ export async function ackQueueHandback(instrumentId: number): Promise<{ error?: 
  * Staff-only, deliberately. A serial number is not proof of purchase and
  * neither is a request; somebody at the operator has to witness the transfer.
  */
+// ── Custody transfers: initiate -> review -> seal -> accept ─────────────────
+// The shaped version of handOffSystem, behind custody.transfers. Every rule
+// lives in lib/custody/transfer; these are the org-scoped, audited doors.
+
+const TRANSFERS_OFF = "Custody transfers are not enabled on this instance yet.";
+
+const transferActor = (u: SessionUser): custodyTransfer.Actor =>
+  ({ email: u.email, name: u.name, role: u.role, orgId: u.orgId, operatorOrgId: u.operatorOrgId });
+
+async function transferAudit(u: SessionUser, transferId: number, action: string) {
+  const [t] = await db.select({ instrumentId: transfers.instrumentId }).from(transfers).where(eq(transfers.id, transferId));
+  await audit({ actor: u.email, instrumentId: t?.instrumentId ?? null, entityType: "custody", entityId: transferId, action });
+  if (t) rev(t.instrumentId);
+}
+
+export async function initiateTransfer(
+  instrumentId: number, data: { toOrgId: number | null; brokerOrgId?: number | null; note?: string },
+): Promise<{ error?: string; id?: number }> {
+  const u = await requireEditor();
+  if (!(await flagOn("custody.transfers"))) return { error: TRANSFERS_OFF };
+  const res = await custodyTransfer.initiate(transferActor(u), { instrumentId, ...data });
+  if (res.error !== undefined) return { error: res.error };
+  await transferAudit(u, res.id, data.toOrgId === null
+    ? "started sealing custody to nobody (the machine will read as dormant)"
+    : `started a custody transfer${data.brokerOrgId ? " through a broker" : ""}`);
+  return { id: res.id };
+}
+
+/** The projection the recipient will get, with the holder's withhold choices applied. */
+export async function reviewTransfer(
+  transferId: number, withheldEventIds: number[],
+): Promise<{ error?: string; lines?: custodyTransfer.ReviewLine[] }> {
+  const u = await requireEditor();
+  if (!(await flagOn("custody.transfers"))) return { error: TRANSFERS_OFF };
+  const res = await custodyTransfer.review(transferActor(u), transferId, withheldEventIds);
+  if (res.error !== undefined) return { error: res.error };
+  return { lines: res.lines };
+}
+
+export async function sealTransfer(transferId: number): Promise<{ error?: string; bundleHash?: string }> {
+  const u = await requireEditor();
+  if (!(await flagOn("custody.transfers"))) return { error: TRANSFERS_OFF };
+  const res = await custodyTransfer.seal(transferActor(u), transferId);
+  if (res.error !== undefined) return { error: res.error };
+  await transferAudit(u, transferId, `sealed custody - bundle ${res.bundleHash.slice(0, 12)}, chain ${res.sealHash.slice(0, 12)}`);
+  revHouse();
+  return { bundleHash: res.bundleHash };
+}
+
+export async function acceptTransfer(transferId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  if (!(await flagOn("custody.transfers"))) return { error: TRANSFERS_OFF };
+  const res = await custodyTransfer.accept(transferActor(u), transferId);
+  if (res.error !== undefined) return { error: res.error };
+  await transferAudit(u, transferId, "accepted custody - a new tenure is open");
+  revHouse();
+  return {};
+}
+
+export async function cancelTransfer(transferId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const res = await custodyTransfer.cancel(transferActor(u), transferId);
+  if (res.error !== undefined) return { error: res.error };
+  await transferAudit(u, transferId, "cancelled the custody transfer before sealing");
+  return {};
+}
+
+export async function declineTransfer(transferId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const res = await custodyTransfer.decline(transferActor(u), transferId);
+  if (res.error !== undefined) return { error: res.error };
+  await transferAudit(u, transferId, "declined custody");
+  revHouse();
+  return {};
+}
+
+export async function resumeCustody(instrumentId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  if (!(await flagOn("custody.transfers"))) return { error: TRANSFERS_OFF };
+  const res = await custodyTransfer.resume(transferActor(u), instrumentId);
+  if (res.error !== undefined) return { error: res.error };
+  await audit({ actor: u.email, instrumentId, entityType: "custody", entityId: instrumentId, action: "resumed custody of a dormant machine - a new tenure is open" });
+  rev(instrumentId);
+  return {};
+}
+
 export async function handOffSystem(instrumentId: number, toOrgId: number, opts?: {
   note?: string; keepPreviousAsViewer?: boolean;
 }): Promise<{ error?: string }> {
@@ -18568,7 +18658,12 @@ export async function acceptHandoff(token: string, data: {
     tenantOrgId: org.id, name: n, sortOrder: i + 1, createdBy: row.toEmail,
   })));
 
-  const made = await materialize({ payload, destTenantOrgId: org.id, actor: row.toEmail });
+  // custody.transfers: the same acceptance on ONE row per machine - a grant
+  // and a share instead of a copy. materialize is the write that forked
+  // history; see lib/clientShareData.attachInstead and docs/adr/0001, blocker 2.
+  const made = await flagOn("custody.transfers")
+    ? await attachInstead({ payload, senderTenantOrgId: row.tenantOrgId, destTenantOrgId: org.id, actor: row.toEmail })
+    : await materialize({ payload, destTenantOrgId: org.id, actor: row.toEmail });
   await raiseReferralFee(row, org.id, made.orgId, "");
   await db.update(clientShares).set({ destOrgId: made.orgId }).where(eq(clientShares.id, row.id));
 

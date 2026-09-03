@@ -165,3 +165,25 @@ All five proposals accepted as written. Encoded as named constants in
    controls, and at least one grant from an unrelated verified org. It gates
    the `third_party` grade: an org grading its own subsidiary as third-party is
    the obvious way to buy a score.
+
+## Phase 5 — decisions made in the build
+
+- **The custody_events row is written at seal, not accept.** The seal is the
+  moment the outgoing holder lets go, and the chain's transfer event takes
+  that row as its source so the backfill's emitter converges on it rather
+  than writing a second one. Between seal and accept a machine has no open
+  epoch: nobody holds it, and `custody-parity` will show the pointer and the
+  chain disagreeing for exactly that window.
+- **Decline after seal makes the machine dormant.** The sealed bundle stands
+  as evidence and the previous holder resumes by opening a fresh tenure
+  (`resume`). History is continued, never reopened.
+- **Merging duplicates re-links the chain.** Two chains cannot be
+  concatenated (each has a genesis link) and events cannot be re-pointed by
+  UPDATE (the append-only trigger), so `merge-instruments` disables the
+  trigger for exactly its own statements, moves the events, and recomputes
+  every hash in recorded order. It prints the tail before and after. A
+  duplicate carrying a sealed tenure is refused: its seal hash names a chain
+  that would cease to exist.
+- **`attachInstead` still creates the client org under the recipient.** The
+  relationship is theirs; only the machine is shared. Org duplication is a
+  relationship record per shop, not a fork of the machine.

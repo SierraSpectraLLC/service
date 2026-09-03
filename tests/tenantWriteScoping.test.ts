@@ -55,6 +55,15 @@ const GUARD_VOCABULARY = new RegExp([
    * about - is the one that did not, and its own houseOf call is still there.
    */
   "workableReport\\(",
+  /*
+   * lib/custody/transfer.recipientStanding: fetches the recipient org row and
+   * admits the caller only as its own member, its operator's staff, or the
+   * steward that created it (parent_org_id). accept and decline write the
+   * instrument pointer only after it says yes; the transfer row they act on
+   * was already bound to that recipient by the holder at initiate, which
+   * custodianStanding gated on the instrument's tenant.
+   */
+  "recipientStanding\\(",
 ].join("|"));
 
 /** Table constants declared with tenantStamp(). */

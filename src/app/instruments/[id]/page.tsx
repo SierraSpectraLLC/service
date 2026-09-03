@@ -8,6 +8,7 @@ import {
   serviceVisits, workOrders, orgSites,
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
   catalogRefs, validationDocs, validationSignatures, agreements,
+  custodyEpochs,
 } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
 import {
@@ -72,6 +73,7 @@ import { advisoryByCoverage, coverageOf, type CoverageAgreement } from "@/lib/co
 import { dayOf } from "@/lib/serviceHistory";
 import { custodyContext } from "@/lib/custody/load";
 import { flagOn } from "@/lib/custody/flags";
+import * as transferLib from "@/lib/custody/transfer";
 import SystemCoverage from "@/components/SystemCoverage";
 import CoverageRecorder from "@/components/CoverageRecorder";
 import { HeroKebab, Pill, RecordHero, type HeroStat } from "@/components/ui";
@@ -538,6 +540,35 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // custody.twoBox: the close-out and PM forms split what travels from what
   // stays. Read once here; the panels are client components.
   const twoBox = await flagOn("custody.twoBox");
+  // custody.transfers: seal-and-accept on the custody panel. Who may act is
+  // decided by lib/custody/transfer from the open epoch, never from the
+  // owner pointer - the pointer is what this replaces.
+  const transferState = await (async () => {
+    if (!(await flagOn("custody.transfers"))) return undefined;
+    const actor = { email: user.email, name: user.name, role: user.role, orgId: user.orgId, operatorOrgId: user.operatorOrgId };
+    const [open, pending, last] = await Promise.all([
+      transferLib.openEpoch(inst.id),
+      transferLib.pendingTransfer(inst.id),
+      db.select().from(custodyEpochs).where(eq(custodyEpochs.instrumentId, inst.id)).orderBy(desc(custodyEpochs.n)).limit(1).then((r) => r[0] ?? null),
+    ]);
+    const standing = open ? await transferLib.custodianStanding(actor, open, inst.tenantOrgId) : null;
+    const canAccept = pending?.toOrgId != null && pending.status === "sealed"
+      ? await transferLib.recipientStanding(actor, pending.toOrgId) : false;
+    const canResume = !open && last?.closeKind === "dormant"
+      ? (await transferLib.custodianStanding(actor, last, inst.tenantOrgId)) !== null : false;
+    const able = await db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind, canCustody: orgs.canCustody, canBroker: orgs.canBroker })
+      .from(orgs).where(or(eq(orgs.canCustody, true), eq(orgs.canBroker, true)));
+    return {
+      enabled: true,
+      canInitiate: canEdit && standing !== null,
+      canAccept: canEdit && canAccept,
+      canResume: canEdit && canResume,
+      pending: pending ? { id: pending.id, status: pending.status, toName: pending.toName, toOrgId: pending.toOrgId, withheldEventIds: pending.withheldEventIds } : null,
+      recipients: able.filter((o) => o.canCustody && o.id !== open?.custodianOrgId).map((o) => ({ id: o.id, name: o.name, kind: o.kind })),
+      brokers: able.filter((o) => o.canBroker).map((o) => ({ id: o.id, name: o.name })),
+      custodianName: open?.custodianName || (open ? "house stewardship" : ""),
+    };
+  })();
   const lastClosed: { day: string; number: string; title: string } | undefined = (
     await flagOn("custody.readPath")
       /* The same answer, read off the machine's own chain. Every custody read
@@ -964,6 +995,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           { key: "custody", label: "Custody", node: (
             <CustodyPanel
               instrumentId={inst.id} externalId={inst.externalId}
+              transfer={transferState}
               holderName={inst.queueOrgId === null ? brand.operatorName : orgName.get(inst.queueOrgId) ?? "another organization"}
               isMine={queueMine}
               since={shopTime(inst.queueSince ?? inst.createdAt)}

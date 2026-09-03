@@ -4522,3 +4522,107 @@ ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "verified_at" timestamp;
 ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "private_notes" text NOT NULL DEFAULT '';
 -- What was found, written for the next holder. body stays the shop's own.
 ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "findings" text NOT NULL DEFAULT '';
+
+-- ═══ CUSTODY AND PROVENANCE, phase 5 ═══════════════════════════════════════
+-- Seal-and-accept as a state machine, and one row per machine.
+ALTER TABLE "engagement_records" ADD COLUMN IF NOT EXISTS "bundle_hash" text NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS "transfers" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "from_epoch_id" integer NOT NULL,
+  "to_org_id" integer,
+  "to_name" text NOT NULL DEFAULT '',
+  "broker_org_id" integer,
+  "status" text NOT NULL DEFAULT 'initiated',
+  "withheld_event_ids" jsonb NOT NULL DEFAULT '[]'::jsonb,
+  "bundle_record_id" integer,
+  "seal_hash" text NOT NULL DEFAULT '',
+  "custody_event_id" integer,
+  "note" text NOT NULL DEFAULT '',
+  "initiated_by" text NOT NULL DEFAULT '',
+  "initiated_by_org_id" integer,
+  "reviewed_at" timestamp,
+  "sealed_at" timestamp,
+  "sealed_by" text NOT NULL DEFAULT '',
+  "accepted_at" timestamp,
+  "accepted_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "transfers_instrument_idx" ON "transfers" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "transfers_to_org_idx" ON "transfers" ("to_org_id");
+
+CREATE TABLE IF NOT EXISTS "org_instrument_tags" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "org_id" integer NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "external_id" text NOT NULL,
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "org_instrument_tag_unique" UNIQUE ("org_id", "instrument_id")
+);
+CREATE INDEX IF NOT EXISTS "org_instrument_tags_instrument_idx" ON "org_instrument_tags" ("instrument_id");
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'transfers_instrument_id_fk') THEN
+    ALTER TABLE "transfers" ADD CONSTRAINT "transfers_instrument_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'transfers_from_epoch_id_fk') THEN
+    ALTER TABLE "transfers" ADD CONSTRAINT "transfers_from_epoch_id_fk"
+      FOREIGN KEY ("from_epoch_id") REFERENCES "custody_epochs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'transfers_to_org_id_fk') THEN
+    ALTER TABLE "transfers" ADD CONSTRAINT "transfers_to_org_id_fk"
+      FOREIGN KEY ("to_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'transfers_broker_org_id_fk') THEN
+    ALTER TABLE "transfers" ADD CONSTRAINT "transfers_broker_org_id_fk"
+      FOREIGN KEY ("broker_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'transfers_initiated_by_org_id_fk') THEN
+    ALTER TABLE "transfers" ADD CONSTRAINT "transfers_initiated_by_org_id_fk"
+      FOREIGN KEY ("initiated_by_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'org_instrument_tags_org_id_fk') THEN
+    ALTER TABLE "org_instrument_tags" ADD CONSTRAINT "org_instrument_tags_org_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'org_instrument_tags_instrument_id_fk') THEN
+    ALTER TABLE "org_instrument_tags" ADD CONSTRAINT "org_instrument_tags_instrument_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- A CLOSED EPOCH IS FROZEN, from below the app. lib/custody/append checks
+-- this too; this is the layer for the call site that forgot to. The seal
+-- appends its own transfer event BEFORE closing, in the same call, which is
+-- why the check is on INSERT and not on the epoch's own row.
+CREATE OR REPLACE FUNCTION "custody_epochs_closed_is_frozen"() RETURNS trigger AS $$
+DECLARE
+  kind text;
+BEGIN
+  IF NEW.epoch_id IS NULL THEN RETURN NEW; END IF;
+  SELECT close_kind INTO kind FROM custody_epochs WHERE id = NEW.epoch_id;
+  IF kind IS NULL THEN
+    RAISE EXCEPTION 'system_events: epoch % does not exist', NEW.epoch_id;
+  END IF;
+  IF kind <> 'open' THEN
+    RAISE EXCEPTION 'system_events: epoch % closed as ''%'' and is frozen', NEW.epoch_id, kind;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+    WHERE t.tgname = 'custody_epochs_closed_is_frozen' AND c.relname = 'system_events'
+  ) THEN
+    CREATE TRIGGER "custody_epochs_closed_is_frozen"
+      BEFORE INSERT ON "system_events"
+      FOR EACH ROW EXECUTE FUNCTION "custody_epochs_closed_is_frozen"();
+  END IF;
+END $$;

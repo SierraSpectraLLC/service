@@ -73,12 +73,18 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
       />
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: "#EEF1F5", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px" }}>
-        <span className="pill neutral">Frozen record</span>
+        <span className="pill neutral">{rec.kind === "sealed" ? "Sealed record" : "Frozen record"}</span>
         <span className="mut t-small">
           {handoff
             ? `Handed on ${shopTime(rec.revokedAt)}. Your tenure as it stood that day - it never updates, and the live system has moved on without it.`
             : `Engagement ended ${shopTime(rec.revokedAt)}. Never updates.`}
         </span>
+        {/* Yours to take away, forever: the stored JSON, its files, and the
+            hash the recipient of the machine was given. See records/[id]/export. */}
+        <a className="btn sm" href={`/records/${rec.id}/export`} style={{ marginLeft: "auto", textDecoration: "none" }}>
+          Download bundle
+        </a>
+        {rec.bundleHash && <span className="mono mut t-meta" title={rec.bundleHash}>sha256 {rec.bundleHash.slice(0, 12)}…</span>}
         {rec.supersededAt !== null && (
           <span className="mut t-small">
             · Superseded {shopTime(rec.supersededAt)}

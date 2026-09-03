@@ -1016,6 +1016,13 @@ export const engagementRecords = pgTable("engagement_records", {
   revokedAt: timestamp("revoked_at").notNull().defaultNow(),
   supersededAt: timestamp("superseded_at"),
   data: jsonb("data").notNull(),
+  /**
+   * sha256 of the canonical JSON in `data`, for kind 'sealed' - the third kind,
+   * minted by a custody seal (lib/custody/transfer). The recipient of a
+   * machine gets this number with the bundle, and an export that does not
+   * hash to it is not the record. Blank on the two older kinds.
+   */
+  bundleHash: text("bundle_hash").notNull().default(""),
 }, (t) => [index("engagement_records_org_idx").on(t.orgId)]);
 
 // The operator's own people, and what they can do. Owner-managed from Settings
@@ -4846,3 +4853,69 @@ export const custodyDiffs = pgTable("custody_diffs", {
   resolved: boolean("resolved").notNull().default(false),
   checkedAt: timestamp("checked_at").notNull().defaultNow(),
 }, (t) => [index("custody_diffs_instrument_idx").on(t.instrumentId)]);
+
+
+/**
+ * CUSTODY CHANGING HANDS, as a state machine rather than a pointer write.
+ *
+ * handOffSystem moves owner_org_id in one call and freezes a dossier on the
+ * way. That is a transfer with no review, no seal and no acceptance: the
+ * outgoing holder never sees what the record will say to a stranger, nothing
+ * is hashed, and the recipient is handed a machine they never said yes to.
+ * A transfer here is initiated -> reviewed -> sealed -> accepted, and the
+ * epoch closes at SEAL, before anybody accepts - so a bundle is frozen over
+ * exactly the events the holder reviewed, and a recipient who never turns up
+ * leaves a dormant machine, not an open one.
+ *
+ * `to_org_id` null is a seal to nobody: legal, and closes the epoch dormant.
+ */
+export const transfers = pgTable("transfers", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  fromEpochId: integer("from_epoch_id").notNull().references(() => custodyEpochs.id, { onDelete: "cascade" }),
+  toOrgId: integer("to_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  toName: text("to_name").notNull().default(""),
+  brokerOrgId: integer("broker_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  /** initiated | reviewed | sealed | accepted | declined | cancelled */
+  status: text("status").notNull().default("initiated"),
+  /** system_events ids whose free text the holder held back. Structured fields never withhold. */
+  withheldEventIds: jsonb("withheld_event_ids").notNull().default([]),
+  /** The frozen bundle, engagement_records.kind = 'sealed'. */
+  bundleRecordId: integer("bundle_record_id"),
+  /** The last event hash at the moment of sealing. What the bundle covers. */
+  sealHash: text("seal_hash").notNull().default(""),
+  /** The custody_events row the seal wrote, so the chain event has a source. */
+  custodyEventId: integer("custody_event_id"),
+  note: text("note").notNull().default(""),
+  initiatedBy: text("initiated_by").notNull().default(""),
+  initiatedByOrgId: integer("initiated_by_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  reviewedAt: timestamp("reviewed_at"),
+  sealedAt: timestamp("sealed_at"),
+  sealedBy: text("sealed_by").notNull().default(""),
+  acceptedAt: timestamp("accepted_at"),
+  acceptedBy: text("accepted_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("transfers_instrument_idx").on(t.instrumentId),
+  index("transfers_to_org_idx").on(t.toOrgId),
+]);
+
+/**
+ * "THEIR EP-001 IS OUR NW-114", without two rows.
+ *
+ * instruments.source_ref carried the other shop's tag on a COPY of the row;
+ * once there is one row per machine, each organization's own label for it
+ * lives here instead. The sticker on the shelf is the org's; the machine is
+ * not. See lib/clientShare and docs/adr/0001, blocker 2.
+ */
+export const orgInstrumentTags = pgTable("org_instrument_tags", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  externalId: text("external_id").notNull(),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  unique("org_instrument_tag_unique").on(t.orgId, t.instrumentId),
+  index("org_instrument_tags_instrument_idx").on(t.instrumentId),
+]);
