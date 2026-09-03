@@ -4682,3 +4682,82 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+-- ═══ CUSTODY AND PROVENANCE, phase 7 ═══════════════════════════════════════
+-- Paper and screen as two surfaces for one procedure set, writing one event.
+ALTER TABLE "signoffs" ADD COLUMN IF NOT EXISTS "role" text NOT NULL DEFAULT 'technician';
+ALTER TABLE "signoffs" ADD COLUMN IF NOT EXISTS "image_attachment_id" integer;
+ALTER TABLE "signoffs" ADD COLUMN IF NOT EXISTS "platform" boolean NOT NULL DEFAULT true;
+ALTER TABLE "signoffs" ADD COLUMN IF NOT EXISTS "event_id" integer;
+
+CREATE TABLE IF NOT EXISTS "sheet_instances" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "token" text NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "procedure_set_id" integer,
+  "set_version" integer NOT NULL DEFAULT 1,
+  "rows" jsonb NOT NULL DEFAULT '[]'::jsonb,
+  "layout" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "status" text NOT NULL DEFAULT 'printed',
+  "printed_by" text NOT NULL DEFAULT '',
+  "printed_at" timestamp NOT NULL DEFAULT now(),
+  "scan_attachment_id" integer,
+  "event_id" integer,
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "sheet_instances_token_unique" UNIQUE ("token")
+);
+CREATE INDEX IF NOT EXISTS "sheet_instances_instrument_idx" ON "sheet_instances" ("instrument_id");
+
+CREATE TABLE IF NOT EXISTS "event_drafts" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "sheet_instance_id" integer NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "marks" jsonb NOT NULL DEFAULT '[]'::jsonb,
+  "fields" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "confirmed_event_id" integer,
+  "confirmed_at" timestamp
+);
+CREATE INDEX IF NOT EXISTS "event_drafts_sheet_idx" ON "event_drafts" ("sheet_instance_id");
+
+CREATE TABLE IF NOT EXISTS "custody_ack_requests" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "event_id" integer NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "custodian_org_id" integer,
+  "status" text NOT NULL DEFAULT 'pending',
+  "requested_by" text NOT NULL DEFAULT '',
+  "requested_at" timestamp NOT NULL DEFAULT now(),
+  "signoff_id" integer,
+  "decided_at" timestamp
+);
+CREATE INDEX IF NOT EXISTS "custody_ack_requests_instrument_idx" ON "custody_ack_requests" ("instrument_id");
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'sheet_instances_instrument_id_fk') THEN
+    ALTER TABLE "sheet_instances" ADD CONSTRAINT "sheet_instances_instrument_id_fk" FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'sheet_instances_procedure_set_id_fk') THEN
+    ALTER TABLE "sheet_instances" ADD CONSTRAINT "sheet_instances_procedure_set_id_fk" FOREIGN KEY ("procedure_set_id") REFERENCES "procedure_sets"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'event_drafts_sheet_instance_id_fk') THEN
+    ALTER TABLE "event_drafts" ADD CONSTRAINT "event_drafts_sheet_instance_id_fk" FOREIGN KEY ("sheet_instance_id") REFERENCES "sheet_instances"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'event_drafts_instrument_id_fk') THEN
+    ALTER TABLE "event_drafts" ADD CONSTRAINT "event_drafts_instrument_id_fk" FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'custody_ack_requests_event_id_fk') THEN
+    ALTER TABLE "custody_ack_requests" ADD CONSTRAINT "custody_ack_requests_event_id_fk" FOREIGN KEY ("event_id") REFERENCES "system_events"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'custody_ack_requests_instrument_id_fk') THEN
+    ALTER TABLE "custody_ack_requests" ADD CONSTRAINT "custody_ack_requests_instrument_id_fk" FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'custody_ack_requests_custodian_org_id_fk') THEN
+    ALTER TABLE "custody_ack_requests" ADD CONSTRAINT "custody_ack_requests_custodian_org_id_fk" FOREIGN KEY ("custodian_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'custody_ack_requests_signoff_id_fk') THEN
+    ALTER TABLE "custody_ack_requests" ADD CONSTRAINT "custody_ack_requests_signoff_id_fk" FOREIGN KEY ("signoff_id") REFERENCES "signoffs"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

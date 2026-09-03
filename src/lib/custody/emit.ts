@@ -49,7 +49,14 @@ export async function placeOf(
     fromName: custodyEvents.fromName, toName: custodyEvents.toName, at: custodyEvents.at,
   }).from(custodyEvents).where(eq(custodyEvents.instrumentId, instrumentId));
   const spans = spansOf(rows as CustodyRow[], { custodianOrgId: inst.ownerOrgId, custodianName: "" });
-  if (!spans.length) return { custodianOrgId: inst.ownerOrgId, epochId: null };
+  if (!spans.length) {
+    // No handoff on file, but a tenure may exist all the same - the epoch
+    // backfill opens one for every held machine, and Phase 5 opens them on
+    // accept. New work belongs to the open tenure when there is one.
+    const [open] = await db.select({ id: custodyEpochs.id, custodianOrgId: custodyEpochs.custodianOrgId }).from(custodyEpochs)
+      .where(and(eq(custodyEpochs.instrumentId, instrumentId), eq(custodyEpochs.closeKind, "open"))).limit(1);
+    return open ? { custodianOrgId: open.custodianOrgId, epochId: open.id } : { custodianOrgId: inst.ownerOrgId, epochId: null };
+  }
 
   // Live emitters place ordinary work; a handoff's own event is placed by the
   // seal in Phase 5, which is the only thing that knows which tenure it ends.

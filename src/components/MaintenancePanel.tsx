@@ -6,7 +6,7 @@ import { toast } from "@/components/ui/Toast";
 import type { WorkTarget } from "@/app/actions";
 import {
   addPmSchedule, updatePmSchedule, setPmPaused, removePmSchedule, requestPmPart, runPmNow,
-  alignMaintenance, undoRunPmNow, logPastPm, setPmPosture,
+  alignMaintenance, undoRunPmNow, logPastPm, setPmPosture, mintPmSheet,
   schedulePmVisit, unschedulePmVisit, completePmNow, undoPmComplete,
 } from "@/app/actions";
 import { addDays, cadenceLabel, pmStanding } from "@/lib/pm";
@@ -29,6 +29,8 @@ export type PmRow = {
   assetId?: number | null;
   /** An open generated task is the schedule "in flight". */
   openTaskId: number | null;
+  /** procedures.key of the schedule's procedure, for the chain's word on it. custody.sheets only. */
+  procedureKey?: string;
 };
 
 const CADENCES = [
@@ -66,8 +68,16 @@ const doneToday = (s: PmRow, today: string) => !s.paused && s.lastDone === today
  * UI state: it is lastDone === today, read off the same rows, so a phone that
  * dies mid-PM picks the run back up exactly where the work stands.
  */
-export default function MaintenancePanel({ target, schedules, people, today, canEdit, catalogHint = false, posture, twoBox = false }: {
+export type ChainPlan = { key: string; lastDone: string; lastGrade: string | null; nextDue: string; stillDue: boolean; skipReason: string };
+
+export default function MaintenancePanel({ target, schedules, people, today, canEdit, catalogHint = false, posture, twoBox = false, sheets }: {
   target: WorkTarget; schedules: PmRow[]; people: string[]; today: string; canEdit: boolean;
+  /**
+   * custody.sheets: the plan as the CHAIN says it stands, keyed by procedure
+   * key, plus the two ways to work it - print a sheet, run it on screen. The
+   * stored last-done keeps rendering; this reads beside it until Phase 8.
+   */
+  sheets?: { plan: ChainPlan[]; instrumentId: number };
   /**
    * custody.twoBox: completing or backfilling a PM asks for findings (which
    * travel with the machine) and a private note (which does not) instead of
@@ -124,6 +134,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   const [booking, setBooking] = useState<number | null>(null);
   const [bookDraft, setBookDraft] = useState({ date: "", note: "" });
   const [logDraft, setLogDraft] = useState({ date: "", note: "", doneBy: "", advanceSchedule: true, findings: "" });
+  const [minting, startMint] = useTransition();
   /* Under twoBox a completion is not one tap: the tap opens this, and filing
      is the second tap. Two words that travel are worth one more press. */
   const [finishing, setFinishing] = useState<number | null>(null);
@@ -234,12 +245,21 @@ export default function MaintenancePanel({ target, schedules, people, today, can
     if (s.paused) return "Paused";
     const st = pmStanding(s, today);
     const tail = s.lastDone ? ` · last ${mdy(s.lastDone)}` : "";
-    if (st.kind === "booked") return `Booked ${mdy(st.on)}${s.nextDue < st.on ? ` (was due ${mdy(s.nextDue)})` : ""}`;
-    if (st.kind === "missed") return `Missed the ${mdy(st.on)} visit`;
-    if (advisory) return `${st.kind === "upcoming" ? "Next cycle" : "Cycle elapsed"} ${mdy(s.nextDue)}${tail}`;
-    if (st.kind === "overdue") return `Overdue ${mdy(st.since)}${tail}`;
-    if (st.kind === "dueToday") return `Due today${tail}`;
-    return `Next ${mdy(s.nextDue)}${tail}${s.openTaskId !== null ? " · task open" : ""}`;
+    // custody.sheets: what the CHAIN says, beside what the column says. The
+    // two agree once every completion goes through a run; where they do not,
+    // the chain is the one with a grade on it.
+    const chain = sheets?.plan.find((p) => p.key && s.procedureKey === p.key);
+    const chainTail = chain
+      ? chain.stillDue ? ` · chain: still due (${chain.skipReason || "skipped"})`
+        : chain.lastDone ? ` · chain: last ${mdy(chain.lastDone)}${chain.lastGrade === "attested" ? " (attested)" : chain.lastGrade === "third_party" ? " (third-party)" : ""}`
+        : " · chain: never recorded"
+      : "";
+    if (st.kind === "booked") return `Booked ${mdy(st.on)}${s.nextDue < st.on ? ` (was due ${mdy(s.nextDue)})` : ""}${chainTail}`;
+    if (st.kind === "missed") return `Missed the ${mdy(st.on)} visit${chainTail}`;
+    if (advisory) return `${st.kind === "upcoming" ? "Next cycle" : "Cycle elapsed"} ${mdy(s.nextDue)}${tail}${chainTail}`;
+    if (st.kind === "overdue") return `Overdue ${mdy(st.since)}${tail}${chainTail}`;
+    if (st.kind === "dueToday") return `Due today${tail}${chainTail}`;
+    return `Next ${mdy(s.nextDue)}${tail}${s.openTaskId !== null ? " · task open" : ""}${chainTail}`;
   };
 
   /**
@@ -564,6 +584,16 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", padding: 0, cursor: "pointer" }}>
           <span aria-hidden className="t-meta" style={{ color: "var(--mut)", width: 12 }}>{panelOpen ? "▾" : "▸"}</span>
           <span className="card-title">Maintenance</span>
+          {sheets && canEdit && (
+            <span style={{ display: "flex", gap: 4 }}>
+              <a className="btn sm" href={`/work/pm-run/${sheets.instrumentId}`} style={{ textDecoration: "none" }}>Run on screen</a>
+              <button className="btn sm" disabled={minting} onClick={() => startMint(async () => {
+                const res = await mintPmSheet(sheets.instrumentId);
+                if (res?.error || !res.token) { setError(res?.error ?? "Could not print a sheet"); return; }
+                window.open(`/print/pm-sheet/${res.token}`, "_blank");
+              })}>{minting ? "Preparing..." : "Print a sheet"}</button>
+            </span>
+          )}
         </button>
         {/* Rolled up, the header keeps the two answers the panel exists for:
             is anything owed, and when is the next thing. */}

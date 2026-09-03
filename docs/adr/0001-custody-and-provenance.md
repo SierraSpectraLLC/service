@@ -212,3 +212,28 @@ All five proposals accepted as written. Encoded as named constants in
   by that name is opened through the existing hand-off acceptance. Sending
   the invitation itself stays with the operator's existing invite flows,
   which need an address a machine's history does not carry.
+
+## Phase 7 — decisions made in the build
+
+- **No vision model.** The only thing on a sheet that needs one is
+  handwriting, and handwriting is typed by the person who wrote it, on
+  confirm, next to a crop of their own comb cell. Tick boxes are geometry: a
+  fill ratio inside a known rectangle, deterministic and pinned by a test. A
+  wrong tick is a tap on a screen; a wrong digit read off a "7" that was a "1"
+  would land on a machine's permanent chain.
+- **The QR is a URL carrying the sheet token**, not a payload. A phone's
+  camera app opens it; nothing decodes a QR, and the token resolves to the
+  instrument, the set version and the frozen layout server-side.
+- **The layout is frozen onto the sheet row** rather than kept as a file per
+  set version: sets are per shop and per model, and a sheet printed in March
+  must be read against the boxes that were on it. `LAYOUT_VERSION` changes
+  when the geometry does.
+- **One builder for both surfaces.** `buildPmEvent` is the only place a PM
+  becomes an event; the surface goes in `private`. Units come from the
+  procedure's acceptance spec, never from input, so paper and screen cannot
+  disagree about them.
+- **A run also files a Done pm task**, so `visitsOf` and the stored plan
+  columns keep telling the truth until Phase 8 retires them.
+- **The custodian's acknowledgement never gates the event.** It is a request,
+  signed in the lab's own session; a signature the technician has to chase
+  before the record exists is one that gets forged at 5pm.

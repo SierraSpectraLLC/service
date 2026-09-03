@@ -75,6 +75,7 @@ import { custodyContext } from "@/lib/custody/load";
 import { flagOn } from "@/lib/custody/flags";
 import * as transferLib from "@/lib/custody/transfer";
 import * as claimsLib from "@/lib/custody/claims";
+import { planStatusFor } from "@/lib/custody/plan";
 import SystemCoverage from "@/components/SystemCoverage";
 import CoverageRecorder from "@/components/CoverageRecorder";
 import { HeroKebab, Pill, RecordHero, type HeroStat } from "@/components/ui";
@@ -544,6 +545,18 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // custody.transfers: seal-and-accept on the custody panel. Who may act is
   // decided by lib/custody/transfer from the open epoch, never from the
   // owner pointer - the pointer is what this replaces.
+  // custody.sheets: the plan as the chain says it stands, for the maintenance
+  // tab, and the two entry points (sheet, run). See lib/custody/plan.
+  const procKeyById = new Map<number, string>(
+    pmRows.some((s) => s.procedureId !== null)
+      ? (await db.select({ id: procedures.id, key: procedures.key }).from(procedures)
+          .where(inArray(procedures.id, pmRows.map((s) => s.procedureId).filter((x): x is number => x !== null))))
+          .map((p) => [p.id, p.key] as const)
+      : [],
+  );
+  const sheetsState = await flagOn("custody.sheets")
+    ? { instrumentId: inst.id, plan: (await planStatusFor(inst.id, today)).map((p) => ({ key: p.key, lastDone: p.lastDone, lastGrade: p.lastGrade, nextDue: p.nextDue, stillDue: p.stillDue, skipReason: p.skipReason })) }
+    : undefined;
   // custody.claims: the holder, its steward, or an author of the open tenure
   // may object while a window runs. Same standing rules as a transfer.
   const claimStateOf = (c: { resolution: string; noticeEndsAt: Date | null }): "window" | "due" | "disputed" | "resolved" =>
@@ -957,7 +970,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               </div>
             )}
             <MaintenancePanel target={{ instrumentId: inst.id, assetId: null }} today={shopToday()} canEdit={canEdit}
-              catalogHint={isStaff} twoBox={twoBox}
+              catalogHint={isStaff} twoBox={twoBox} sheets={sheetsState}
               // Scheduled vs advisory (lib/pmPosture): a reseller's systems
               // carry their calendar as reference. The toggle is the house's -
               // it changes what the cron does, which is operator machinery.
@@ -988,6 +1001,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
                   onAsset: onAsset ? `${onAsset.kind} - ${onAsset.model || onAsset.serial || "?"}` : undefined,
                   assetId: s.assetId,
                   openTaskId: taskRows.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
+                  procedureKey: s.procedureId === null ? undefined : procKeyById.get(s.procedureId),
                 };
               })} />
             </>

@@ -55,6 +55,9 @@ export const NOTIFY_KINDS = [
   { kind: "claim_notice", label: "A claim is running on a system I hold or wrote on", audience: "all" },
   // An outside shop asked to confirm work attributed to it.
   { kind: "countersign", label: "Asked to confirm work attributed to my organization", audience: "all" },
+  // The lab is asked to acknowledge a PM just recorded on its instrument. Never
+  // gates the record; a signature nobody chased is the only kind worth having.
+  { kind: "pm_ack", label: "Asked to acknowledge maintenance on my instrument", audience: "all" },
   { kind: "gas_empty", label: "A gas is marked empty", audience: "house" },
   { kind: "queue", label: "A system moves into my queue", audience: "all" },
   { kind: "handoff", label: "A system changes hands", audience: "all" },

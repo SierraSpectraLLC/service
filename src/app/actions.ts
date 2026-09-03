@@ -16,6 +16,7 @@ import {
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   transfers,
   systemEvents,
+  eventDrafts,
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
   awards, shareLinkSystems, providerProfiles, providerLinks, clientShares, referralFees,
   leads, leadOffers, calendarNotes,
@@ -72,10 +73,11 @@ import { signoffGate, snapshotOf } from "@/lib/signoff";
 import {
   emitCheckoutVerdict, emitCustodyEvent, emitPmTask, emitSafely, emitWorkOrderClosed,
 } from "@/lib/custody/emit";
-import { notifyClaimNotice, notifyCountersignRequest } from "@/lib/notify";
+import { notifyAckRequested, notifyClaimNotice, notifyCountersignRequest } from "@/lib/notify";
 import * as custodyTransfer from "@/lib/custody/transfer";
 import * as custodyClaims from "@/lib/custody/claims";
 import * as countersign from "@/lib/custody/countersign";
+import * as pmSheets from "@/lib/custody/sheets";
 import { CLAIM_NOTICE_DAYS } from "@/lib/custody/policy";
 import { flagOn } from "@/lib/custody/flags";
 import { shopTime } from "@/lib/shopday";
@@ -9884,6 +9886,83 @@ export async function ackQueueHandback(instrumentId: number): Promise<{ error?: 
  * Staff-only, deliberately. A serial number is not proof of purchase and
  * neither is a request; somebody at the operator has to witness the transfer.
  */
+// ── PM sheets and runs: paper and screen, one event ─────────────────────────
+// Behind custody.sheets. The rules live in lib/custody/sheets and
+// lib/custody/pmEvent; these are the org-scoped, audited doors.
+
+const SHEETS_OFF = "PM sheets are not enabled on this instance yet.";
+
+export async function mintPmSheet(instrumentId: number): Promise<{ error?: string; token?: string }> {
+  const u = await requireEditor();
+  if (!(await flagOn("custody.sheets"))) return { error: SHEETS_OFF };
+  await assertSystemEditable(u, instrumentId);
+  const res = await pmSheets.mintSheet(instrumentId, transferActor(u));
+  if (res.error) return res;
+  await audit({ actor: u.email, instrumentId, entityType: "pm_sheet", entityId: res.token, action: "printed a PM sheet" });
+  return res;
+}
+
+/** The marks the browser read off the photo, plus the photo. A draft, not history. */
+export async function submitSheetScan(token: string, marks: import("@/lib/custody/marks").Mark[], scan: { fileName: string; url: string; size: number } | null): Promise<{ error?: string; draftId?: number }> {
+  const u = await requireEditor();
+  if (!(await flagOn("custody.sheets"))) return { error: SHEETS_OFF };
+  const sheet = await pmSheets.sheetByToken(token);
+  if (!sheet) return { error: "Not found" };
+  await assertSystemEditable(u, sheet.instrumentId);
+  const res = await pmSheets.draftFromScan(token, marks, scan, transferActor(u));
+  if (res.error) return res;
+  await audit({ actor: u.email, instrumentId: sheet.instrumentId, entityType: "pm_sheet", entityId: token, action: `uploaded a filled PM sheet - ${marks.filter((m) => m.state).length} of ${marks.length} boxes read` });
+  return res;
+}
+
+export async function confirmSheetDraft(draftId: number, fields: pmSheets.ConfirmFields): Promise<{ error?: string; eventId?: number }> {
+  const u = await requireEditor();
+  if (!(await flagOn("custody.sheets"))) return { error: SHEETS_OFF };
+  const [d] = await db.select({ instrumentId: eventDrafts.instrumentId }).from(eventDrafts).where(eq(eventDrafts.id, draftId));
+  if (!d) return { error: "Not found" };
+  await assertSystemEditable(u, d.instrumentId);
+  const res = await pmSheets.confirmDraft(draftId, fields, transferActor(u));
+  if (res.error) return res;
+  await audit({ actor: u.email, instrumentId: d.instrumentId, entityType: "pm", entityId: res.eventId, action: "confirmed a scanned PM sheet - filed as a procedure run" });
+  rev(d.instrumentId);
+  return res;
+}
+
+export async function submitPmRun(instrumentId: number, input: Omit<pmSheets.RunInput, "surface">): Promise<{ error?: string; eventId?: number }> {
+  const u = await requireEditor();
+  if (!(await flagOn("custody.sheets"))) return { error: SHEETS_OFF };
+  await assertSystemEditable(u, instrumentId);
+  const res = await pmSheets.submitRun(instrumentId, input, transferActor(u));
+  if (res.error) return { error: res.error };
+  await audit({ actor: u.email, instrumentId, entityType: "pm", entityId: res.eventId, action: `filed a PM run - ${input.steps.length} step${input.steps.length === 1 ? "" : "s"}` });
+  rev(instrumentId);
+  return { eventId: res.eventId };
+}
+
+export async function requestCustodianAck(eventId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  if (!(await flagOn("custody.sheets"))) return { error: SHEETS_OFF };
+  const res = await pmSheets.requestAck(eventId, transferActor(u));
+  if (res.error) return { error: res.error };
+  if (res.custodianOrgId != null && res.requestId) {
+    const [e] = await db.select({ instrumentId: systemEvents.instrumentId }).from(systemEvents).where(eq(systemEvents.id, eventId));
+    const [inst] = e ? await db.select({ externalId: instruments.externalId }).from(instruments).where(eq(instruments.id, e.instrumentId)) : [];
+    await notifyAckRequested({
+      to: await ownerAudience(res.custodianOrgId), technicianName: u.name || u.email,
+      externalId: inst?.externalId ?? "", instrumentId: e?.instrumentId ?? 0,
+    });
+  }
+  return {};
+}
+
+export async function signCustodianAck(requestId: number, signerName: string, signerTitle = ""): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const res = await pmSheets.signAck(requestId, signerName, signerTitle, transferActor(u));
+  if (res.error) return res;
+  await audit({ actor: u.email, entityType: "signoff", entityId: requestId, action: `acknowledged a PM as "${signerName.trim()}"` });
+  return {};
+}
+
 // ── Claims: notice, window, silence or objection ────────────────────────────
 // approveClaim moved the pointer on an admin's say-so with the holder never
 // asked. Behind custody.claims a claim is a NOTICE with a window; the rules

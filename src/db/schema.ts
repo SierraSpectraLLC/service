@@ -1913,6 +1913,18 @@ export const signoffs = pgTable("signoffs", {
   revokedAt: timestamp("revoked_at"),
   revokedBy: text("revoked_by").notNull().default(""),
   revokedReason: text("revoked_reason").notNull().default(""),
+  /**
+   * WHO IS SIGNING, AND WHAT THE SIGNATURE IS. `technician` is the person who
+   * did the work; `custodian_ack` is the lab acknowledging it, which never
+   * gates anything. `platform` is true when captured in-app by the signer's
+   * own account - a drawn line on paper does not verify anybody, and the
+   * record says so rather than letting the two read alike. `eventId` ties a
+   * signature to the system_events line it stands behind.
+   */
+  role: text("role").notNull().default("technician"),
+  imageAttachmentId: integer("image_attachment_id"),
+  platform: boolean("platform").notNull().default(true),
+  eventId: integer("event_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("signoffs_instrument_idx").on(t.instrumentId), index("signoffs_asset_idx").on(t.assetId)]);
 
@@ -4971,3 +4983,79 @@ export const eventConfirmations = pgTable("event_confirmations", {
   index("event_confirmations_event_idx").on(t.eventId),
   index("event_confirmations_org_idx").on(t.orgId),
 ]);
+
+/**
+ * A PRINTED SHEET, as an object. Paper and screen are two surfaces for the
+ * same procedure set, and both write the same event - but paper has to come
+ * back, and when it does the reader must know which steps were on it. So a
+ * sheet is minted with a token, a frozen row list and a frozen LAYOUT (the
+ * page geometry the mark reader uses), and the QR on it is a URL carrying the
+ * token. A phone's camera app opens that URL; nothing has to decode a QR.
+ *
+ * Frozen rather than recomputed because a sheet printed in March and scanned
+ * in June must be read against the steps and boxes that were on it, not the
+ * ones the set grew in April. That is the failure mode paper has that a screen
+ * does not, and it is why set_version and layout live on this row.
+ */
+export const sheetInstances = pgTable("sheet_instances", {
+  id: serial("id").primaryKey(),
+  token: text("token").notNull().unique(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  /** Null when the sheet was built from the machine's schedules rather than a published set. */
+  procedureSetId: integer("procedure_set_id").references(() => procedureSets.id, { onDelete: "set null" }),
+  setVersion: integer("set_version").notNull().default(1),
+  /** [{ key, title, unit?, intervalDays?, partNumber? }] - the steps as printed. */
+  rows: jsonb("rows").notNull().default([]),
+  /** The geometry the reader uses. See lib/custody/sheetLayout. */
+  layout: jsonb("layout").notNull().default({}),
+  /** printed | uploaded | confirmed | void */
+  status: text("status").notNull().default("printed"),
+  printedBy: text("printed_by").notNull().default(""),
+  printedAt: timestamp("printed_at").notNull().defaultNow(),
+  /** The scan of the filled sheet, attached privately to the machine. */
+  scanAttachmentId: integer("scan_attachment_id"),
+  eventId: integer("event_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("sheet_instances_instrument_idx").on(t.instrumentId)]);
+
+/**
+ * What a scan PROPOSED, before a person confirmed it.
+ *
+ * The mark reader is deterministic and says how sure it is; the readings are
+ * handwriting and are typed by the technician looking at their own sheet.
+ * Nothing here is history until confirm turns it into a system_events row -
+ * a draft that is wrong costs nothing, an event that is wrong is forever.
+ */
+export const eventDrafts = pgTable("event_drafts", {
+  id: serial("id").primaryKey(),
+  sheetInstanceId: integer("sheet_instance_id").notNull().references(() => sheetInstances.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  /** [{ key, state: done|skip|na|null, confidence: 0..1, fill: { done, skip, na } }] */
+  marks: jsonb("marks").notNull().default([]),
+  /** Whatever the person keyed on confirm: readings, reasons, findings, notes. */
+  fields: jsonb("fields").notNull().default({}),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  confirmedEventId: integer("confirmed_event_id"),
+  confirmedAt: timestamp("confirmed_at"),
+}, (t) => [index("event_drafts_sheet_idx").on(t.sheetInstanceId)]);
+
+/**
+ * The custodian's acknowledgement of a PM, as a REQUEST. Never gates the
+ * event: the work happened whether or not the lab signs, and a signature the
+ * technician has to chase before the record exists is a signature that gets
+ * forged at 5pm. The lab signs in their own session, in their own time, and
+ * the signoffs row it makes carries role 'custodian_ack'.
+ */
+export const custodyAckRequests = pgTable("custody_ack_requests", {
+  id: serial("id").primaryKey(),
+  eventId: integer("event_id").notNull().references(() => systemEvents.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  custodianOrgId: integer("custodian_org_id").references(() => orgs.id, { onDelete: "cascade" }),
+  /** pending | signed | declined */
+  status: text("status").notNull().default("pending"),
+  requestedBy: text("requested_by").notNull().default(""),
+  requestedAt: timestamp("requested_at").notNull().defaultNow(),
+  signoffId: integer("signoff_id").references(() => signoffs.id, { onDelete: "set null" }),
+  decidedAt: timestamp("decided_at"),
+}, (t) => [index("custody_ack_requests_instrument_idx").on(t.instrumentId)]);

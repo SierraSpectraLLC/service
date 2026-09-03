@@ -268,6 +268,23 @@ export async function notifyClaimNotice(opts: {
   }
 }
 
+/** The lab is asked to acknowledge a PM. Their own session, their own time. */
+export async function notifyAckRequested(opts: { to: string[]; technicianName: string; externalId: string; instrumentId: number }) {
+  try {
+    if (!opts.to.length) return;
+    const url = appUrl();
+    const subject = `${opts.externalId}: please acknowledge today's maintenance`;
+    await deliver({
+      to: opts.to, kind: "pm_ack", href: `/instruments/${opts.instrumentId}`,
+      title: subject, subject,
+      body: `<b>${esc(opts.technicianName)}</b> has recorded maintenance on <b>${esc(opts.externalId)}</b> and asks you to acknowledge it. It takes a moment, and it goes on the machine's record in your name - which a signature on paper never does.
+        ${url ? btn(`${url}/instruments/${opts.instrumentId}`, `Acknowledge on ${opts.externalId}`) : ""}`,
+    });
+  } catch (e) {
+    console.error("[notify] pm-ack email failed:", (e as Error).message);
+  }
+}
+
 /** An outside shop is asked to confirm a line of work attributed to it. */
 export async function notifyCountersignRequest(opts: {
   to: string[]; requesterName: string; externalId: string; instrumentId: number; line: string;
