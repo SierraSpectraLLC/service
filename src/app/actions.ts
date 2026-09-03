@@ -68,7 +68,7 @@ import { cleanItem, parseChecklist, serializeChecklist } from "@/lib/checklist";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { completionBlocked, evaluateResult, needsResult, parseAcceptance, resultIsRecorded, serializeAcceptance, type Acceptance } from "@/lib/testResult";
 import { TIME_CATEGORIES } from "@/lib/rates";
-import { sellPrice, EXPENSE_KINDS, LINE_KINDS, linesTotal } from "@/lib/billing";
+import { sellPrice, EXPENSE_KINDS, LINE_KINDS, linesTotal, orderOf } from "@/lib/billing";
 import {
   INVOICE_OUTCOMES, QUOTE_OUTCOMES, invoiceProblem, openingStatus, quoteProblem,
 } from "@/lib/backfill";
@@ -17896,6 +17896,68 @@ export async function deleteProposal(proposalId: number, reason: string): Promis
   });
   revalidatePath(`/money/quotes/${q.id}/proposal`);
   return {};
+}
+
+/**
+ * Put the lines in the order somebody dragged them into.
+ *
+ * Position is what the paper prints in, and the paper argues from top to
+ * bottom - the system first, then the modules it covers, then the labor, then
+ * the travel - so the order a line was typed in is rarely the order it should
+ * read in. Draft only, like every other edit to a line: a client is reading a
+ * sent document, and lines that move under them are lines they cannot cite.
+ *
+ * Modelled on reorderProcedures: the caller's list is walked, ids that are not
+ * this document's are ignored rather than refused (a stale screen is not an
+ * attack), and a line the list left out keeps its place at the end.
+ */
+async function reorderLines(
+  target: "quote" | "invoice", docId: number, orderedIds: number[],
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  if (target === "quote") {
+    const [q] = await db.select().from(quotes).where(eq(quotes.id, docId));
+    if (!q) return { error: "Not found" };
+    if (readTenant(u) !== null && q.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+    if (q.status !== "draft") return { error: `${q.number} has gone out - the client is reading these lines.` };
+    const rows = await db.select().from(quoteLines).where(eq(quoteLines.quoteId, docId));
+    const next = orderOf(rows, orderedIds);
+    for (const { id, position } of next) {
+      await db.update(quoteLines).set({ position }).where(eq(quoteLines.id, id));
+    }
+    if (next.length) {
+      await audit({
+        actor: u.email, entityType: "quote", entityId: q.id, tenantOrgId: q.tenantOrgId,
+        action: `reordered the lines on ${q.number}`,
+      });
+      revQuote(q);
+    }
+    return {};
+  }
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, docId));
+  if (!inv) return { error: "Not found" };
+  if (readTenant(u) !== null && inv.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  if (inv.status !== "draft") return { error: `${inv.number} has been sent - its lines stay as sent.` };
+  const rows = await db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, docId));
+  const next = orderOf(rows, orderedIds);
+  for (const { id, position } of next) {
+    await db.update(invoiceLines).set({ position }).where(eq(invoiceLines.id, id));
+  }
+  if (next.length) {
+    await audit({
+      actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: inv.tenantOrgId,
+      action: `reordered the lines on ${inv.number}`,
+    });
+    revInvoice(inv);
+  }
+  return {};
+}
+
+export async function reorderQuoteLines(quoteId: number, orderedIds: number[]) {
+  return reorderLines("quote", quoteId, orderedIds);
+}
+export async function reorderInvoiceLines(invoiceId: number, orderedIds: number[]) {
+  return reorderLines("invoice", invoiceId, orderedIds);
 }
 
 /** Take a line off a draft quote, with the reason on the record. */
