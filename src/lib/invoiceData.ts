@@ -37,7 +37,7 @@ import {
 import { pmCosts, type PmCompletion, type PmCostBoard } from "@/lib/pmCosting";
 import { isoDay } from "@/lib/partGroups";
 import { getSystemLabels } from "@/lib/systemLabel";
-import { daysToExpiry, stale } from "@/lib/quotes";
+import { daysToExpiry, netCents, stale } from "@/lib/quotes";
 import type { BillingPolicy } from "@/lib/billingPolicy";
 import type { MoneyInput } from "@/lib/digestMoney";
 import { shopToday } from "@/lib/shopday";
@@ -513,8 +513,20 @@ export type FullQuote = {
   lines: (typeof quoteLines.$inferSelect)[];
 };
 
-export const quoteTotal = (q: FullQuote): number =>
+/** The lines, before anything comes off. What the paper calls Subtotal. */
+export const quoteSubtotal = (q: FullQuote): number =>
   q.lines.reduce((n, l) => n + (l.covered ? 0 : Math.round(qtyOf(l) * l.unitCents)), 0);
+
+/**
+ * What the quote is FOR: the lines, less the discount.
+ *
+ * The one place a quote's price comes from. Everything that quotes a figure at
+ * anybody - the client's page, the emailed link, the deposit raised on
+ * approval, the digest, the finance rollup - reads this, so a discount cannot
+ * be visible on one screen and absent from the invoice that follows.
+ */
+export const quoteTotal = (q: FullQuote): number =>
+  netCents(quoteSubtotal(q), q.row);
 
 async function hydrateQuotes(rows: (typeof quotes.$inferSelect)[]): Promise<FullQuote[]> {
   if (!rows.length) return [];

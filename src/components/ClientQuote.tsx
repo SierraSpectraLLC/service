@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { approveQuote, askAboutQuote, declineQuote } from "@/app/actions";
 import { formatCents } from "@/lib/money";
 import { approvalConsequence, declineConsequence } from "@/lib/quotes";
+import { descriptionLines } from "@/lib/billing";
 import { Id } from "@/components/ui";
 
 export type QuoteLine = {
@@ -28,6 +29,7 @@ export type QuoteLine = {
 export default function ClientQuote({
   token, quoteId, number, title, brandName, orgName, expiresOn, depositPct,
   lines, totalCents, onHold, standing, answeredBy, answeredOn, feeClause,
+  greeting = "", attn = "", address = [], discount, comments = "",
 }: {
   token: string;
   quoteId: number;
@@ -44,6 +46,15 @@ export default function ClientQuote({
   answeredBy: string;
   answeredOn: string;
   feeClause: string;
+  /** The sentence at the top, naming them where the shop named somebody. */
+  greeting?: string;
+  attn?: string;
+  /** Where it was addressed, as the lines it prints on. */
+  address?: string[];
+  /** What came off, when something did - see lib/quotes.discountOf. */
+  discount?: { label: string; cents: number };
+  /** The shop's own notes at the bottom. The client reads these before signing. */
+  comments?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -74,6 +85,20 @@ export default function ClientQuote({
         {expiresOn ? ` · good until ${expiresOn}` : ""}
       </div>
 
+      {/* Who it was addressed to, and where it was sent. A client checking a
+          quote against their own PO needs to see both, and the person named is
+          who to ask about it. */}
+      {(attn || address.length > 0) && (
+        <div className="mut t-meta" style={{ marginBottom: 10 }}>
+          {attn && <div>Attn: {attn}</div>}
+          {address.map((l, i) => <div key={i}>{l}</div>)}
+        </div>
+      )}
+
+      {greeting && (
+        <div className="t-body" style={{ fontWeight: 600, marginBottom: 10 }}>{greeting}</div>
+      )}
+
       {lines.map((l) => (
         <div key={l.id} className="row-2" style={{ alignItems: "baseline", padding: "7px 0", borderTop: "1px solid var(--line)" }}>
           <span style={{ flex: 1, minWidth: 0 }}>
@@ -81,11 +106,19 @@ export default function ClientQuote({
                 purchasing system matches on it, and a description alone gives
                 them nothing to raise a PO against. */}
             {l.partNumber && (
-              <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)", marginRight: 6 }}>
+              <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)", marginRight: 8 }}>
                 {l.partNumber}
               </span>
             )}
-            <span className="t-body" style={{ fontWeight: 600 }}>{l.description}</span>
+            <span className="t-body" style={{ fontWeight: 600 }}>{descriptionLines(l.description).head}</span>
+            {/* What is inside the thing being charged for. One charge, several
+                sentences - the modules a system covers, the parts in a kit. */}
+            {descriptionLines(l.description).rest.map((r, i) => (
+              <span key={i} className="mut t-meta"
+                style={{ display: "block", paddingLeft: 12, fontStyle: "italic" }}>
+                {r}
+              </span>
+            ))}
             {(l.detail || l.covered) && (
               <span className="mut t-meta" style={{ display: "block" }}>
                 {l.detail}
@@ -99,10 +132,37 @@ export default function ClientQuote({
         </div>
       ))}
 
-      <div className="row-2" style={{ alignItems: "baseline", padding: "9px 0 0", borderTop: "2px solid var(--line)" }}>
+      {discount && discount.cents > 0 && (
+        <>
+          <div className="row-2" style={{ alignItems: "baseline", padding: "9px 0 0", borderTop: "2px solid var(--line)" }}>
+            <span className="mut t-body" style={{ flex: 1, minWidth: 0 }}>Subtotal</span>
+            <span className="mut t-body">{formatCents(totalCents + discount.cents)}</span>
+          </div>
+          <div className="row-2" style={{ alignItems: "baseline", padding: "3px 0 0" }}>
+            <span className="t-body" style={{ flex: 1, minWidth: 0, color: "var(--t-good-fg)" }}>
+              {discount.label}
+            </span>
+            <b className="t-body" style={{ color: "var(--t-good-fg)" }}>-{formatCents(discount.cents)}</b>
+          </div>
+        </>
+      )}
+      <div className="row-2" style={{
+        alignItems: "baseline", padding: "9px 0 0",
+        borderTop: discount && discount.cents > 0 ? "1px solid var(--line)" : "2px solid var(--line)",
+      }}>
         <span className="t-body" style={{ fontWeight: 700, flex: 1, minWidth: 0 }}>Total</span>
         <b className="t-page">{formatCents(totalCents)}</b>
       </div>
+
+      {/* The shop's own notes. Read BEFORE the approve button, because half of
+          what is in them - what is included, what can be added later - is what
+          the client is actually saying yes to. */}
+      {comments.trim() && (
+        <div style={{ marginTop: 12 }}>
+          <div className="mut t-meta">Comments or special instructions</div>
+          <div className="t-body" style={{ whiteSpace: "pre-wrap" }}>{comments}</div>
+        </div>
+      )}
 
       {done && (
         <div className="t-body" style={{ marginTop: 12, padding: "8px 10px", borderRadius: 8, background: "var(--t-good-bg)", color: "var(--t-good-fg)" }}>

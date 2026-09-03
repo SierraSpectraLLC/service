@@ -7,9 +7,11 @@ import { fmtBytes } from "@/lib/storage";
 import { shopToday } from "@/lib/shopday";
 import {
   asStatementRow, billingContext, creditFor, invoiceForOrg, invoicesForOrg,
-  quoteForOrg, quoteTotal,
+  quoteForOrg, quoteSubtotal, quoteTotal,
 } from "@/lib/invoiceData";
-import { quoteStanding } from "@/lib/quotes";
+import {
+  addressBlock, addressedTo, discountLabel, discountOf, greetingLine, quoteStanding,
+} from "@/lib/quotes";
 import { stripeMode } from "@/lib/stripe";
 import { feeClause } from "@/lib/billingPolicy";
 import { statementFor } from "@/lib/statement";
@@ -208,6 +210,7 @@ async function QuoteShare({ link }: { link: typeof shareLinks.$inferSelect }) {
     creditFor(orgId, today).catch(() => null),
     billingContext(orgId),
   ]);
+  const quoteOff = discountOf(quoteSubtotal(full), full.row);
 
   return (
     <PublicShell brandName={name} tagline={brand.tagline} width={640}>
@@ -226,6 +229,17 @@ async function QuoteShare({ link }: { link: typeof shareLinks.$inferSelect }) {
         answeredBy={full.row.answeredBy}
         answeredOn={full.row.answeredOn ?? ""}
         feeClause={feeClause(ctx.policy)}
+        /* The letter around the table: the sentence naming them, where it was
+           sent, what came off the price and why, and the shop's own notes. All
+           of it composed by lib/quotes, so this page, the shop's page and the
+           spreadsheet say the same thing. */
+        greeting={greetingLine(full.row)}
+        attn={full.row.attn}
+        address={addressBlock(addressedTo(full.row, org ?? null).address)}
+        comments={full.row.note}
+        {...(quoteOff > 0
+          ? { discount: { label: discountLabel(full.row), cents: quoteOff } }
+          : {})}
         lines={full.lines.map((l) => ({
           id: l.id, description: l.description, detail: l.detail, partNumber: l.partNumber,
           qty: l.qty / 1000, unitCents: l.unitCents, covered: l.covered, coveredBy: l.coveredBy,

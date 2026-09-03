@@ -85,6 +85,129 @@ export function stale<T extends { status: string; expiresOn: string }>(
   });
 }
 
+// ---------------------------------------------------------------------------
+// What a quote SAYS, as opposed to what it costs.
+//
+// A quote is a letter with a table in it. The five things below are the letter
+// - who it is addressed to, the sentence at the top, the money taken off, and
+// the shop's own notes at the bottom - and every one of them was, until now,
+// either missing from the record or hard-coded into the Excel template. The
+// shop was retyping them into the spreadsheet after every export.
+// ---------------------------------------------------------------------------
+
+/** The line at the top of the quote when nobody is named. Matches the template. */
+export const HOUSE_GREETING = "Thank you for considering us! Here are the specifics of the job:";
+
+/**
+ * The sentence at the top of the quote, addressed to a person where there is
+ * one.
+ *
+ * "Hideaki, thank you for considering us!" is a different document from "Thank
+ * you for considering us!", and the difference is the whole reason somebody
+ * types a name into a quote. The composed line is NOT stored - it is the name
+ * plus the house sentence - so changing the house sentence changes every quote
+ * that has not overridden it, and a quote that has overridden it keeps exactly
+ * what somebody wrote.
+ */
+export function greetingLine(q: { attn?: string; greeting?: string }): string {
+  const own = (q.greeting ?? "").trim();
+  if (own) return own;
+  const who = (q.attn ?? "").trim();
+  if (!who) return HOUSE_GREETING;
+  // Their first name, not their whole title block: the address block says who
+  // they are, and this line is meant to read like somebody talking.
+  const first = who.split(/[\s,]+/)[0];
+  return `${first}, thank you for considering us! Here are the specifics of your quote:`;
+}
+
+/**
+ * Where the quote is addressed. The client's billing address unless this quote
+ * says otherwise.
+ *
+ * Stored per quote only when it DIFFERS, which is the same discipline the rest
+ * of this module follows: a quote to a lab at a site that is not their accounts
+ * payable address has to be able to say so, and a quote to the usual address
+ * must not freeze a copy of it that goes stale the day they move.
+ */
+export function addressedTo(
+  q: { attn?: string; clientAddress?: string },
+  org: { name: string; billingAddress: string } | null,
+): { name: string; attn: string; address: string; ownAddress: boolean } {
+  const own = (q.clientAddress ?? "").trim();
+  return {
+    name: org?.name ?? "",
+    attn: (q.attn ?? "").trim(),
+    address: own || (org?.billingAddress ?? "").trim(),
+    ownAddress: own.length > 0,
+  };
+}
+
+/** An address as the lines it prints on, blanks dropped. */
+export const addressBlock = (address: string): string[] =>
+  address.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+/**
+ * How much comes off, in cents.
+ *
+ * Two ways to say it because a shop says it both ways: "10% off" on a stocking
+ * order and "$12,000 off" on a pooled parts allocation. A PERCENTAGE WINS when
+ * both are set - one rule, stated here, rather than two screens each guessing -
+ * and the answer is clamped to the subtotal, because a discount larger than the
+ * quote is a typo and a negative total is not an offer anybody can accept.
+ */
+export function discountOf(
+  subtotalCents: number,
+  d: { discountPct?: number; discountCents?: number },
+): number {
+  if (subtotalCents <= 0) return 0;
+  const pct = Math.max(0, Math.min(100, Math.round(d.discountPct ?? 0)));
+  const flat = Math.max(0, Math.round(d.discountCents ?? 0));
+  const off = pct > 0 ? Math.round((subtotalCents * pct) / 100) : flat;
+  return Math.min(subtotalCents, off);
+}
+
+/** What is actually owed: the lines, less what came off. Never below zero. */
+export const netCents = (
+  subtotalCents: number, d: { discountPct?: number; discountCents?: number },
+): number => Math.max(0, subtotalCents - discountOf(subtotalCents, d));
+
+/**
+ * What the discount is CALLED on the paper.
+ *
+ * A number taken off a client's quote with no reason beside it is a question
+ * they have to phone in to ask - and the answer is usually a concession the
+ * shop wants credit for. The percentage says itself; a flat amount needs the
+ * label somebody typed, and falls back to the plain word.
+ */
+export function discountLabel(d: {
+  discountPct?: number; discountCents?: number; discountLabel?: string;
+}): string {
+  const own = (d.discountLabel ?? "").trim();
+  const pct = Math.max(0, Math.round(d.discountPct ?? 0));
+  if (own) return pct > 0 ? `${own} (${pct}%)` : own;
+  return pct > 0 ? `Discount (${pct}%)` : "Discount";
+}
+
+/**
+ * The comment block, as the rows the paper has for it.
+ *
+ * The shop's own words come first and the standing terms - the deposit, the
+ * expiry - go after them, because the terms are the same on every quote and
+ * the comments are why this one is different. The last row is held for the
+ * terms when there are any, so a long note cannot silently push the deposit
+ * off a document somebody is about to sign.
+ */
+export function commentRows(note: string, terms: string[], max: number): string[] {
+  const said = (note ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const keep = terms.slice(0, Math.max(0, max - 1));
+  const room = Math.max(0, max - keep.length);
+  const mine = said.slice(0, room);
+  // A note that did not fit says so, rather than ending mid-thought: the reader
+  // needs to know there is more, and where to read it.
+  if (said.length > room && room > 0) mine[room - 1] = `${mine[room - 1]} ...`;
+  return [...mine, ...keep];
+}
+
 /**
  * The deposit due on approval, in cents.
  *

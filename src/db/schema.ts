@@ -3665,6 +3665,28 @@ export const quotes = pgTable("quotes", {
   expiresOn: text("expires_on").notNull().default(""),
   /** Percent due on approval. Zero means nothing is owed until the work is done. */
   depositPct: integer("deposit_pct").notNull().default(0),
+  /**
+   * The letter around the table - see lib/quotes.
+   *
+   * `attn` is the person it is addressed to, which personalizes the line at the
+   * top; `greeting` overrides that line outright when somebody wants their own
+   * words. `clientAddress` is stored ONLY when this quote goes somewhere other
+   * than the client's accounts-payable address (orgs.billing_address) - a copy
+   * of the usual one would go stale the day they move.
+   */
+  attn: text("attn").notNull().default(""),
+  greeting: text("greeting").notNull().default(""),
+  clientAddress: text("client_address").notNull().default(""),
+  /**
+   * What comes off the subtotal. A percentage OR a flat amount - a shop says it
+   * both ways - resolved by exactly one function, lib/quotes.discountOf, where
+   * the rule that a percentage wins is written down once. The label is what the
+   * client reads beside the number: a concession with no reason next to it is a
+   * phone call.
+   */
+  discountPct: integer("discount_pct").notNull().default(0),
+  discountCents: integer("discount_cents").notNull().default(0),
+  discountLabel: text("discount_label").notNull().default(""),
   /** Set when the client answers, with their own words in `answerNote`. */
   answeredOn: text("answered_on"),
   answeredBy: text("answered_by").notNull().default(""),

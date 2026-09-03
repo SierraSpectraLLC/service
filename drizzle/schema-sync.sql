@@ -4267,3 +4267,21 @@ ALTER TABLE "invoice_lines" ADD COLUMN IF NOT EXISTS "part_number" text NOT NULL
 ALTER TABLE "invoice_lines" ADD COLUMN IF NOT EXISTS "unit" text NOT NULL DEFAULT '';
 ALTER TABLE "quote_lines" ADD COLUMN IF NOT EXISTS "part_number" text NOT NULL DEFAULT '';
 ALTER TABLE "quote_lines" ADD COLUMN IF NOT EXISTS "unit" text NOT NULL DEFAULT '';
+
+-- The letter a quote is, around the table it carries.
+--
+-- Five things the shop was retyping into the exported spreadsheet after every
+-- send, because the record had nowhere to put them: who it is addressed to,
+-- the greeting that names them, the address it goes to when that is not
+-- accounts payable, what came off the price, and why.
+--
+-- The discount is two columns because a shop says it two ways - "10% off" and
+-- "$12,000 off" - and exactly one function (lib/quotes.discountOf) decides
+-- which applies, so no screen has to guess. Both default to zero, which is
+-- every quote already written: no discount, total unchanged.
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "attn" text NOT NULL DEFAULT '';
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "greeting" text NOT NULL DEFAULT '';
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "client_address" text NOT NULL DEFAULT '';
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "discount_pct" integer NOT NULL DEFAULT 0;
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "discount_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "discount_label" text NOT NULL DEFAULT '';

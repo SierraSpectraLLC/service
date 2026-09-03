@@ -10,12 +10,14 @@ import { modelOptions } from "@/lib/pmKitData";
 import { awardOfQuote, quoteHasPeriods } from "@/lib/awardData";
 import { formatCents } from "@/lib/money";
 import { shopMonthDay, shopToday } from "@/lib/shopday";
-import { billingContext, quoteById, quoteTotal } from "@/lib/invoiceData";
+import { billingContext, quoteById, quoteSubtotal, quoteTotal } from "@/lib/invoiceData";
 import { feeClause } from "@/lib/billingPolicy";
 import {
-  daysToExpiry, depositCents, quoteStanding, STANDING_LABEL, STANDING_TONE,
+  daysToExpiry, depositCents, discountLabel, discountOf, quoteStanding,
+  STANDING_LABEL, STANDING_TONE,
 } from "@/lib/quotes";
 import QuoteActions from "@/components/QuoteActions";
+import QuoteLetterCard from "@/components/QuoteLetterCard";
 import CoverageEstimateBuilder from "@/components/CoverageEstimateBuilder";
 import AwardQuoteButton from "@/components/AwardQuoteButton";
 import InvoiceLineList from "@/components/InvoiceLineList";
@@ -54,13 +56,16 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
   ]);
 
   const standing = quoteStanding(row, today);
+  const subtotal = quoteSubtotal(full);
   const total = quoteTotal(full);
+  const off = discountOf(subtotal, row);
   const deposit = depositCents(total, row.depositPct);
   const left = daysToExpiry(row.expiresOn, today);
   const clause = feeClause(ctx.policy);
 
   const stats: HeroStat[] = [
     { label: "total", value: formatCents(total) },
+    ...(off > 0 ? [{ label: `${discountLabel(row).toLowerCase()} off ${formatCents(subtotal)}`, value: `-${formatCents(off)}`, tone: "good" as const }] : []),
     ...(deposit > 0 ? [{ label: `deposit on approval (${row.depositPct}%)`, value: formatCents(deposit) }] : []),
     ...(standing === "awaiting" && left !== null
       ? [{ label: left >= 0 ? "days left" : "days past expiry", value: Math.abs(left), tone: left <= 7 ? "warn" as const : undefined }]
@@ -80,6 +85,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
         meta={
           <>
             {wo && <><Link href={`/work/${wo.id}`}><Id>{wo.number}</Id></Link> · </>}
+            {row.attn ? `attn ${row.attn} · ` : ""}
             {row.sentOn ? `sent ${row.sentOn}` : "not sent yet"}
             {row.expiresOn ? ` · expires ${row.expiresOn}` : ""}
             {row.answeredOn ? ` · ${standing} ${row.answeredOn} by ${row.answeredBy}` : ""}
@@ -118,6 +124,22 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
         )}
       </div>
 
+      {/* Everything on the quote that is not a line item: who it is addressed
+          to, the sentence at the top, what came off the price, and the shop's
+          own notes at the bottom. See lib/quotes. */}
+      <QuoteLetterCard
+        quoteId={id}
+        editable={row.status === "draft"}
+        subtotalCents={subtotal}
+        orgName={org?.name ?? ""}
+        billingAddress={org?.billingAddress ?? ""}
+        letter={{
+          attn: row.attn, greeting: row.greeting, clientAddress: row.clientAddress,
+          note: row.note, discountPct: row.discountPct, discountCents: row.discountCents,
+          discountLabel: row.discountLabel,
+        }}
+      />
+
       <InvoiceLineList
         editable={row.status === "draft"}
         target={{ kind: "quote", id }}
@@ -125,6 +147,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
            after it will price the same part: cost plus the shop's markup, one
            formula (lib/billing.sellPrice), read off this client's policy. */
         partsMarkupBps={ctx.policy.partsMarkupBps}
+        {...(off > 0 ? { discount: { label: discountLabel(row), cents: off } } : {})}
         lines={full.lines.map((l) => ({
           id: l.id, kind: l.kind, description: l.description, detail: l.detail,
           partNumber: l.partNumber, unit: l.unit,

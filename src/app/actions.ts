@@ -86,7 +86,9 @@ import { cadenceOf, checkStipend, stipendCadenceLabel } from "@/lib/stipends";
 import { poProblem, usablePoLines } from "@/lib/backfill";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
-import { answerable, depositCents, quoteStanding } from "@/lib/quotes";
+import {
+  addressBlock, answerable, depositCents, discountOf, netCents, quoteStanding,
+} from "@/lib/quotes";
 import { feeClause, resolvePolicy } from "@/lib/billingPolicy";
 import { linkState } from "@/lib/dropShare";
 import type { BillingPolicy } from "@/lib/billingPolicy";
@@ -16193,6 +16195,24 @@ export async function draftQuote(
   throw last;
 }
 
+/**
+ * A quote's money, from its own rows: the subtotal, what came off, the net.
+ *
+ * Three code paths used to sum the lines inline - the page, the send, the
+ * approval - which was harmless while a quote was only its lines and is not
+ * once a discount exists. One function, so the number the client reads, the
+ * number in the email, and the number the deposit is a percentage of cannot
+ * come apart.
+ */
+function quoteMoney(
+  q: { discountPct: number; discountCents: number },
+  lines: { covered: boolean; qty: number; unitCents: number }[],
+): { subtotal: number; discount: number; total: number } {
+  const subtotal = lines.reduce(
+    (n, l) => n + (l.covered ? 0 : Math.round((l.qty / 1000) * l.unitCents)), 0);
+  return { subtotal, discount: discountOf(subtotal, q), total: netCents(subtotal, q) };
+}
+
 /** Open the link and mail it. The client answers on the link, not by reply. */
 export async function sendQuote(id: number): Promise<{ error?: string; token?: string; warning?: string }> {
   const u = await requireStaff();
@@ -16216,7 +16236,9 @@ export async function sendQuote(id: number): Promise<{ error?: string; token?: s
   await db.update(quotes).set({ status: "sent", sentOn: today, updatedAt: new Date() })
     .where(eq(quotes.id, id));
 
-  const total = lines.reduce((n, l) => n + (l.covered ? 0 : Math.round((l.qty / 1000) * l.unitCents)), 0);
+  // The discounted figure, because that is the one the client is being sent -
+  // netCents is what the page, the paper and the deposit all read.
+  const total = quoteMoney(q, lines).total;
   await audit({
     actor: u.email, entityType: "quote", entityId: id, tenantOrgId: q.tenantOrgId,
     action: `sent ${q.number} to ${org?.name ?? "the client"}: ${formatCents(total)}, expires ${q.expiresOn}`,
@@ -16315,7 +16337,10 @@ async function applyQuoteApproval(
   if (!who) return { error: "Type your name to sign." };
 
   const lines = await db.select().from(quoteLines).where(eq(quoteLines.quoteId, q.id));
-  const total = lines.reduce((n, l) => n + (l.covered ? 0 : Math.round((l.qty / 1000) * l.unitCents)), 0);
+  // The deposit is a percentage of what they are ACTUALLY agreeing to pay. Off
+  // the subtotal it would quietly charge a deposit on money the shop already
+  // took off, which is the first thing a client checks.
+  const total = quoteMoney(q, lines).total;
   const deposit = depositCents(total, q.depositPct);
   const credit = await creditFor(q.orgId, today).catch(() => null);
 
@@ -16889,7 +16914,12 @@ export type ManualLine = {
 
 function cleanManualLine(data: ManualLine):
   { error: string } | Required<ManualLine> {
-  const description = data.description.trim();
+  /* Newlines SURVIVE. One charge is often several sentences - the system, and
+     then the seven modules it covers - and the alternative the shop had was
+     seven $0 rows typed by hand. Bounded rather than unbounded, and trimmed at
+     both ends so a stray blank line is not a blank row on the paper. See
+     descriptionLines in lib/billing, which is what reads them back. */
+  const description = data.description.replace(/\r\n/g, "\n").trim().slice(0, 2000);
   if (!description) return { error: "Say what the charge is for" };
   if (!(MANUAL_LINE_KINDS as readonly string[]).includes(data.kind)) {
     return { error: "Pick what kind of charge it is" };
@@ -17482,6 +17512,73 @@ export async function addInvoiceLine(
   return {};
 }
 
+/**
+ * The letter around the table: who it is addressed to, the line at the top, the
+ * discount, and the shop's own notes at the bottom.
+ *
+ * Draft only, for the same reason the line editor is: a quote that has gone out
+ * reads as sent, and rewriting the greeting or the discount behind the client
+ * is not an edit anybody should be able to make quietly.
+ *
+ * The audit names what CHANGED rather than restating the whole form - a history
+ * that says "edited the quote" fifteen times is a history nobody reads.
+ */
+export async function updateQuoteLetter(quoteId: number, data: {
+  attn?: string;
+  greeting?: string;
+  clientAddress?: string;
+  note?: string;
+  discountPct?: number;
+  discountCents?: number;
+  discountLabel?: string;
+}): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (!q) return { error: "Not found" };
+  if (readTenant(u) !== null && q.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  if (q.status !== "draft") return { error: `${q.number} has gone out - it reads as sent.` };
+
+  const pct = Math.max(0, Math.min(100, Math.round(Number(data.discountPct) || 0)));
+  // A percentage and an amount are two ways to say one thing, and lib/quotes
+  // says the percentage wins. Clearing the other here means the row cannot hold
+  // a contradiction for some later reader to resolve differently.
+  const cents = pct > 0 ? 0 : Math.max(0, Math.round(Number(data.discountCents) || 0));
+  const next = {
+    ...(data.attn !== undefined ? { attn: data.attn.trim().slice(0, 120) } : {}),
+    ...(data.greeting !== undefined ? { greeting: data.greeting.trim().slice(0, 300) } : {}),
+    ...(data.clientAddress !== undefined
+      ? { clientAddress: addressBlock(data.clientAddress).slice(0, 4).join("\n").slice(0, 400) } : {}),
+    ...(data.note !== undefined ? { note: data.note.slice(0, 2000) } : {}),
+    ...(data.discountPct !== undefined || data.discountCents !== undefined
+      ? { discountPct: pct, discountCents: cents } : {}),
+    ...(data.discountLabel !== undefined ? { discountLabel: data.discountLabel.trim().slice(0, 120) } : {}),
+  };
+  const before = q as unknown as Record<string, unknown>;
+  const changed = Object.keys(next).filter((k) => before[k] !== (next as Record<string, unknown>)[k]);
+  if (!changed.length) return {};
+  await db.update(quotes).set({ ...next, updatedAt: new Date() }).where(eq(quotes.id, quoteId));
+
+  const said: string[] = [];
+  if (changed.includes("attn")) said.push(next.attn ? `addressed to ${next.attn}` : "addressed to nobody in particular");
+  if (changed.includes("greeting")) said.push(next.greeting ? "its own greeting" : "the house greeting");
+  if (changed.includes("clientAddress")) {
+    said.push(next.clientAddress ? "a delivery address of its own" : "the client's billing address");
+  }
+  if (changed.includes("discountPct") || changed.includes("discountCents")) {
+    said.push(pct > 0 ? `${pct}% off`
+      : cents > 0 ? `${formatCents(cents)} off`
+        : "no discount");
+  }
+  if (changed.includes("discountLabel")) said.push(`the discount reads "${next.discountLabel}"`);
+  if (changed.includes("note")) said.push("comments for the client");
+  await audit({
+    actor: u.email, entityType: "quote", entityId: quoteId, tenantOrgId: q.tenantOrgId,
+    action: `${q.number}: ${said.join(", ")}`,
+  });
+  revQuote(q);
+  return {};
+}
+
 /** Type a line onto a draft quote. */
 export async function addQuoteLine(
   quoteId: number, data: ManualLine,
@@ -17508,6 +17605,58 @@ export async function addQuoteLine(
   revQuote(q);
   return {};
 }
+
+/**
+ * Rewrite what a line SAYS. Not what it costs.
+ *
+ * The description is the one part of a line that is prose, and prose gets
+ * revised: a system's module list grows, a client asks what "PM kit" covers.
+ * Money is deliberately not editable here - a price that changed is a line
+ * removed and re-added, which leaves the reason on the record where a silent
+ * edit to a number on a client's quote would not.
+ */
+async function setLineDescription(
+  target: "quote" | "invoice", lineId: number, description: string,
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const text = description.replace(/\r\n/g, "\n").trim().slice(0, 2000);
+  if (!text) return { error: "Say what the charge is for" };
+  if (target === "quote") {
+    const [line] = await db.select().from(quoteLines).where(eq(quoteLines.id, lineId));
+    if (!line) return { error: "Not found" };
+    const [q] = await db.select().from(quotes).where(eq(quotes.id, line.quoteId));
+    if (!q) return { error: "Not found" };
+    if (q.status !== "draft") return { error: `${q.number} has gone out - the client is reading these lines.` };
+    if (line.description === text) return {};
+    await db.update(quoteLines).set({ description: text }).where(eq(quoteLines.id, lineId));
+    await audit({
+      actor: u.email, entityType: "quote", entityId: q.id, tenantOrgId: q.tenantOrgId,
+      action: `reworded a line on ${q.number}: ${text.split("\n")[0]}`,
+      field: "description", oldValue: line.description, newValue: text,
+    });
+    revQuote(q);
+    return {};
+  }
+  const [line] = await db.select().from(invoiceLines).where(eq(invoiceLines.id, lineId));
+  if (!line) return { error: "Not found" };
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, line.invoiceId));
+  if (!inv) return { error: "Not found" };
+  if (inv.status !== "draft") return { error: `${inv.number} has been sent - its lines stay as sent.` };
+  if (line.description === text) return {};
+  await db.update(invoiceLines).set({ description: text }).where(eq(invoiceLines.id, lineId));
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: inv.tenantOrgId,
+    action: `reworded a line on ${inv.number}: ${text.split("\n")[0]}`,
+    field: "description", oldValue: line.description, newValue: text,
+  });
+  revInvoice(inv);
+  return {};
+}
+
+export const setQuoteLineDescription = (lineId: number, description: string) =>
+  setLineDescription("quote", lineId, description);
+export const setInvoiceLineDescription = (lineId: number, description: string) =>
+  setLineDescription("invoice", lineId, description);
 
 /** Take a line off a draft quote, with the reason on the record. */
 export async function removeQuoteLine(lineId: number, reason: string): Promise<{ error?: string }> {

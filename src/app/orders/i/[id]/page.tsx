@@ -6,6 +6,7 @@ import { orgs, shareLinks } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { maySeeOrgMoney } from "@/lib/tenancy";
 import { isStaffRole } from "@/lib/tenants";
+import { descriptionLines } from "@/lib/billing";
 import { formatCents } from "@/lib/money";
 import { shopMonthDay, shopToday } from "@/lib/shopday";
 import { asStatementRow, invoiceForOrg, qtyOf } from "@/lib/invoiceData";
@@ -74,7 +75,11 @@ export default async function ClientOrderPage({ params }: { params: Promise<{ id
         {full.lines.map((l) => (
           <div key={l.id} className="row-2" style={{ alignItems: "baseline", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
             <span style={{ flex: 1, minWidth: 0 }}>
-              <span className="t-body" style={{ fontWeight: 600 }}>{l.description}</span>
+              <span className="t-body" style={{ fontWeight: 600 }}>{descriptionLines(l.description).head}</span>
+              {descriptionLines(l.description).rest.map((r, i) => (
+                <span key={i} className="mut t-meta"
+                  style={{ display: "block", paddingLeft: 12, fontStyle: "italic" }}>{r}</span>
+              ))}
               {l.detail && <span className="mut t-meta" style={{ display: "block" }}>{l.detail}</span>}
             </span>
             {qtyOf(l) !== 1 && <span className="mut t-small">× {qtyOf(l)}</span>}

@@ -8,8 +8,9 @@ import { maySeeOrgMoney } from "@/lib/tenancy";
 import { isStaffRole } from "@/lib/tenants";
 import { formatCents } from "@/lib/money";
 import { shopMonthDay, shopToday } from "@/lib/shopday";
-import { qtyOf, quoteForOrg, quoteTotal } from "@/lib/invoiceData";
-import { quoteStanding } from "@/lib/quotes";
+import { qtyOf, quoteForOrg, quoteSubtotal, quoteTotal } from "@/lib/invoiceData";
+import { descriptionLines } from "@/lib/billing";
+import { discountLabel, discountOf, greetingLine, quoteStanding } from "@/lib/quotes";
 import { quoteOrderStatus, quoteSteps } from "@/lib/clientOrders";
 import OrderSteps from "@/components/OrderSteps";
 import ClientApprove from "@/components/ClientApprove";
@@ -38,6 +39,8 @@ export default async function ClientQuotePage({ params }: { params: Promise<{ id
   const standing = quoteStanding(row, today);
   const status = quoteOrderStatus(row, standing);
   const placedOn = shopMonthDay(row.createdAt);
+  const subtotal = quoteSubtotal(full);
+  const off = discountOf(subtotal, row);
   const total = quoteTotal(full);
 
   return (
@@ -75,17 +78,27 @@ export default async function ClientQuotePage({ params }: { params: Promise<{ id
         )}
       </div>
 
+      {greetingLine(row) && row.attn && (
+        <div className="card">
+          <div className="t-body" style={{ fontWeight: 600 }}>{greetingLine(row)}</div>
+        </div>
+      )}
+
       <Panel title="Items" count={full.lines.length}>
         {full.lines.map((l) => (
           <div key={l.id} className="row-2" style={{ alignItems: "baseline", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
             <span style={{ flex: 1, minWidth: 0 }}>
               {/* The number they would raise a PO against. */}
               {l.partNumber && (
-                <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)", marginRight: 6 }}>
+                <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)", marginRight: 8 }}>
                   {l.partNumber}
                 </span>
               )}
-              <span className="t-body" style={{ fontWeight: 600 }}>{l.description}</span>
+              <span className="t-body" style={{ fontWeight: 600 }}>{descriptionLines(l.description).head}</span>
+              {descriptionLines(l.description).rest.map((r, i) => (
+                <span key={i} className="mut t-meta"
+                  style={{ display: "block", paddingLeft: 12, fontStyle: "italic" }}>{r}</span>
+              ))}
               {l.detail && <span className="mut t-meta" style={{ display: "block" }}>{l.detail}</span>}
             </span>
             {qtyOf(l) !== 1 && <span className="mut t-small">× {qtyOf(l)}</span>}
@@ -100,13 +113,34 @@ export default async function ClientQuotePage({ params }: { params: Promise<{ id
             </b>
           </div>
         ))}
+        {off > 0 && (
+          <>
+            <div className="row-2" style={{ alignItems: "baseline", padding: "9px 0 0", borderTop: "2px solid var(--line)" }}>
+              <span className="mut t-body" style={{ flex: 1 }}>Subtotal</span>
+              <span className="mut t-body">{formatCents(subtotal)}</span>
+            </div>
+            <div className="row-2" style={{ alignItems: "baseline", padding: "3px 0 0" }}>
+              <span className="t-body" style={{ flex: 1, color: "var(--t-good-fg)" }}>{discountLabel(row)}</span>
+              <b className="mono t-body" style={{ color: "var(--t-good-fg)" }}>-{formatCents(off)}</b>
+            </div>
+          </>
+        )}
         {total > 0 && (
-          <div className="row-2" style={{ alignItems: "baseline", padding: "9px 0 0", borderTop: "2px solid var(--line)" }}>
+          <div className="row-2" style={{
+            alignItems: "baseline", padding: "9px 0 0",
+            borderTop: off > 0 ? "1px solid var(--line)" : "2px solid var(--line)",
+          }}>
             <span className="t-body" style={{ fontWeight: 700, flex: 1 }}>Total</span>
             <b className="mono t-body">{formatCents(total)}</b>
           </div>
         )}
       </Panel>
+
+      {row.note.trim() && (
+        <Panel title="Comments or special instructions">
+          <div className="t-body" style={{ whiteSpace: "pre-wrap" }}>{row.note}</div>
+        </Panel>
+      )}
     </div>
   );
 }

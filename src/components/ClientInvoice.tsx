@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { startPayment } from "@/app/actions";
+import { descriptionLines } from "@/lib/billing";
 import { formatCents } from "@/lib/money";
 import { payAmount } from "@/lib/stripe";
 import { Id, Tabs } from "@/components/ui";
@@ -91,7 +92,11 @@ export default function ClientInvoice({ brandName, orgName, apEmail, invoice, st
           {invoice.lines.map((l) => (
             <div key={l.id} className="row-2" style={{ alignItems: "baseline", padding: "7px 0", borderTop: "1px solid var(--line)" }}>
               <span style={{ flex: 1, minWidth: 0 }}>
-                <span className="t-body" style={{ fontWeight: 600 }}>{l.description}</span>
+                <span className="t-body" style={{ fontWeight: 600 }}>{descriptionLines(l.description).head}</span>
+                {descriptionLines(l.description).rest.map((r, i) => (
+                  <span key={i} className="mut t-meta"
+                    style={{ display: "block", paddingLeft: 12, fontStyle: "italic" }}>{r}</span>
+                ))}
                 {(l.detail || l.covered) && (
                   <span className="mut t-meta" style={{ display: "block" }}>
                     {l.detail}

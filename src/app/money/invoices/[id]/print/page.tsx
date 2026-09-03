@@ -5,6 +5,7 @@ import { orgs, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { brandForTenant } from "@/lib/brand";
+import { descriptionLines } from "@/lib/billing";
 import { formatCents } from "@/lib/money";
 import { shopMonthDay, shopToday } from "@/lib/shopday";
 import { feeClause } from "@/lib/billingPolicy";
@@ -85,7 +86,13 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
           {full.lines.map((l) => (
             <tr key={l.id}>
               <td style={{ padding: "6px 8px 6px 0", borderBottom: "1px solid var(--line)" }}>
-                <span className="t-body" style={{ fontWeight: 600 }}>{l.description}</span>
+                <span className="t-body" style={{ fontWeight: 600 }}>{descriptionLines(l.description).head}</span>
+                {/* What is inside the thing being charged for, printed under it
+                    the way the shop's own paper prints it. */}
+                {descriptionLines(l.description).rest.map((r, i) => (
+                  <span key={i} className="mut t-meta"
+                    style={{ display: "block", paddingLeft: 12, fontStyle: "italic" }}>{r}</span>
+                ))}
                 {(l.detail || l.covered) && (
                   <span className="mut t-meta" style={{ display: "block" }}>
                     {l.detail}
