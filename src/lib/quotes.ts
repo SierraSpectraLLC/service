@@ -189,6 +189,49 @@ export function discountLabel(d: {
 }
 
 /**
+ * How many rows the specifics block has, per column.
+ *
+ * Seven, because that is what the template gives it - rows 17 to 23, two
+ * columns - and row 24 is the table's header. A block that overflowed would
+ * not wrap, it would land on "Description | Part Num. | Quantity". So the cap
+ * is a fact about the paper, and the editor says when somebody is over it
+ * rather than the export quietly dropping the last two lines.
+ */
+export const SPEC_ROWS = 7;
+
+/** One row of the specifics block: a heading, or a point under one. */
+export type SpecRow = { text: string; sub: boolean };
+
+/**
+ * The block under the greeting, as the rows it prints on.
+ *
+ * The one part of the shop's own quote that carried the SHAPE of the offer -
+ * "Full-Service Unlimited Contract for:" and then the two systems it covers,
+ * beside "Unlimited Emergency Service Visits" and what that means. Fourteen
+ * cells in the template, one of which anything ever wrote to.
+ *
+ * Two marks, the same two the proposal's sections use, because somebody typing
+ * into one box should not have to remember which box they are in: a line
+ * starting "-" is a point under the heading above it, and anything else is a
+ * heading. Nothing else - no bold syntax, no nesting. A quote is not a document
+ * anybody should be learning a markup language to write.
+ */
+export function specRows(text: string, max = SPEC_ROWS): SpecRow[] {
+  return (text ?? "").split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => (/^[-•*]\s*/.test(l)
+      ? { text: l.replace(/^[-•*]\s*/, "").trim(), sub: true }
+      : { text: l, sub: false }))
+    .filter((r) => r.text)
+    .slice(0, max);
+}
+
+/** How many lines the paper cannot take. Zero when it all fits. */
+export const specOverflow = (text: string, max = SPEC_ROWS): number =>
+  Math.max(0, specRows(text, Number.MAX_SAFE_INTEGER).length - max);
+
+/**
  * The comment block, as the rows the paper has for it.
  *
  * The shop's own words come first and the standing terms - the deposit, the

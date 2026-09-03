@@ -4378,3 +4378,18 @@ BEGIN
       FOREIGN KEY ("proposal_id") REFERENCES "proposals"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- The specifics block: the shape of the offer, under the greeting.
+--
+-- Fourteen cells in the quote template - rows 17 to 23, two columns - of which
+-- exactly one was ever written to (B17, the quote's title). The rest is where
+-- the shop writes what the contract actually covers: "Full-Service Unlimited
+-- Contract for:" and the two systems under it, beside "Unlimited Emergency
+-- Service Visits" and what that means. It was typed into the exported file by
+-- hand, every time.
+--
+-- A line is a heading; a line starting "-" is a point under it. Seven rows per
+-- column because row 24 is the table's header and a block that overflowed would
+-- print on top of it - see SPEC_ROWS in lib/quotes.
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "specs_left" text NOT NULL DEFAULT '';
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "specs_right" text NOT NULL DEFAULT '';

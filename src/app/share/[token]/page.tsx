@@ -10,7 +10,7 @@ import {
   quoteForOrg, quoteSubtotal, quoteTotal,
 } from "@/lib/invoiceData";
 import {
-  addressBlock, addressedTo, discountLabel, discountOf, greetingLine, quoteStanding,
+  addressBlock, addressedTo, discountLabel, discountOf, greetingLine, quoteStanding, specRows,
 } from "@/lib/quotes";
 import { stripeMode } from "@/lib/stripe";
 import { feeClause } from "@/lib/billingPolicy";
@@ -237,6 +237,7 @@ async function QuoteShare({ link }: { link: typeof shareLinks.$inferSelect }) {
         attn={full.row.attn}
         address={addressBlock(addressedTo(full.row, org ?? null).address)}
         comments={full.row.note}
+        specs={{ left: specRows(full.row.specsLeft), right: specRows(full.row.specsRight) }}
         {...(quoteOff > 0
           ? { discount: { label: discountLabel(full.row), cents: quoteOff } }
           : {})}

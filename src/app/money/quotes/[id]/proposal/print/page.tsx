@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
@@ -8,10 +9,11 @@ import { isStaffRole } from "@/lib/tenants";
 import { brandForTenant } from "@/lib/brand";
 import { shopToday } from "@/lib/shopday";
 import { quoteById } from "@/lib/invoiceData";
-import { addressedTo, addressBlock } from "@/lib/quotes";
+import { addressedTo } from "@/lib/quotes";
 import { longDate } from "@/lib/demandLetter";
 import { proposalBlocks } from "@/lib/proposal";
 import { proposalForQuote, sectionRows, systemRows, tierRows } from "@/lib/proposalData";
+import { docContactLine } from "@/lib/xlsxDocData";
 import PrintButton from "@/components/PrintButton";
 import { PrintHeader } from "@/components/ui";
 
@@ -59,7 +61,7 @@ export default async function ProposalPrintPage({ params }: { params: Promise<{ 
   });
 
   return (
-    <div className="container" style={{ maxWidth: 760 }}>
+    <div className="container doc">
       <div className="crumb no-print">
         <Link href="/money/quotes">Quotes</Link> ›{" "}
         <Link href={`/money/quotes/${id}`}>{full.row.number}</Link> ›{" "}
@@ -77,118 +79,85 @@ export default async function ProposalPrintPage({ params }: { params: Promise<{ 
       {blocks.map((b, i) => {
         if (b.kind === "title") {
           return (
-            <div key={i} style={{ marginBottom: 16 }}>
-              <h1 className="page-title">{b.text}</h1>
-              {b.sub && <div className="mut t-body" style={{ marginTop: 4 }}>{b.sub}</div>}
+            <div key={i}>
+              <h1 className="doc-title">{b.text}</h1>
+              {b.sub && <div className="doc-subtitle">{b.sub}</div>}
             </div>
           );
         }
         if (b.kind === "facts") {
           return (
-            <table key={i} className="t-body"
-              style={{ width: "100%", borderCollapse: "collapse", marginBottom: 24 }}>
+            <table key={i} className="doc-facts">
               <tbody>
                 {/* Two pairs to a row, the way the shop's own header table reads. */}
                 {Array.from({ length: Math.ceil(b.rows.length / 2) }, (_, r) => (
                   <tr key={r}>
-                    {[b.rows[r * 2], b.rows[r * 2 + 1]].map((cell, c) => (
-                      <ProposalFact key={c} label={cell?.[0] ?? ""} value={cell?.[1] ?? ""} />
-                    ))}
+                    {[b.rows[r * 2], b.rows[r * 2 + 1]].map((cell, c) =>
+                      cell ? (
+                        <Fragment key={c}>
+                          <td className="k">{cell[0]}</td>
+                          <td>{cell[1]}</td>
+                        </Fragment>
+                      ) : <Fragment key={c}><td className="k" /><td /></Fragment>,
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
           );
         }
-        if (b.kind === "head") {
-          return (
-            <h2 key={i} className="t-page"
-              style={{ margin: "24px 0 8px", fontWeight: 700, borderBottom: "2px solid var(--navy)", paddingBottom: 4 }}>
-              {b.text}
-            </h2>
-          );
-        }
-        if (b.kind === "sub") {
-          return (
-            <h3 key={i} className="t-body" style={{ margin: "16px 0 4px", fontWeight: 700 }}>{b.text}</h3>
-          );
-        }
+        if (b.kind === "head") return <h2 key={i} className="doc-head">{b.text}</h2>;
+        if (b.kind === "sub") return <h3 key={i} className="doc-subhead">{b.text}</h3>;
+        // A caption for the table under it prints smaller and italic; the
+        // assembler decides which paragraphs those are, not this file.
         if (b.kind === "para") {
           return (
-            <p key={i} className="t-body" style={{ margin: "0 0 8px", lineHeight: 1.7 }}>{b.text}</p>
+            <p key={i} className={b.lead ? "doc-lead" : b.strong ? "strong" : undefined}>{b.text}</p>
           );
         }
         if (b.kind === "list") {
-          return (
-            <ul key={i} className="t-body" style={{ margin: "0 0 8px 16px", lineHeight: 1.7 }}>
-              {b.items.map((it, j) => <li key={j}>{it}</li>)}
-            </ul>
-          );
+          return <ul key={i}>{b.items.map((it, j) => <li key={j}>{it}</li>)}</ul>;
         }
         if (b.kind === "callout") {
           return (
-            <div key={i} className="card tone-accent" style={{ marginBottom: 12 }}>
-              <div className="t-body" style={{ fontWeight: 700, marginBottom: 4 }}>{b.text}</div>
-              {b.body.map((t, j) => (
-                <p key={j} className="t-body" style={{ margin: "0 0 8px", lineHeight: 1.7 }}>{t}</p>
-              ))}
+            <div key={i} className="doc-callout">
+              <div className="h">{b.text}</div>
+              {b.body.map((t, j) => <p key={j}>{t}</p>)}
             </div>
           );
         }
         return (
-          <div key={i} style={{ overflowX: "auto", marginBottom: 12 }}>
-            <table className="t-small" style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  {b.head.map((h, j) => (
-                    <th key={j} style={{
-                      textAlign: j === 0 ? "left" : "center", padding: "4px 8px",
-                      borderBottom: "2px solid var(--navy)", fontWeight: 700, whiteSpace: "nowrap",
-                    }}>{h}</th>
-                  ))}
+          <table key={i} className="doc-table">
+            <thead>
+              <tr>{b.head.map((h, j) => <th key={j}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {b.rows.map((r, j) => (
+                <tr key={j} className={b.lead && j === 0 ? "lead" : undefined}>
+                  {r.map((c, k) => <td key={k}>{c}</td>)}
                 </tr>
-              </thead>
-              <tbody>
-                {b.rows.map((r, j) => (
-                  <tr key={j}>
-                    {r.map((c, k) => (
-                      <td key={k} style={{
-                        textAlign: k === 0 ? "left" : "center", padding: "4px 8px",
-                        borderBottom: "1px solid var(--line)",
-                        fontWeight: k === 0 ? 600 : 400,
-                      }}>{c}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         );
       })}
 
-      <h2 className="t-page" style={{ margin: "24px 0 8px", fontWeight: 700, borderBottom: "2px solid var(--navy)", paddingBottom: 4 }}>
-        Contact
-      </h2>
-      <p className="t-body" style={{ margin: "0 0 8px", lineHeight: 1.7 }}>
+      <h2 className="doc-head">Contact</h2>
+      <p>
         {brand.operatorName || brand.name}
         {brand.contactEmail ? <><br />{brand.contactEmail}</> : null}
-        {to.address ? <><br /><span className="mut">Prepared for {to.name}, {addressBlock(to.address).join(", ")}</span></> : null}
       </p>
 
-      <p className="mut t-meta no-print" style={{ marginTop: 16 }}>
+      {/* Repeated on every printed page - see .doc-foot. A confidentiality
+          line on page one and nowhere else is not a confidentiality line. */}
+      <div className="doc-foot">
+        <div>{docContactLine(brand)}</div>
+        <div>CONFIDENTIAL{to.name ? ` - Prepared for ${to.name}` : ""}</div>
+      </div>
+
+      <p className="mut t-meta no-print">
         Print to PDF and send it, or <Link href={`/money/quotes/${id}/proposal`}>go back and edit it</Link>.
       </p>
     </div>
-  );
-}
-
-/** One label/value pair of the header table. */
-function ProposalFact({ label, value }: { label: string; value: string }) {
-  if (!label) return <td style={{ width: "50%" }} />;
-  return (
-    <td style={{ width: "50%", padding: "4px 8px 4px 0", borderBottom: "1px solid var(--line)" }}>
-      <span className="mut t-meta" style={{ display: "inline-block", width: 96 }}>{label}</span>
-      <span className="t-body" style={{ fontWeight: 600 }}>{value}</span>
-    </td>
   );
 }

@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addressBlock, addressedTo, commentRows, discountLabel, discountOf, greetingLine,
-  netCents, HOUSE_GREETING,
+  netCents, specOverflow, specRows, HOUSE_GREETING, SPEC_ROWS,
 } from "@/lib/quotes";
 import { descriptionLines } from "@/lib/billing";
 import { invoiceLinesForXlsx } from "@/lib/xlsxDocData";
@@ -183,5 +183,50 @@ describe("what the spreadsheet gets", () => {
     expect(out[0].unitPrice).toBe(0);
     expect(out[0].description).toContain("covered by AGR-2026-11");
     expect(out[0].qty).toBe(2);
+  });
+});
+
+/**
+ * The specifics block: the shape of the offer, under the greeting.
+ *
+ * Fourteen cells in the template - rows 17 to 23, two columns - of which
+ * exactly one was ever written to. The rest is where the shop said what the
+ * contract covers, and it was typed into the exported file by hand every time.
+ */
+describe("the specifics block", () => {
+  it("reads a heading and the points under it", () => {
+    expect(specRows("Full-Service Unlimited Contract for:\n- System A (Quattro Ultima & LC-10 LC)\n- System B (LC-20 LC System)"))
+      .toEqual([
+        { text: "Full-Service Unlimited Contract for:", sub: false },
+        { text: "System A (Quattro Ultima & LC-10 LC)", sub: true },
+        { text: "System B (LC-20 LC System)", sub: true },
+      ]);
+  });
+
+  it("takes a point however somebody marked it, and drops the blank lines", () => {
+    // The same two marks the proposal's sections use: somebody typing into one
+    // box should not have to remember which box they are in.
+    expect(specRows("Head\n- a\n• b\n* c\n\n  \n").map((r) => r.sub))
+      .toEqual([false, true, true, true]);
+  });
+
+  it("stops at the seven rows the paper has", () => {
+    // Row 24 is the table's header. An eighth line would print on top of
+    // "Description | Part Num. | Quantity", not wrap.
+    const nine = Array.from({ length: 9 }, (_, i) => `Line ${i + 1}`).join("\n");
+    expect(specRows(nine)).toHaveLength(SPEC_ROWS);
+    expect(specRows(nine).at(-1)).toEqual({ text: "Line 7", sub: false });
+  });
+
+  it("counts what will not fit, so the editor can say so", () => {
+    // Said out loud rather than silently dropped: what does not fit is still
+    // what somebody wrote.
+    expect(specOverflow("a\nb\nc")).toBe(0);
+    expect(specOverflow(Array.from({ length: 10 }, (_, i) => `L${i}`).join("\n"))).toBe(3);
+  });
+
+  it("says nothing about an empty column", () => {
+    expect(specRows("")).toEqual([]);
+    expect(specRows("   \n\n  ")).toEqual([]);
   });
 });

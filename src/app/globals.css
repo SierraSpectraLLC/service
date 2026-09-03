@@ -3,6 +3,12 @@
   --navy-2: #21395F;      /* hover / raised state of the navy surfaces */
   --coral: #E8613C;
   --coral-2: #D4532F;     /* hover state of the coral surfaces */
+  /* The coral at wash strength, for a tinted ROW or PANEL rather than a
+     control: the recommended tier's callout and the price row of a comparison
+     table. The tone vocabulary below is a status vocabulary - accent there is
+     lavender and means "notice this", not "this is ours" - and a proposal
+     tinting its own recommendation in somebody else's hue reads as a warning. */
+  --coral-wash: #FDF2F1;
   --sky: #5BA8D9;
   --slate: #64748B;
   --bg: #F5F6F9;
@@ -895,6 +901,108 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
   body { background: #fff; }
   .card { border: none; box-shadow: none; padding: 0; }
   a { color: inherit; text-decoration: none; }
+}
+
+/* ── The long document ──────────────────────────────────────────────────────
+   A service proposal is twelve pages somebody reads in a meeting and then
+   again in a procurement review, and it has to look like the document the
+   shop has always sent: Letter, three-quarter-inch margins, a coral section
+   heading, hairline tables with a tinted head, and the recommended tier in a
+   wash of the same coral so the eye lands on it.
+
+   Every colour here is a token this app already had - the Word file was drawn
+   from the same palette - and every size is a step on the scale. The only
+   thing print adds is the PAGE: where it may break, and what must not be left
+   stranded at the bottom of one.
+
+   See lib/proposal, which assembles the blocks these classes render. */
+/* A NAMED page, claimed by .doc alone. A bare `@page` here would re-margin
+   every printed thing in the app - the shipping labels, the signoff sheet, the
+   binder - none of which asked for a three-quarter-inch margin. Where named
+   pages are not supported the rule is simply ignored and the browser's own
+   margins apply, which is what this page had before. */
+@page doc { size: letter; margin: 0.75in 0.75in 0.625in; }
+
+.doc {
+  page: doc;
+  max-width: 7.5in; margin: 0 auto;
+  color: var(--ink); font-size: var(--fs-small); line-height: 1.55;
+}
+.doc-title {
+  font-size: var(--fs-page); font-weight: 700; color: var(--ink);
+  letter-spacing: -0.3px; margin: 0 0 2px;
+}
+.doc-subtitle { font-size: var(--fs-body); color: var(--slate); margin: 0 0 16px; }
+
+/* The section heading, and the one place the brand colour appears in the body.
+   break-after keeps it with what it introduces: a heading alone at the foot of
+   a page is the commonest way a generated document reads as generated. */
+.doc-head {
+  font-size: var(--fs-title); font-weight: 700; color: var(--coral);
+  margin: 24px 0 8px; break-after: avoid;
+}
+.doc-subhead {
+  font-size: var(--fs-body); font-weight: 700; color: var(--ink);
+  margin: 12px 0 4px; break-after: avoid;
+}
+.doc p { margin: 0 0 8px; }
+/* The figure a reader skips to - a tier's price, among its sentences. */
+.doc p.strong { font-weight: 700; }
+/* The line under a section heading that says what the section is for. */
+.doc-lead { font-size: var(--fs-meta); font-style: italic; color: var(--slate); }
+.doc ul { margin: 0 0 8px; padding-left: 16px; }
+.doc li { margin: 0 0 3px; }
+
+/* The facts table at the top: label, value, twice across. */
+.doc-facts { width: 100%; border-collapse: collapse; margin-bottom: 16px; break-inside: avoid; }
+.doc-facts td { padding: 4px 8px; border: 1px solid var(--line); vertical-align: baseline; }
+.doc-facts td.k {
+  width: 1.1in; background: var(--t-faint-bg); color: var(--slate);
+  font-size: var(--fs-meta); font-weight: 700;
+}
+
+/* Hairline tables with a tinted head, header repeated on every page. */
+.doc-table {
+  width: 100%; border-collapse: collapse;
+  font-size: var(--fs-meta); margin-bottom: 12px;
+}
+.doc-table thead { display: table-header-group; }
+.doc-table th {
+  background: var(--t-faint-bg); color: var(--sky); font-weight: 700;
+  text-align: center; padding: 5px 8px; border: 1px solid var(--line);
+}
+.doc-table th:first-child, .doc-table td:first-child { text-align: left; }
+.doc-table td { padding: 4px 8px; border: 1px solid var(--line); text-align: center; }
+.doc-table td:first-child { font-weight: 600; }
+.doc-table tr { break-inside: avoid; }
+/* The price row of a comparison: the figure every other row is read against. */
+.doc-table tr.lead td { background: var(--coral-wash); font-weight: 700; }
+
+/* What we recommend, and why. */
+.doc-callout {
+  background: var(--coral-wash); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 12px; margin-bottom: 12px;
+  break-inside: avoid;
+}
+.doc-callout .h {
+  font-size: var(--fs-body); font-weight: 700; color: var(--coral); margin-bottom: 4px;
+}
+.doc-callout p:last-child { margin-bottom: 0; }
+
+/* The standing footer. Fixed, so the browser repeats it on every printed page
+   - a confidentiality line on page one and nowhere else is not a
+   confidentiality line. On screen it sits at the end, like any other block. */
+.doc-foot {
+  color: var(--t-faint-fg); font-size: var(--fs-micro); line-height: 1.5;
+  border-top: 1px solid var(--line); padding-top: 6px; margin-top: 24px;
+}
+@media print {
+  .doc-foot {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    margin: 0; background: #fff;
+  }
+  /* Room for it, on every page. */
+  .doc { padding-bottom: 0.4in; }
 }
 
 /* ── Record-page section bands ──────────────────────────────────────────────

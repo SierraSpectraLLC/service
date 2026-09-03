@@ -29,7 +29,7 @@ export type QuoteLine = {
 export default function ClientQuote({
   token, quoteId, number, title, brandName, orgName, expiresOn, depositPct,
   lines, totalCents, onHold, standing, answeredBy, answeredOn, feeClause,
-  greeting = "", attn = "", address = [], discount, comments = "",
+  greeting = "", attn = "", address = [], discount, comments = "", specs,
 }: {
   token: string;
   quoteId: number;
@@ -55,6 +55,8 @@ export default function ClientQuote({
   discount?: { label: string; cents: number };
   /** The shop's own notes at the bottom. The client reads these before signing. */
   comments?: string;
+  /** The shape of the offer, in the two columns the paper prints it in. */
+  specs?: { left: { text: string; sub: boolean }[]; right: { text: string; sub: boolean }[] };
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -97,6 +99,23 @@ export default function ClientQuote({
 
       {greeting && (
         <div className="t-body" style={{ fontWeight: 600, marginBottom: 10 }}>{greeting}</div>
+      )}
+
+      {/* The specifics: what the offer covers, before a single price. It is the
+          half of the document a client reads to decide whether the number at
+          the bottom is the right number. */}
+      {specs && (specs.left.length > 0 || specs.right.length > 0) && (
+        <div className="pf2" style={{ marginBottom: 12 }}>
+          {[specs.left, specs.right].map((col, i) => (
+            <div key={i} className="t-body">
+              {col.map((r, j) => (
+                <div key={j} style={{ fontWeight: r.sub ? 400 : 700, paddingLeft: r.sub ? 12 : 0 }}>
+                  {r.sub ? `- ${r.text}` : r.text}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       )}
 
       {lines.map((l) => (

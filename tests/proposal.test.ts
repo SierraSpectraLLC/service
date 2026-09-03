@@ -136,6 +136,26 @@ describe("the document, in order", () => {
     });
   });
 
+  it("marks a placeholder section's words as a caption, and prose as prose", () => {
+    /*
+     * "Tiers structured to fit different risk profiles" is a note about the
+     * table under it, and the document sets it smaller and italic to say so.
+     * The executive summary's first paragraph is a paragraph. A renderer that
+     * decided this by noticing what came before it got the summary wrong.
+     */
+    const bs = proposalBlocks(input());
+    const caption = bs.find((b) => b.kind === "para" && b.text.startsWith("All tiers"));
+    expect(caption).toMatchObject({ lead: true });
+    const prose = bs.find((b) => b.kind === "para" && b.text.startsWith("We are pleased"));
+    expect(prose).toEqual({ kind: "para", text: "We are pleased to propose coverage." });
+  });
+
+  it("tints the comparison's price row, the figure the others are read against", () => {
+    const table = proposalBlocks(input()).find((b) => b.kind === "table" && b.head[0] === "Feature");
+    expect(table).toMatchObject({ lead: true });
+    expect((table as { rows: string[][] }).rows[0][0]).toBe("Annual Investment");
+  });
+
   it("follows the order the sections are in, not an order baked into the code", () => {
     // The whole reason the placeholders are rows: somebody can put the tier
     // comparison first without a code change.
@@ -156,7 +176,8 @@ describe("the document, in order", () => {
     expect(heads).toContain("Tier Detail: Essential");
     expect(heads).toContain("Tier Detail: Premium");
     const i = bs.findIndex((b) => b.kind === "head" && b.text === "Tier Detail: Essential");
-    expect(bs[i + 1]).toEqual({ kind: "para", text: "Annual Investment: $32,000" });
+    // Bold: the price is the line a reader skips to, among sentences.
+    expect(bs[i + 1]).toEqual({ kind: "para", text: "Annual Investment: $32,000", strong: true });
     expect(bs[i + 2]).toMatchObject({ kind: "para", text: "Best for: labs supporting GMP work" });
     expect(bs[i + 3]).toEqual({ kind: "sub", text: "Includes" });
   });

@@ -3678,6 +3678,15 @@ export const quotes = pgTable("quotes", {
   greeting: text("greeting").notNull().default(""),
   clientAddress: text("client_address").notNull().default(""),
   /**
+   * The specifics block under the greeting - the shape of the offer, in the
+   * template's two columns of seven rows. A line is a heading; a line starting
+   * "-" is a point under it. See specRows in lib/quotes, and SPEC_ROWS for why
+   * seven: row 24 is the table's header, and a block that overflowed would land
+   * on it.
+   */
+  specsLeft: text("specs_left").notNull().default(""),
+  specsRight: text("specs_right").notNull().default(""),
+  /**
    * What comes off the subtotal. A percentage OR a flat amount - a shop says it
    * both ways - resolved by exactly one function, lib/quotes.discountOf, where
    * the rule that a percentage wins is written down once. The label is what the

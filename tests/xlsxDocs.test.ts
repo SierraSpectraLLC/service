@@ -145,6 +145,59 @@ describe("quote export", () => {
     expect(v("B47")).toBe("Quote good through 2025-10-30");
   });
 
+  it("writes the specifics block into the two columns the template has for it", async () => {
+    /*
+     * Rows 17-23, B and G. Fourteen cells the template has always had and
+     * nothing ever wrote to but B17 - so this block was typed into the
+     * exported file by hand after every send.
+     */
+    const buf = await fillQuoteXlsx({
+      number: "030190_C", date: "2025-09-30", customer: CUSTOMER,
+      title: "Should not print - the specifics take B17",
+      comments: [], contactLine: "",
+      specs: {
+        left: [
+          { text: "Full-Service Unlimited Contract for:", sub: false },
+          { text: "System A (Quattro Ultima & LC-10 LC)", sub: true },
+          { text: "$12,000 pooled repair part allocation", sub: false },
+        ],
+        right: [
+          { text: "Unlimited Emergency Service Visits", sub: false },
+          { text: "Unlimited Days per Service Visit", sub: true },
+        ],
+      },
+      lines: [line("Coverage", 1, 32000)],
+    });
+    const { ws, v } = await read(buf, "Quote");
+    expect(v("B17")).toBe("Full-Service Unlimited Contract for:");
+    // A point prints indented under its heading, the way the shop's own quote
+    // does - and only the heading is bold.
+    expect(v("B18")).toBe(" - System A (Quattro Ultima & LC-10 LC)");
+    expect(v("B19")).toBe("$12,000 pooled repair part allocation");
+    expect(ws.getCell("B17").font?.bold).toBe(true);
+    expect(ws.getCell("B18").font?.bold ?? false).toBe(false);
+    expect(ws.getCell("B19").font?.bold).toBe(true);
+    // The right column, beside it.
+    expect(v("G17")).toBe("Unlimited Emergency Service Visits");
+    expect(v("G18")).toBe(" - Unlimited Days per Service Visit");
+    // Rows nobody used are cleared rather than left with the template's own
+    // placeholder text, and the table's header on row 24 is untouched.
+    expect(v("B20")).toBe(null);
+    expect(v("G19")).toBe(null);
+    expect(v("B24")).toBe("Description");
+  });
+
+  it("keeps the quote's title in B17 when there is no specifics block", async () => {
+    // What every quote written before this block existed says.
+    const buf = await fillQuoteXlsx({
+      number: "030190_D", date: "2025-09-30", customer: CUSTOMER,
+      title: "Relocate the GC-2010 to lab 4", comments: [], contactLine: "",
+      lines: [line("Labor", 1, 500)],
+    });
+    const { v } = await read(buf, "Quote");
+    expect(v("B17")).toBe("Relocate the GC-2010 to lab 4");
+  });
+
   it("leaves the template's own greeting and adjustment alone when the quote says nothing", async () => {
     const buf = await fillQuoteXlsx({
       number: "030213", date: "2026-03-02", customer: CUSTOMER,

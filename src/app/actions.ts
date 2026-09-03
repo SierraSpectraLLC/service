@@ -88,7 +88,7 @@ import { poProblem, usablePoLines } from "@/lib/backfill";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
 import {
-  addressBlock, answerable, depositCents, discountOf, netCents, quoteStanding,
+  addressBlock, answerable, depositCents, discountOf, netCents, quoteStanding, specRows,
 } from "@/lib/quotes";
 import { feeClause, resolvePolicy } from "@/lib/billingPolicy";
 import { linkState } from "@/lib/dropShare";
@@ -17529,6 +17529,8 @@ export async function updateQuoteLetter(quoteId: number, data: {
   attn?: string;
   greeting?: string;
   clientAddress?: string;
+  specsLeft?: string;
+  specsRight?: string;
   note?: string;
   discountPct?: number;
   discountCents?: number;
@@ -17550,6 +17552,14 @@ export async function updateQuoteLetter(quoteId: number, data: {
     ...(data.greeting !== undefined ? { greeting: data.greeting.trim().slice(0, 300) } : {}),
     ...(data.clientAddress !== undefined
       ? { clientAddress: addressBlock(data.clientAddress).slice(0, 4).join("\n").slice(0, 400) } : {}),
+    /* Stored as typed, newlines and all, and capped only for length. The row
+       budget is NOT applied here: what does not fit on the paper is still what
+       somebody wrote, and silently deleting their eighth line on save is worse
+       than the editor telling them it will not print. See specRows. */
+    ...(data.specsLeft !== undefined
+      ? { specsLeft: data.specsLeft.replace(/\r\n/g, "\n").trim().slice(0, 1200) } : {}),
+    ...(data.specsRight !== undefined
+      ? { specsRight: data.specsRight.replace(/\r\n/g, "\n").trim().slice(0, 1200) } : {}),
     ...(data.note !== undefined ? { note: data.note.slice(0, 2000) } : {}),
     ...(data.discountPct !== undefined || data.discountCents !== undefined
       ? { discountPct: pct, discountCents: cents } : {}),
@@ -17572,6 +17582,11 @@ export async function updateQuoteLetter(quoteId: number, data: {
         : "no discount");
   }
   if (changed.includes("discountLabel")) said.push(`the discount reads "${next.discountLabel}"`);
+  if (changed.includes("specsLeft") || changed.includes("specsRight")) {
+    const rows = specRows(next.specsLeft ?? q.specsLeft).length
+      + specRows(next.specsRight ?? q.specsRight).length;
+    said.push(rows ? `${rows} lines of specifics` : "no specifics block");
+  }
   if (changed.includes("note")) said.push("comments for the client");
   await audit({
     actor: u.email, entityType: "quote", entityId: quoteId, tenantOrgId: q.tenantOrgId,

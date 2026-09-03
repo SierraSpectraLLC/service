@@ -10,7 +10,7 @@ import { formatCents } from "@/lib/money";
 import { shopMonthDay, shopToday } from "@/lib/shopday";
 import { qtyOf, quoteForOrg, quoteSubtotal, quoteTotal } from "@/lib/invoiceData";
 import { descriptionLines } from "@/lib/billing";
-import { discountLabel, discountOf, greetingLine, quoteStanding } from "@/lib/quotes";
+import { discountLabel, discountOf, greetingLine, quoteStanding, specRows } from "@/lib/quotes";
 import { quoteOrderStatus, quoteSteps } from "@/lib/clientOrders";
 import OrderSteps from "@/components/OrderSteps";
 import ClientApprove from "@/components/ClientApprove";
@@ -78,9 +78,23 @@ export default async function ClientQuotePage({ params }: { params: Promise<{ id
         )}
       </div>
 
-      {greetingLine(row) && row.attn && (
+      {(row.attn || row.specsLeft.trim() || row.specsRight.trim()) && (
         <div className="card">
-          <div className="t-body" style={{ fontWeight: 600 }}>{greetingLine(row)}</div>
+          {row.attn && (
+            <div className="t-body" style={{ fontWeight: 600 }}>{greetingLine(row)}</div>
+          )}
+          {/* What the offer covers, before a single price. */}
+          <div className="pf2" style={{ marginTop: row.attn ? 8 : 0 }}>
+            {[specRows(row.specsLeft), specRows(row.specsRight)].map((col, i) => (
+              <div key={i} className="t-body">
+                {col.map((r, j) => (
+                  <div key={j} style={{ fontWeight: r.sub ? 400 : 700, paddingLeft: r.sub ? 12 : 0 }}>
+                    {r.sub ? `- ${r.text}` : r.text}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
