@@ -62,6 +62,11 @@ const STAMPED = [
   // myTenantOrgId would be null for every note they ever left - unreadable to
   // the shop they left it for, which is the whole point of writing one.
   "calendarNotes",
+  // The long document behind a quote's price. Takes the QUOTE's stamp, not the
+  // writer's: a proposal belongs to the workspace that issued the price it
+  // argues for, and its systems, tiers and sections hang off it with no stamp
+  // of their own - they die with the proposal, the part_kit_lines rule.
+  "proposals",
 ];
 
 const walk = (dir: string): string[] =>

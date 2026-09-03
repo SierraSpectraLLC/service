@@ -21,6 +21,7 @@ import {
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, stipends, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
   dunningEvents, creditOverrides, quotes, quoteLines, payroll, perks, bugReports,
+  proposals, proposalSections, proposalSystems, proposalTiers,
   restorationProjects, restorationConfirms, componentConditions, findings,
   provenanceAnswers, handoffKits, checklistTemplates, checklistTemplateItems,
   checklistRuns, checklistRunItems, checkoutVerdicts, outsideWork,
@@ -178,8 +179,9 @@ import {
 import { crumbsFor } from "@/lib/bugData";
 import { jobFrom, nextDocNumber } from "@/lib/docNumberData";
 import {
-  DOC_KINDS, DOC_LABEL, serializeScheme, templateProblems, type Scheme,
+  DOC_KINDS, DOC_LABEL, nextRevision, serializeScheme, templateProblems, type Scheme,
 } from "@/lib/docNumber";
+import { houseTemplate, SECTION_KINDS, SECTION_KIND_LABEL } from "@/lib/proposal";
 import { PLAN_MAX_PER_YEAR, perYearLabel } from "@/lib/pmPlan";
 import {
   estimate, estimateProblems, periodWindows, reserveTerms, type CoverageInput,
@@ -17653,10 +17655,233 @@ async function setLineDescription(
   return {};
 }
 
-export const setQuoteLineDescription = (lineId: number, description: string) =>
-  setLineDescription("quote", lineId, description);
-export const setInvoiceLineDescription = (lineId: number, description: string) =>
-  setLineDescription("invoice", lineId, description);
+/* Both doors, spelled out as async functions: an exported server action that
+   is an arrow returning a promise compiles here and is refused by the bundler,
+   which is a build failure nobody sees until deploy. See
+   tests/serverActionShape.test.ts, which is what catches the next one. */
+export async function setQuoteLineDescription(lineId: number, description: string) {
+  return setLineDescription("quote", lineId, description);
+}
+export async function setInvoiceLineDescription(lineId: number, description: string) {
+  return setLineDescription("invoice", lineId, description);
+}
+
+// ── The long document ───────────────────────────────────────────────────────
+// A proposal is the argument for a quote's price: covered systems, coverage
+// tiers side by side, the parts policy, the terms, and a recommendation. See
+// lib/proposal, which assembles it and holds the house template.
+//
+// The three lists below are saved WHOLESALE rather than diffed, the same way
+// setKitLines and writeAliases are: each is a short list somebody edits as one
+// sheet, and diffing it row by row would buy nothing but a chance to get it
+// wrong. The audit says what the sheet now holds.
+
+/** The proposal and its quote, with the workspace check both need. */
+async function proposalGate(u: SessionUser, proposalId: number): Promise<
+  { error: string } | { p: typeof proposals.$inferSelect; q: typeof quotes.$inferSelect }
+> {
+  const [p] = await db.select().from(proposals).where(eq(proposals.id, proposalId));
+  if (!p) return { error: "Not found" };
+  const t = readTenant(u);
+  if (t !== null && p.tenantOrgId !== t) return { error: "Not found" };
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, p.quoteId));
+  if (!q) return { error: "Not found" };
+  return { p, q };
+}
+
+/**
+ * Start the document for a quote, from the house template.
+ *
+ * COPIED, not referenced. A template read live would rewrite what a client
+ * already read the next time somebody improved a sentence - and the whole
+ * reason a proposal exists as a record is that it is the document that went
+ * out. The number is the quote's own, revised: the header table on the paper
+ * says "Quote #", and a proposal that could not be tied back to its price
+ * would be the one document nobody could trust.
+ */
+export async function startProposal(quoteId: number): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (!q) return { error: "Not found" };
+  if (readTenant(u) !== null && q.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  const existing = await db.select().from(proposals).where(eq(proposals.quoteId, quoteId));
+  if (existing.length) return { id: existing[0].id };
+
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, q.orgId));
+  const { sections, tiers } = houseTemplate();
+  const [row] = await db.insert(proposals).values({
+    tenantOrgId: q.tenantOrgId, quoteId,
+    number: nextRevision(q.number),
+    subtitle: [q.title, org?.name].filter(Boolean).join(" - "),
+    createdBy: u.email,
+  }).returning();
+  await db.insert(proposalSections).values(sections.map((sec, i) => ({
+    proposalId: row.id, kind: sec.kind, heading: sec.heading, body: sec.body, position: i,
+  })));
+  await db.insert(proposalTiers).values(tiers.map((t, i) => ({
+    proposalId: row.id, key: t.key, name: t.name, annualCents: t.annualCents,
+    bestFor: t.bestFor, includes: t.includes, notIncluded: t.notIncluded,
+    features: t.features, position: i,
+  })));
+  await audit({
+    actor: u.email, entityType: "quote", entityId: quoteId, tenantOrgId: q.tenantOrgId,
+    action: `started a service proposal for ${q.number} as ${row.number}`
+      + `, ${tiers.length} tiers and ${sections.length} sections from the house template`,
+  });
+  revalidatePath(`/money/quotes/${quoteId}/proposal`);
+  return { id: row.id };
+}
+
+/** The document's own header: what it is called, and how long the price holds. */
+export async function updateProposal(proposalId: number, data: {
+  title?: string; subtitle?: string; pricingValid?: string; recommendedTier?: string;
+}): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const gate = await proposalGate(u, proposalId);
+  if ("error" in gate) return gate;
+  const { p, q } = gate;
+  const next = {
+    ...(data.title !== undefined ? { title: data.title.trim().slice(0, 160) } : {}),
+    ...(data.subtitle !== undefined ? { subtitle: data.subtitle.trim().slice(0, 300) } : {}),
+    ...(data.pricingValid !== undefined ? { pricingValid: data.pricingValid.trim().slice(0, 120) } : {}),
+    ...(data.recommendedTier !== undefined ? { recommendedTier: data.recommendedTier.trim().slice(0, 60) } : {}),
+  };
+  const before = p as unknown as Record<string, unknown>;
+  const changed = Object.keys(next).filter((k) => before[k] !== (next as Record<string, unknown>)[k]);
+  if (!changed.length) return {};
+  await db.update(proposals).set({ ...next, updatedAt: new Date() }).where(eq(proposals.id, proposalId));
+  await audit({
+    actor: u.email, entityType: "quote", entityId: q.id, tenantOrgId: p.tenantOrgId,
+    action: `${p.number}: ${changed.includes("recommendedTier")
+      ? (next.recommendedTier ? `recommends the ${next.recommendedTier} tier` : "recommends no tier in particular")
+      : `edited the ${changed.join(", ")}`}`,
+  });
+  revalidatePath(`/money/quotes/${q.id}/proposal`);
+  return {};
+}
+
+/** The covered systems, as one sheet. */
+export async function saveProposalSystems(proposalId: number, rows: {
+  instrumentId?: number | null; name: string; model: string; note: string;
+}[]): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const gate = await proposalGate(u, proposalId);
+  if ("error" in gate) return gate;
+  const { p, q } = gate;
+  const clean = rows
+    .map((r) => ({
+      instrumentId: r.instrumentId ?? null,
+      name: r.name.trim().slice(0, 160),
+      model: r.model.trim().slice(0, 120),
+      note: r.note.trim().slice(0, 300),
+    }))
+    .filter((r) => r.name || r.model)
+    .slice(0, 40);
+  await db.delete(proposalSystems).where(eq(proposalSystems.proposalId, proposalId));
+  if (clean.length) {
+    await db.insert(proposalSystems).values(clean.map((r, i) => ({ ...r, proposalId, position: i })));
+  }
+  await db.update(proposals).set({ updatedAt: new Date() }).where(eq(proposals.id, proposalId));
+  await audit({
+    actor: u.email, entityType: "quote", entityId: q.id, tenantOrgId: p.tenantOrgId,
+    action: `${p.number} covers ${clean.length} system${clean.length === 1 ? "" : "s"}`
+      + (clean.length ? `: ${clean.map((r) => r.name || r.model).join(", ")}` : ""),
+  });
+  revalidatePath(`/money/quotes/${q.id}/proposal`);
+  return {};
+}
+
+/** The coverage tiers, as one sheet. */
+export async function saveProposalTiers(proposalId: number, rows: {
+  key: string; name: string; annualCents: number;
+  bestFor: string; includes: string; notIncluded: string; features: string;
+}[]): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const gate = await proposalGate(u, proposalId);
+  if ("error" in gate) return gate;
+  const { p, q } = gate;
+  const seen = new Set<string>();
+  const clean = rows
+    .map((r) => ({
+      // A tier's key is what the recommendation points at, so it has to be
+      // stable and unique. Derived from the name when somebody adds a tier,
+      // and de-duplicated here rather than silently pointing two rows at once.
+      key: (r.key.trim() || r.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_")).slice(0, 60),
+      name: r.name.trim().slice(0, 80),
+      annualCents: Math.max(0, Math.round(Number(r.annualCents) || 0)),
+      bestFor: r.bestFor.trim().slice(0, 600),
+      includes: r.includes.replace(/\r\n/g, "\n").trim().slice(0, 4000),
+      notIncluded: r.notIncluded.replace(/\r\n/g, "\n").trim().slice(0, 2000),
+      features: r.features.replace(/\r\n/g, "\n").trim().slice(0, 4000),
+    }))
+    .filter((r) => r.name)
+    .filter((r) => (seen.has(r.key) ? false : (seen.add(r.key), true)))
+    .slice(0, 8);
+  await db.delete(proposalTiers).where(eq(proposalTiers.proposalId, proposalId));
+  if (clean.length) {
+    await db.insert(proposalTiers).values(clean.map((r, i) => ({ ...r, proposalId, position: i })));
+  }
+  // A recommendation pointing at a tier that is no longer on the document is
+  // a heading over silence. Cleared here rather than left to the renderer.
+  const rec = clean.some((r) => r.key === p.recommendedTier) ? p.recommendedTier : "";
+  await db.update(proposals).set({ recommendedTier: rec, updatedAt: new Date() })
+    .where(eq(proposals.id, proposalId));
+  await audit({
+    actor: u.email, entityType: "quote", entityId: q.id, tenantOrgId: p.tenantOrgId,
+    action: `${p.number} offers ${clean.length} tier${clean.length === 1 ? "" : "s"}`
+      + (clean.length ? `: ${clean.map((r) => `${r.name} ${formatCents(r.annualCents)}`).join(", ")}` : ""),
+  });
+  revalidatePath(`/money/quotes/${q.id}/proposal`);
+  return {};
+}
+
+/** The document's sections and their order, as one sheet. */
+export async function saveProposalSections(proposalId: number, rows: {
+  kind: string; heading: string; body: string;
+}[]): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const gate = await proposalGate(u, proposalId);
+  if ("error" in gate) return gate;
+  const { p, q } = gate;
+  const clean = rows
+    .map((r) => ({
+      kind: (SECTION_KINDS as readonly string[]).includes(r.kind) ? r.kind : "prose",
+      heading: r.heading.trim().slice(0, 160),
+      body: r.body.replace(/\r\n/g, "\n").trim().slice(0, 20000),
+    }))
+    .filter((r) => r.heading || r.body)
+    .slice(0, 40);
+  await db.delete(proposalSections).where(eq(proposalSections.proposalId, proposalId));
+  if (clean.length) {
+    await db.insert(proposalSections).values(clean.map((r, i) => ({ ...r, proposalId, position: i })));
+  }
+  await db.update(proposals).set({ updatedAt: new Date() }).where(eq(proposals.id, proposalId));
+  await audit({
+    actor: u.email, entityType: "quote", entityId: q.id, tenantOrgId: p.tenantOrgId,
+    action: `${p.number} has ${clean.length} section${clean.length === 1 ? "" : "s"}: `
+      + clean.map((r) => r.heading || SECTION_KIND_LABEL[r.kind] || r.kind).join(" · "),
+  });
+  revalidatePath(`/money/quotes/${q.id}/proposal`);
+  return {};
+}
+
+/** Throw the document away. The quote and its price are untouched. */
+export async function deleteProposal(proposalId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const gate = await proposalGate(u, proposalId);
+  if ("error" in gate) return gate;
+  const { p, q } = gate;
+  await db.delete(proposals).where(eq(proposals.id, proposalId));
+  await audit({
+    actor: u.email, entityType: "quote", entityId: q.id, tenantOrgId: p.tenantOrgId,
+    action: `deleted the service proposal ${p.number} - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revalidatePath(`/money/quotes/${q.id}/proposal`);
+  return {};
+}
 
 /** Take a line off a draft quote, with the reason on the record. */
 export async function removeQuoteLine(lineId: number, reason: string): Promise<{ error?: string }> {

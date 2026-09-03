@@ -11,6 +11,7 @@ import { awardOfQuote, quoteHasPeriods } from "@/lib/awardData";
 import { formatCents } from "@/lib/money";
 import { shopMonthDay, shopToday } from "@/lib/shopday";
 import { billingContext, quoteById, quoteSubtotal, quoteTotal } from "@/lib/invoiceData";
+import { proposalForQuote } from "@/lib/proposalData";
 import { feeClause } from "@/lib/billingPolicy";
 import {
   daysToExpiry, depositCents, discountLabel, discountOf, quoteStanding,
@@ -39,7 +40,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
   const { row } = full;
   const today = shopToday();
 
-  const [org, wo, link, history, ctx, models, award, coveragePeriods] = await Promise.all([
+  const [org, wo, link, history, ctx, models, award, coveragePeriods, proposal] = await Promise.all([
     db.select().from(orgs).where(eq(orgs.id, row.orgId)).then((r) => r[0] ?? null),
     row.workOrderId === null ? Promise.resolve(null)
       : db.select().from(workOrders).where(eq(workOrders.id, row.workOrderId)).then((r) => r[0] ?? null),
@@ -53,9 +54,11 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
     row.status === "draft" ? viewTenant(user).then(modelOptions) : Promise.resolve([]),
     awardOfQuote(id),
     quoteHasPeriods(id),
+    proposalForQuote(id),
   ]);
 
   const standing = quoteStanding(row, today);
+  const hasProposal = proposal !== null;
   const subtotal = quoteSubtotal(full);
   const total = quoteTotal(full);
   const off = discountOf(subtotal, row);
@@ -101,6 +104,11 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
         <a className="btn sm" href={`/api/export/quote/${id}`} download>
           Excel
         </a>
+        {/* The long document behind the price: covered systems, coverage tiers
+            side by side, the parts policy, the terms. See lib/proposal. */}
+        <Link className="btn sm" href={`/money/quotes/${id}/proposal`} style={{ textDecoration: "none" }}>
+          {hasProposal ? "Proposal" : "Write a proposal"}
+        </Link>
         {link && (
           <Link className="btn sm" href={`/share/${link.token}`} style={{ textDecoration: "none" }}>
             Open as the client

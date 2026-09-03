@@ -3703,6 +3703,91 @@ export const quotes = pgTable("quotes", {
   unique("quote_number_unique").on(t.tenantOrgId, t.number),
 ]);
 
+// ── The long document ───────────────────────────────────────────────────────
+// A quote is a price. A proposal is the argument for it: covered systems,
+// coverage tiers side by side, what parts coverage means, how a remote-first
+// shop works a machine nine hundred miles away, and which tier we think they
+// should buy. See lib/proposal, which assembles it, and which holds the HOUSE
+// TEMPLATE these rows are copied from at creation.
+//
+// One per quote, and bound to it: the document's own header table says "Quote
+// #", the client and the contact and the pricing validity are all the quote's,
+// and a proposal that could drift from the price it argues for would be the
+// one document nobody could trust.
+export const proposals = pgTable("proposals", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  quoteId: integer("quote_id").notNull().references((): AnyPgColumn => quotes.id, { onDelete: "cascade" }),
+  /** The document's own number - the quote's, revised. See lib/docNumber. */
+  number: text("number").notNull().default(""),
+  title: text("title").notNull().default("Service Contract Proposal"),
+  /** The line under the title: the systems and where they are. */
+  subtitle: text("subtitle").notNull().default(""),
+  /** "30 days from issue", or a date. Free text: it is a sentence on paper. */
+  pricingValid: text("pricing_valid").notNull().default("30 days from issue"),
+  /** The `key` of the tier the recommendation argues for. Blank = none. */
+  recommendedTier: text("recommended_tier").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("proposals_quote_idx").on(t.quoteId),
+  unique("proposals_quote_unique").on(t.quoteId),
+]);
+
+/**
+ * A machine the contract covers.
+ *
+ * `instrumentId` where the system is one we already have a record of, which is
+ * the point of adding it from the client's own fleet rather than retyping it -
+ * but the NAME and MODEL are copied onto the row rather than joined, because a
+ * proposal is a document that was sent and must keep reading the way it read
+ * when it was signed, whatever gets renamed afterwards.
+ */
+export const proposalSystems = pgTable("proposal_systems", {
+  id: serial("id").primaryKey(),
+  proposalId: integer("proposal_id").notNull().references((): AnyPgColumn => proposals.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").references((): AnyPgColumn => instruments.id, { onDelete: "set null" }),
+  name: text("name").notNull().default(""),
+  model: text("model").notNull().default(""),
+  note: text("note").notNull().default(""),
+  position: integer("position").notNull().default(0),
+}, (t) => [index("proposal_systems_proposal_idx").on(t.proposalId)]);
+
+/** One coverage level, priced. The comparison table is built from these. */
+export const proposalTiers = pgTable("proposal_tiers", {
+  id: serial("id").primaryKey(),
+  proposalId: integer("proposal_id").notNull().references((): AnyPgColumn => proposals.id, { onDelete: "cascade" }),
+  /** Stable slug, so the recommendation points at a tier and not at its name. */
+  key: text("key").notNull(),
+  name: text("name").notNull().default(""),
+  annualCents: integer("annual_cents").notNull().default(0),
+  bestFor: text("best_for").notNull().default(""),
+  includes: text("includes").notNull().default(""),      // one bullet per line
+  notIncluded: text("not_included").notNull().default(""),
+  /** The comparison column: "Label | Value" per line. See parseFeatures. */
+  features: text("features").notNull().default(""),
+  position: integer("position").notNull().default(0),
+}, (t) => [index("proposal_tiers_proposal_idx").on(t.proposalId)]);
+
+/**
+ * The document's sections, in reading order.
+ *
+ * Four of the five kinds are PLACEHOLDERS - systems, tiers, tier_detail,
+ * recommendation - carrying only a heading, with the proposal's own rows
+ * rendered in their place. That is what lets somebody move the systems table
+ * above the comparison, or drop a section, without any of the order being
+ * wired into a function. See SECTION_KINDS in lib/proposal.
+ */
+export const proposalSections = pgTable("proposal_sections", {
+  id: serial("id").primaryKey(),
+  proposalId: integer("proposal_id").notNull().references((): AnyPgColumn => proposals.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull().default("prose"),
+  heading: text("heading").notNull().default(""),
+  body: text("body").notNull().default(""),
+  position: integer("position").notNull().default(0),
+}, (t) => [index("proposal_sections_proposal_idx").on(t.proposalId)]);
+
 /** The same shape as an invoice line, for the same reason: one composer. */
 export const quoteLines = pgTable("quote_lines", {
   id: serial("id").primaryKey(),
