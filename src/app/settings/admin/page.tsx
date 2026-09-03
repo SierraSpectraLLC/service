@@ -11,6 +11,9 @@ import { forTenant, readTenant, visibleOrgs } from "@/lib/tenancy";
 import { tempState } from "@/lib/tempPassword";
 import SharePanel from "@/components/SharePanel";
 import AccessRequestsPanel from "@/components/AccessRequestsPanel";
+import DisputedClaimsPanel from "@/components/DisputedClaimsPanel";
+import { disputedClaims } from "@/lib/custody/claims";
+import { flagOn } from "@/lib/custody/flags";
 import HouseMembersPanel from "@/components/HouseMembersPanel";
 import { PageHead, Panel } from "@/components/ui";
 import { listHouseMembers } from "@/app/actions";
@@ -39,6 +42,24 @@ export default async function AdminSettingsPage() {
    * predicate, which is how the instance's own operator keeps seeing all of it.
    */
   const tenant = readTenant(user);
+  const disputed = isPlatform && await flagOn("custody.claims")
+    ? await (async () => {
+        const rows = await disputedClaims();
+        const names = new Map((await db.select({ id: orgs.id, name: orgs.name }).from(orgs)).map((o) => [o.id, o.name]));
+        // Only the machines under dispute, and only within what this reader may
+        // see - the disputed list is platform-wide by design, the tags are not.
+        const ids = rows.map((c) => c.instrumentId);
+        const tags = new Map(ids.length
+          ? (await db.select({ id: instruments.id, externalId: instruments.externalId }).from(instruments)
+              .where(and(inArray(instruments.id, ids), forTenant(instruments.tenantOrgId, tenant)))).map((i) => [i.id, i.externalId])
+          : []);
+        return rows.map((c) => ({
+          id: c.id, instrumentId: c.instrumentId, externalId: tags.get(c.instrumentId) ?? String(c.instrumentId),
+          claimant: names.get(c.orgId) ?? "an organization", requestedBy: c.requestedBy, message: c.message,
+          disputeNote: c.disputeNote, evidenceAttachmentId: c.evidenceAttachmentId, when: shopTime(c.createdAt),
+        }));
+      })()
+    : [];
   const siteRows = await db.select({
     name: orgSites.name, address: orgSites.address, orgName: orgs.name,
   }).from(orgSites).innerJoin(orgs, eq(orgs.id, orgSites.orgId))
@@ -126,6 +147,13 @@ export default async function AdminSettingsPage() {
           // Some shops name sites with the client already in them.
           return { label: site.startsWith(x.orgName) ? site : `${x.orgName} - ${site}`, address: x.address };
         })} />
+
+      {/* custody.claims: the one place a parked claim gets decided. Platform
+          only - a dispute is between a holder and a claimant, and neither of
+          them rules on it. */}
+      {isPlatform && disputed.length > 0 && (
+        <DisputedClaimsPanel claims={disputed} />
+      )}
 
       {requestRows.length > 0 && (
         <Panel title="Waiting on a decision" count={requestRows.length}>

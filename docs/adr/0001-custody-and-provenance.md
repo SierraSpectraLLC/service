@@ -187,3 +187,28 @@ All five proposals accepted as written. Encoded as named constants in
 - **`attachInstead` still creates the client org under the recipient.** The
   relationship is theirs; only the machine is shared. Org duplication is a
   relationship record per shop, not a fork of the machine.
+
+## Phase 6 — decisions made in the build
+
+- **A countersign changes the grade, not the author.** The plan had
+  `author_org_id` move to the confirming org. It is inside the hash (Phase 2's
+  contract), and a chain that must be re-linked to record a confirmation is a
+  chain nobody can trust to record one. The holder wrote the line; the
+  `event_confirmations` row is the provider saying it happened. The trigger's
+  allow-list gained `who_grade` only.
+- **The claim event is authored by nobody.** An author is a party to the
+  tenure, and the claimant must read the tenure they took as provenance -
+  anonymized and embargoed - not as a party who happened to be named on its
+  last line.
+- **A dormant machine resolves at once.** No open tenure means nobody to
+  notice; the claimant's tenure opens immediately and the dormant epoch is
+  untouched. The gap stays in the record.
+- **Free text under a claim is embargoed, not withheld.** Two markers, on
+  purpose: one says the author held it back (permanent), the other says the
+  clock has not run (it ends). The reader is owed the difference.
+- **"The request becomes an invitation" is recorded, not emailed.** A
+  countersign naming a shop not on the platform waits as `invited`, and
+  `adoptInvitations` turns it into a pending request the moment a workspace
+  by that name is opened through the existing hand-off acceptance. Sending
+  the invitation itself stays with the operator's existing invite flows,
+  which need an address a machine's history does not carry.

@@ -1160,6 +1160,21 @@ export const accessRequests = pgTable("access_requests", {
   status: text("status").notNull().default("pending"), // pending | approved | denied
   decidedBy: text("decided_by").notNull().default(""),
   decidedAt: timestamp("decided_at"),
+  /**
+   * CLAIMS ONLY, from Phase 6 on. A claim is the path for history whose holder
+   * will not or cannot seal: the claimant shows evidence, the holder and every
+   * author in the open tenure are told, and a window runs. Silence resolves it
+   * (resolved_silent); the holder can seal instead (sealed_by_holder); an
+   * objection parks it for a person (disputed); the platform can refuse it
+   * (denied). A serial number is not proof of purchase, which is why evidence
+   * is a file and the window is CLAIM_NOTICE_DAYS long, not an hour.
+   */
+  evidenceAttachmentId: integer("evidence_attachment_id"),
+  noticeEndsAt: timestamp("notice_ends_at"),
+  resolution: text("resolution").notNull().default(""),
+  resolvedAt: timestamp("resolved_at"),
+  /** The objection, in the holder's or an author's words. Read by the admin screen. */
+  disputeNote: text("dispute_note").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("access_requests_instrument_idx").on(t.instrumentId)]);
 
@@ -4781,6 +4796,12 @@ export const custodyEpochs = pgTable("custody_epochs", {
   brokerOrgId: integer("broker_org_id").references(() => orgs.id, { onDelete: "set null" }),
   /** When the outgoing custodian last looked at what would travel. Null = never. */
   redactionReviewedAt: timestamp("redaction_reviewed_at"),
+  /**
+   * CLAIMED EPOCHS ONLY. Structured provenance crosses to the claimant at once;
+   * free text crosses at this moment unless its author withheld it during the
+   * notice window. Null = no embargo. lib/custody/view reads it with `now`.
+   */
+  findingsEmbargoUntil: timestamp("findings_embargo_until"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   unique("custody_epoch_n_unique").on(t.instrumentId, t.n),
@@ -4918,4 +4939,35 @@ export const orgInstrumentTags = pgTable("org_instrument_tags", {
 }, (t) => [
   unique("org_instrument_tag_unique").on(t.orgId, t.instrumentId),
   index("org_instrument_tags_instrument_idx").on(t.instrumentId),
+]);
+
+
+/**
+ * COUNTERSIGN: an outside shop confirming that work attributed to it happened.
+ *
+ * A backfilled or scanned line says "Sierra Spectra did the PM"; that is the
+ * custodian's word, graded `attested`. If Sierra is on the platform, Sierra can
+ * say so too, and the line becomes `third_party` - which is the only way a
+ * machine's pre-platform history can ever be worth more than its holder's
+ * say-so. The grade is the one column the append-only trigger lets a
+ * confirmation change; it is not hashed, so the chain does not move. The
+ * author stays - it is hashed - and this row is the record of who confirmed.
+ */
+export const eventConfirmations = pgTable("event_confirmations", {
+  id: serial("id").primaryKey(),
+  eventId: integer("event_id").notNull().references(() => systemEvents.id, { onDelete: "cascade" }),
+  /** Who is being asked. Null while the named provider is not on the platform yet. */
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+  /** The name as written on the line, for the invitation and for the record. */
+  namedProvider: text("named_provider").notNull().default(""),
+  /** pending | confirmed | declined | invited */
+  status: text("status").notNull().default("pending"),
+  requestedBy: text("requested_by").notNull().default(""),
+  requestedAt: timestamp("requested_at").notNull().defaultNow(),
+  decidedAt: timestamp("decided_at"),
+  decidedBy: text("decided_by").notNull().default(""),
+  note: text("note").notNull().default(""),
+}, (t) => [
+  index("event_confirmations_event_idx").on(t.eventId),
+  index("event_confirmations_org_idx").on(t.orgId),
 ]);

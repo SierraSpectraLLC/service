@@ -49,6 +49,12 @@ export const NOTIFY_KINDS = [
   // The OWNING org's editors rule on access to their own equipment, so this
   // reaches them as well as staff - see actions.ownerAudience.
   { kind: "access_request", label: "Access requests and ownership claims", audience: "all" },
+  // A claim's notice: the holder, its steward and every author in the open
+  // tenure are told a window is running on their free text. All, for the same
+  // reason as access_request - the people who can object are not staff.
+  { kind: "claim_notice", label: "A claim is running on a system I hold or wrote on", audience: "all" },
+  // An outside shop asked to confirm work attributed to it.
+  { kind: "countersign", label: "Asked to confirm work attributed to my organization", audience: "all" },
   { kind: "gas_empty", label: "A gas is marked empty", audience: "house" },
   { kind: "queue", label: "A system moves into my queue", audience: "all" },
   { kind: "handoff", label: "A system changes hands", audience: "all" },

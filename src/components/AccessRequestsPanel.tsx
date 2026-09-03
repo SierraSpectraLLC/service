@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { approveAccessRequest, approveClaim, denyAccessRequest } from "@/app/actions";
+import { approveAccessRequest, approveClaim, denyAccessRequest, disputeClaim } from "@/app/actions";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 
 export type AccessRequestRow = {
   id: number; orgName: string; orgKind: string; kind: string;
   requestedBy: string; message: string; when: string;
+  /** custody.claims: the notice window, and where the claim stands. */
+  claim?: { noticeEndsOn: string; state: "window" | "due" | "disputed" | "resolved"; canObject: boolean };
 };
 
 /**
@@ -38,6 +40,29 @@ export default function AccessRequestsPanel({ requests, isOperator }: {
               <span className="mut t-small">{r.requestedBy} · {r.when}</span>
             </div>
             {r.message && <div className="mut t-small" style={{ whiteSpace: "pre-wrap", marginTop: 2 }}>{r.message}</div>}
+            {/* A claim with a window is a notice, not a request: silence
+                resolves it. Saying so, with the date, is the whole point of
+                the notice; the object button is for the people it names. */}
+            {isClaim && r.claim && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
+                <span className={`pill ${r.claim.state === "disputed" ? "bad" : r.claim.state === "due" ? "warn" : "neutral"}`}>
+                  {r.claim.state === "window" ? `window closes ${r.claim.noticeEndsOn}`
+                    : r.claim.state === "due" ? "window closed - resolving"
+                    : r.claim.state === "disputed" ? "objected - with the platform" : "resolved"}
+                </span>
+                {r.claim.state === "window" && r.claim.canObject && (
+                  <button className="btn sm" disabled={pending} onClick={async () => {
+                    const why = window.prompt("Why is this claim wrong? The platform reads this.");
+                    if (!why?.trim()) return;
+                    setError("");
+                    startTransition(async () => {
+                      const res = await disputeClaim(r.id, why);
+                      if (res?.error) setError(res.error); else toast({ message: "Objection filed - the claim is parked for the platform" });
+                    });
+                  }}>Object</button>
+                )}
+              </div>
+            )}
             {isClaim && !isOperator && (
               <div className="mut t-meta" style={{ marginTop: 4 }}>
                 Ownership claims are decided by the platform operator.

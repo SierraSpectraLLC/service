@@ -145,8 +145,16 @@ export type EventView = {
   withheldDownstream: boolean;
 };
 
+/**
+ * Shown in place of free text that a claim has not yet released. Different
+ * words from WITHHELD_MARKER on purpose: one says the author held it back,
+ * the other says the clock has not run - and the reader is owed the
+ * difference, because one of them ends.
+ */
+export const EMBARGOED_MARKER = "Findings held until the claim's notice window ends.";
+
 export function eventVisibility(
-  viewerOrgId: OrgId | null, event: SystemEvent, epoch: Epoch, chain: SystemChain,
+  viewerOrgId: OrgId | null, event: SystemEvent, epoch: Epoch, chain: SystemChain, now: Date = new Date(),
 ): EventView {
   const level = levelOf(viewerOrgId, epoch, chain);
   const onEvent = viewerOrgId !== null && eventParties(event).has(viewerOrgId);
@@ -162,6 +170,11 @@ export function eventVisibility(
 
   let provenance: Record<string, unknown> & { findings?: string } = { ...event.provenance };
   if (event.withheld && !onEvent) provenance = { ...provenance, findings: WITHHELD_MARKER };
+  // A claimed tenure releases its free text on a clock, to everyone who is not
+  // a party to the line - the claimant included. Structured fields never wait.
+  else if (!onEvent && epoch.findingsEmbargoUntil && now < epoch.findingsEmbargoUntil && typeof provenance.findings === "string") {
+    provenance = { ...provenance, findings: EMBARGOED_MARKER };
+  }
 
   return {
     eventId: event.id,

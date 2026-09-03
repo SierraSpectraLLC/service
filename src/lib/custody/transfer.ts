@@ -283,54 +283,14 @@ export async function seal(actor: Actor, transferId: number): Promise<Outcome<{ 
     .where(eq(systemEvents.instrumentId, inst.id)).orderBy(desc(systemEvents.id)).limit(1);
   const sealHash = last?.hash ?? "";
 
-  // 4. Freeze the bundle over exactly these events.
-  const ctx = await custodyContext(epoch.custodianOrgId, inst.id);
-  const epochShape = ctx.chain.epochs.find((e) => e.id === epoch.id)!;
-  const lines = projectionOf(epochShape, ctx.chain.events, held);
-  const dossier = epoch.custodianOrgId === null ? null : await composeSystemDossier(inst.id, epoch.custodianOrgId);
-  const bundle: SealedBundle = {
-    version: 1, sealedAt: now.toISOString(),
-    instrument: { id: inst.id, externalId: inst.externalId, label: dossier?.label ?? inst.model },
-    epoch: { n: epoch.n, custodianOrgId: epoch.custodianOrgId, custodianName: fromName, closeKind, brokerOrgId: t.brokerOrgId },
-    transfer: { toOrgId: t.toOrgId, toName: t.toName },
-    chain: lines.map((l) => {
-      const e = ctx.chain.events.find((x) => x.id === l.eventId)!;
-      return { eventId: l.eventId, kind: l.kind, occurredAt: l.occurredAt.toISOString(), whoGrade: e.whoGrade, howGrade: e.howGrade, procedureKeys: l.procedureKeys, provenance: l.provenance, hash: e.hash ?? "" };
-    }),
-    dossier: dossier ?? emptyDossier(inst),
-  };
-  const digest = bundleHash(bundle);
-  let bundleRecordId = 0;
-  if (epoch.custodianOrgId !== null) {
-    await supersede(inst.id, epoch.custodianOrgId, "sealed");
-    const [rec] = await db.insert(engagementRecords).values({
-      instrumentId: inst.id, orgId: epoch.custodianOrgId, kind: "sealed", externalId: inst.externalId,
-      label: bundle.instrument.label, revokedBy: actor.email, revokedAt: now, data: bundle, bundleHash: digest,
-    }).returning({ id: engagementRecords.id });
-    bundleRecordId = rec.id;
-  }
-
-  // 5. Close. From here the trigger refuses every append into this epoch.
-  await db.update(custodyEpochs).set({
-    closeKind, sealedAt: now, sealHash, closedByEventId: appended.id, brokerOrgId: t.brokerOrgId,
-    redactionReviewedAt: t.reviewedAt ?? now,
-  }).where(eq(custodyEpochs.id, epoch.id));
-
-  // 6. Every grant on the epoch ends, and each grantee keeps a frozen record -
-  //    the existing 'revoked' behaviour, because to them that is what happened.
-  const live = await db.select().from(grants).where(and(eq(grants.epochId, epoch.id), isNull(grants.endedAt)));
-  for (const g of live) {
-    await db.update(grants).set({ endedAt: now, endedBy: epoch.custodianOrgId, endReason: "epoch_closed" }).where(eq(grants.id, g.id));
-    const theirs = await composeSystemDossier(inst.id, g.granteeOrgId);
-    if (theirs) {
-      await supersede(inst.id, g.granteeOrgId, "revoked");
-      await db.insert(engagementRecords).values({
-        instrumentId: inst.id, orgId: g.granteeOrgId, kind: "revoked", externalId: inst.externalId,
-        label: theirs.label, revokedBy: actor.email, revokedAt: now, data: theirs,
-      });
-    }
-  }
-
+  // 4-6. Freeze the bundle, close, end the grants. Shared with a claim's
+  //      silent resolution, which closes a tenure the same way for a holder
+  //      who never turned up.
+  const { bundleRecordId, digest } = await freezeAndClose({
+    inst, epoch, actor, closeKind, held, closedByEventId: appended.id, sealHash, now,
+    brokerOrgId: t.brokerOrgId, toOrgId: t.toOrgId, toName: t.toName, custodianName: fromName,
+    reviewedAt: t.reviewedAt,
+  });
   // 7. Seal to nobody: nobody holds it, and the pointer says so too.
   if (t.toOrgId === null) {
     await db.update(instruments).set({ ownerOrgId: null }).where(eq(instruments.id, inst.id));
@@ -429,6 +389,93 @@ export async function resume(actor: Actor, instrumentId: number): Promise<Outcom
   }).returning({ id: custodyEpochs.id });
   await db.update(instruments).set({ ownerOrgId: last.custodianOrgId }).where(eq(instruments.id, instrumentId));
   return { epochId: next.id };
+}
+
+
+/**
+ * Freeze the holder's bundle over exactly this epoch's events, close the
+ * epoch, and end every grant on it - each grantee keeping a 'revoked' record.
+ *
+ * Called by seal and by a claim's silent resolution. The transfer or claim
+ * event must already be appended (it is the last line the bundle covers) and
+ * the seal hash read, because from the close on nothing can be appended.
+ */
+export async function freezeAndClose(args: {
+  inst: typeof instruments.$inferSelect;
+  epoch: typeof custodyEpochs.$inferSelect;
+  actor: Actor;
+  closeKind: "sealed" | "steward_sealed" | "dormant" | "claimed";
+  held: number[];
+  closedByEventId: number;
+  sealHash: string;
+  now: Date;
+  brokerOrgId: number | null;
+  toOrgId: number | null;
+  toName: string;
+  custodianName: string;
+  reviewedAt: Date | null;
+  /** Claims only: when the tenure's free text is released downstream. */
+  findingsEmbargoUntil?: Date | null;
+}): Promise<{ bundleRecordId: number; digest: string }> {
+  const { inst, epoch, actor, closeKind, held, now } = args;
+  const ctx = await custodyContext(epoch.custodianOrgId, inst.id);
+  const epochShape = ctx.chain.epochs.find((e) => e.id === epoch.id)!;
+  const lines = projectionOf(epochShape, ctx.chain.events, held);
+  const dossier = epoch.custodianOrgId === null ? null : await composeSystemDossier(inst.id, epoch.custodianOrgId);
+  const bundle: SealedBundle = {
+    version: 1, sealedAt: now.toISOString(),
+    instrument: { id: inst.id, externalId: inst.externalId, label: dossier?.label ?? inst.model },
+    epoch: { n: epoch.n, custodianOrgId: epoch.custodianOrgId, custodianName: args.custodianName, closeKind, brokerOrgId: args.brokerOrgId },
+    transfer: { toOrgId: args.toOrgId, toName: args.toName },
+    chain: lines.map((l) => {
+      const e = ctx.chain.events.find((x) => x.id === l.eventId)!;
+      return { eventId: l.eventId, kind: l.kind, occurredAt: l.occurredAt.toISOString(), whoGrade: e.whoGrade, howGrade: e.howGrade, procedureKeys: l.procedureKeys, provenance: l.provenance, hash: e.hash ?? "" };
+    }),
+    dossier: dossier ?? emptyDossier(inst),
+  };
+  const digest = bundleHash(bundle);
+  let bundleRecordId = 0;
+  if (epoch.custodianOrgId !== null) {
+    await supersede(inst.id, epoch.custodianOrgId, "sealed");
+    const [rec] = await db.insert(engagementRecords).values({
+      instrumentId: inst.id, orgId: epoch.custodianOrgId, kind: "sealed", externalId: inst.externalId,
+      label: bundle.instrument.label, revokedBy: actor.email, revokedAt: now, data: bundle, bundleHash: digest,
+    }).returning({ id: engagementRecords.id });
+    bundleRecordId = rec.id;
+  }
+
+  // Close. From here the trigger refuses every append into this epoch.
+  await db.update(custodyEpochs).set({
+    closeKind, sealedAt: now, sealHash: args.sealHash, closedByEventId: args.closedByEventId,
+    brokerOrgId: args.brokerOrgId, redactionReviewedAt: args.reviewedAt ?? now,
+    findingsEmbargoUntil: args.findingsEmbargoUntil ?? null,
+  }).where(eq(custodyEpochs.id, epoch.id));
+
+  // Every grant on the epoch ends, and each grantee keeps a frozen record -
+  // the existing 'revoked' behaviour, because to them that is what happened.
+  const live = await db.select().from(grants).where(and(eq(grants.epochId, epoch.id), isNull(grants.endedAt)));
+  for (const g of live) {
+    await db.update(grants).set({ endedAt: now, endedBy: epoch.custodianOrgId, endReason: "epoch_closed" }).where(eq(grants.id, g.id));
+    const theirs = await composeSystemDossier(inst.id, g.granteeOrgId);
+    if (theirs) {
+      await supersede(inst.id, g.granteeOrgId, "revoked");
+      await db.insert(engagementRecords).values({
+        instrumentId: inst.id, orgId: g.granteeOrgId, kind: "revoked", externalId: inst.externalId,
+        label: theirs.label, revokedBy: actor.email, revokedAt: now, data: theirs,
+      });
+    }
+  }
+  return { bundleRecordId, digest };
+}
+
+/** Open the next tenure for an org. Used by accept, resume and a resolved claim. */
+export async function openNextEpoch(instrumentId: number, custodianOrgId: number | null, custodianName: string, openedByEventId: number | null): Promise<number> {
+  const [{ maxN }] = await db.select({ maxN: sql<number>`coalesce(max(${custodyEpochs.n}), 0)::int` })
+    .from(custodyEpochs).where(eq(custodyEpochs.instrumentId, instrumentId));
+  const [next] = await db.insert(custodyEpochs).values({
+    instrumentId, n: maxN + 1, custodianOrgId, custodianName, openedByEventId, closeKind: "open",
+  }).returning({ id: custodyEpochs.id });
+  return next.id;
 }
 
 function emptyDossier(inst: typeof instruments.$inferSelect): SystemDossier {

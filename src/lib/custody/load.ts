@@ -29,6 +29,7 @@ function toChain(
     openedByEventId: e.openedByEventId, closedByEventId: e.closedByEventId,
     closeKind: e.closeKind as CloseKind,
     sealedAt: e.sealedAt, sealHash: e.sealHash, brokerOrgId: e.brokerOrgId,
+    findingsEmbargoUntil: e.findingsEmbargoUntil,
   }));
   const events: SystemEvent[] = eventRows.map((r) => ({
     id: r.id, instrumentId: r.instrumentId, assetId: r.assetId, epochId: r.epochId,

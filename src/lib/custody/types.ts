@@ -149,6 +149,13 @@ export type Epoch = {
   sealHash: string | null;
   /** The broker on the transfer that CLOSED this epoch. A party to it, forever. */
   brokerOrgId: OrgId | null;
+  /**
+   * Claimed epochs only. Structured provenance crosses to the claimant at
+   * once; free text crosses at this moment unless its author withheld it
+   * during the notice window. Null = no embargo, which is every epoch that
+   * closed any other way.
+   */
+  findingsEmbargoUntil?: Date | null;
 };
 
 export type Grant = {

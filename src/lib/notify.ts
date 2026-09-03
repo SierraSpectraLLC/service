@@ -239,6 +239,56 @@ export async function notifyAccessRequest(opts: {
 }
 
 /**
+ * A claim has been filed on a machine, and a window is running. Told to the
+ * holder (or its steward) and to every author of a line in the open tenure:
+ * the authors because their free text crosses when the window ends unless
+ * they hold it back, and nobody can hold back what they were not told about.
+ */
+export async function notifyClaimNotice(opts: {
+  to: string[]; claimantName: string; externalId: string; instrumentId: number; noticeEndsOn: string;
+  role: "holder" | "steward" | "author";
+}) {
+  try {
+    if (!opts.to.length) return;
+    const url = appUrl();
+    const subject = `${opts.externalId}: ${opts.claimantName} claims custody - window closes ${opts.noticeEndsOn}`;
+    const line = opts.role === "author"
+      ? `You wrote on this machine's record. When the window closes, the free text of those lines becomes readable to ${esc(opts.claimantName)} unless you hold it back first; readings, parts and dates travel regardless.`
+      : opts.role === "steward"
+        ? `The organization holding it has nobody who can answer, so this reaches you as its steward. Seal to ${esc(opts.claimantName)} yourself, object, or let the window run.`
+        : `You hold this machine. Seal it to ${esc(opts.claimantName)} yourself, object, or let the window run - after which custody moves and your record is frozen for you exactly as a seal would leave it.`;
+    await deliver({
+      to: opts.to, kind: "claim_notice", href: `/instruments/${opts.instrumentId}`,
+      title: subject, subject,
+      body: `<b>${esc(opts.claimantName)}</b> has filed a custody claim on <b>${esc(opts.externalId)}</b> with evidence on file. The notice window closes <b>${esc(opts.noticeEndsOn)}</b>.<br><br>${line}
+        ${url ? btn(`${url}/instruments/${opts.instrumentId}`, `Open ${opts.externalId}`) : ""}`,
+    });
+  } catch (e) {
+    console.error("[notify] claim-notice email failed:", (e as Error).message);
+  }
+}
+
+/** An outside shop is asked to confirm a line of work attributed to it. */
+export async function notifyCountersignRequest(opts: {
+  to: string[]; requesterName: string; externalId: string; instrumentId: number; line: string;
+}) {
+  try {
+    if (!opts.to.length) return;
+    const url = appUrl();
+    const subject = `${opts.externalId}: confirm work attributed to you`;
+    await deliver({
+      to: opts.to, kind: "countersign", href: `/instruments/${opts.instrumentId}`,
+      title: subject, subject,
+      body: `<b>${esc(opts.requesterName)}</b> recorded on <b>${esc(opts.externalId)}</b>: ${quote(opts.line)}
+        They say your organization did this work. Confirming makes the line yours - third-party, in your name - and changes nothing else about it. Declining leaves it as their word.
+        ${url ? btn(`${url}/instruments/${opts.instrumentId}`, `Review on ${opts.externalId}`) : ""}`,
+    });
+  } catch (e) {
+    console.error("[notify] countersign email failed:", (e as Error).message);
+  }
+}
+
+/**
  * Somebody wrote @Name in a task or checklist note. Same name resolution as
  * discussion mentions (directory, then users, then a staff-email prefix), and the
  * same visibility discipline: the note's text travels in the notification, so

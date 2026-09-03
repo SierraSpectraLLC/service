@@ -15,6 +15,7 @@ import {
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   transfers,
+  systemEvents,
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
   awards, shareLinkSystems, providerProfiles, providerLinks, clientShares, referralFees,
   leads, leadOffers, calendarNotes,
@@ -71,8 +72,13 @@ import { signoffGate, snapshotOf } from "@/lib/signoff";
 import {
   emitCheckoutVerdict, emitCustodyEvent, emitPmTask, emitSafely, emitWorkOrderClosed,
 } from "@/lib/custody/emit";
+import { notifyClaimNotice, notifyCountersignRequest } from "@/lib/notify";
 import * as custodyTransfer from "@/lib/custody/transfer";
+import * as custodyClaims from "@/lib/custody/claims";
+import * as countersign from "@/lib/custody/countersign";
+import { CLAIM_NOTICE_DAYS } from "@/lib/custody/policy";
 import { flagOn } from "@/lib/custody/flags";
+import { shopTime } from "@/lib/shopday";
 import { attachInstead } from "@/lib/clientShareData";
 import { completionBlocked, evaluateResult, needsResult, parseAcceptance, resultIsRecorded, serializeAcceptance, type Acceptance } from "@/lib/testResult";
 import { TIME_CATEGORIES } from "@/lib/rates";
@@ -9878,6 +9884,135 @@ export async function ackQueueHandback(instrumentId: number): Promise<{ error?: 
  * Staff-only, deliberately. A serial number is not proof of purchase and
  * neither is a request; somebody at the operator has to witness the transfer.
  */
+// ── Claims: notice, window, silence or objection ────────────────────────────
+// approveClaim moved the pointer on an admin's say-so with the holder never
+// asked. Behind custody.claims a claim is a NOTICE with a window; the rules
+// live in lib/custody/claims. These are the audited doors.
+
+const CLAIMS_OFF = "Custody claims are not enabled on this instance yet.";
+
+/**
+ * File a claim: the ordinary serial-matched request, plus evidence and a
+ * window. Who gets told is decided by lib/custody/claims.noticeAudience -
+ * the holder or its steward, and every author in the open tenure.
+ */
+export async function fileClaim(
+  serial: string, message: string, evidence?: { fileName: string; url: string; size: number },
+): Promise<{ error?: string; noticeEndsOn?: string; immediate?: boolean }> {
+  const u = await requireUser();
+  if (!(await flagOn("custody.claims"))) return { error: CLAIMS_OFF };
+  if (u.orgId === null) return { error: "Claims are filed by an organization, not by staff." };
+  const filed = await requestAccess(serial, message, "claim");
+  if (filed.error) return { error: filed.error };
+  const [row] = await db.select().from(accessRequests).where(and(
+    eq(accessRequests.orgId, u.orgId), eq(accessRequests.kind, "claim"), eq(accessRequests.status, "pending"),
+    isNull(accessRequests.noticeEndsAt),
+  )).orderBy(desc(accessRequests.id)).limit(1);
+  if (!row) return { error: "The claim was filed but could not be noticed - ask the platform." };
+
+  let evidenceAttachmentId: number | null = null;
+  if (evidence) {
+    const [att] = await db.insert(attachments).values({
+      tenantOrgId: await tenantOfSystem(row.instrumentId), instrumentId: row.instrumentId, orgId: u.orgId,
+      fileName: evidence.fileName.slice(0, 200), kind: "Other", url: evidence.url, size: evidence.size,
+      uploadedBy: u.name || u.email, description: "Evidence for a custody claim",
+    }).returning({ id: attachments.id });
+    evidenceAttachmentId = att.id;
+  }
+  const noticed = await custodyClaims.noticeClaim(row.id, evidenceAttachmentId);
+  if (noticed.error) return { error: noticed.error };
+  const [inst] = await db.select({ externalId: instruments.externalId }).from(instruments).where(eq(instruments.id, row.instrumentId));
+  const noticeEndsOn = noticed.noticeEndsAt ? shopTime(noticed.noticeEndsAt) : "";
+  await audit({
+    actor: u.email, instrumentId: row.instrumentId, entityType: "claim", entityId: row.id,
+    action: noticed.immediate
+      ? `claimed custody of ${inst?.externalId ?? "a system"} - resolved at once, the machine was dormant`
+      : `claimed custody of ${inst?.externalId ?? "a system"} with evidence - the notice window runs ${CLAIM_NOTICE_DAYS} days, to ${noticeEndsOn}`,
+  });
+  if (!noticed.immediate) {
+    const who = await custodyClaims.noticeAudience(row.instrumentId);
+    const tell = async (orgId: number | null, role: "holder" | "steward" | "author") => {
+      if (orgId === null) return;
+      const to = await ownerAudience(orgId);
+      await notifyClaimNotice({ to, claimantName: u.orgName ?? u.name, externalId: inst?.externalId ?? "", instrumentId: row.instrumentId, noticeEndsOn, role });
+    };
+    await tell(who.stewardOrgId ?? who.custodianOrgId, who.stewardOrgId !== null ? "steward" : "holder");
+    for (const a of who.authorOrgIds) await tell(a, "author");
+  }
+  rev(row.instrumentId);
+  return { noticeEndsOn, immediate: noticed.immediate };
+}
+
+export async function disputeClaim(claimId: number, note: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const res = await custodyClaims.dispute(transferActor(u), claimId, note);
+  if (res.error) return res;
+  const [c] = await db.select().from(accessRequests).where(eq(accessRequests.id, claimId));
+  await audit({ actor: u.email, instrumentId: c?.instrumentId ?? null, entityType: "claim", entityId: claimId, action: `objected to a custody claim - parked for the platform: ${note.trim().slice(0, 120)}` });
+  if (c) rev(c.instrumentId);
+  return {};
+}
+
+/** An author holds back their own line during a claim window. */
+export async function withholdMyLine(eventId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const res = await custodyClaims.withholdOwnLine(transferActor(u), eventId);
+  if (res.error) return res;
+  await audit({ actor: u.email, entityType: "custody", entityId: eventId, action: "held back the free text of a line during a claim window" });
+  return {};
+}
+
+/** The platform decides a disputed claim. Owner of the instance only. */
+export async function decideDisputedClaim(claimId: number, grant: boolean): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  if (!isPlatformStaff(tenantViewer(u))) return { error: "Only the platform decides a disputed claim." };
+  const res = await custodyClaims.decideDisputed(transferActor(u), claimId, grant);
+  if (res.error) return res;
+  const [c] = await db.select().from(accessRequests).where(eq(accessRequests.id, claimId));
+  await audit({ actor: u.email, instrumentId: c?.instrumentId ?? null, entityType: "claim", entityId: claimId, action: grant ? "granted a disputed custody claim" : "denied a disputed custody claim" });
+  if (c) rev(c.instrumentId);
+  revHouse();
+  return {};
+}
+
+// ── Countersign: an outside shop confirms work attributed to it ─────────────
+
+export async function requestCountersignAction(eventId: number, namedProvider: string): Promise<{ error?: string; status?: string }> {
+  const u = await requireEditor();
+  const [e] = await db.select().from(systemEvents).where(eq(systemEvents.id, eventId));
+  if (!e) return { error: "Not found" };
+  await assertSystemVisible(u, e.instrumentId);
+  const res = await countersign.requestCountersign(eventId, namedProvider, u.email);
+  const [inst] = await db.select({ externalId: instruments.externalId }).from(instruments).where(eq(instruments.id, e.instrumentId));
+  if (res.status === "pending") {
+    await notifyCountersignRequest({
+      to: await ownerAudience(res.orgId), requesterName: u.orgName ?? u.name, externalId: inst?.externalId ?? "",
+      instrumentId: e.instrumentId, line: String((e.provenance as { findings?: string }).findings ?? e.kind),
+    });
+  }
+  await audit({ actor: u.email, instrumentId: e.instrumentId, entityType: "custody", entityId: eventId,
+    action: res.status === "invited"
+      ? `asked ${namedProvider} to confirm a line - they are not on the platform yet, so it waits as an invitation`
+      : `asked ${namedProvider} to confirm a line of work` });
+  return { status: res.status };
+}
+
+export async function confirmCountersignAction(confirmationId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const res = await countersign.confirmCountersign(transferActor(u), confirmationId);
+  if (res.error) return res;
+  await audit({ actor: u.email, entityType: "custody", entityId: confirmationId, action: "confirmed a line of work attributed to us - it is third-party now" });
+  return {};
+}
+
+export async function declineCountersignAction(confirmationId: number, note = ""): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const res = await countersign.declineCountersign(transferActor(u), confirmationId, note);
+  if (res.error) return res;
+  await audit({ actor: u.email, entityType: "custody", entityId: confirmationId, action: "declined to confirm a line of work attributed to us" });
+  return {};
+}
+
 // ── Custody transfers: initiate -> review -> seal -> accept ─────────────────
 // The shaped version of handOffSystem, behind custody.transfers. Every rule
 // lives in lib/custody/transfer; these are the org-scoped, audited doors.
@@ -9923,6 +10058,10 @@ export async function sealTransfer(transferId: number): Promise<{ error?: string
   const res = await custodyTransfer.seal(transferActor(u), transferId);
   if (res.error !== undefined) return { error: res.error };
   await transferAudit(u, transferId, `sealed custody - bundle ${res.bundleHash.slice(0, 12)}, chain ${res.sealHash.slice(0, 12)}`);
+  // A holder who seals to a claimant while the window runs has answered the
+  // claim the best way there is; the cron must not resolve it a second time.
+  const [t] = await db.select({ instrumentId: transfers.instrumentId, toOrgId: transfers.toOrgId }).from(transfers).where(eq(transfers.id, transferId));
+  if (t?.toOrgId != null) await custodyClaims.markSealedByHolder(t.instrumentId, t.toOrgId);
   revHouse();
   return { bundleHash: res.bundleHash };
 }
@@ -18664,6 +18803,9 @@ export async function acceptHandoff(token: string, data: {
   const made = await flagOn("custody.transfers")
     ? await attachInstead({ payload, senderTenantOrgId: row.tenantOrgId, destTenantOrgId: org.id, actor: row.toEmail })
     : await materialize({ payload, destTenantOrgId: org.id, actor: row.toEmail });
+  // The countersign requests that were waiting for a shop by this name are
+  // now waiting ON it. See lib/custody/countersign.adoptInvitations.
+  await countersign.adoptInvitations(org.id, name).catch(() => 0);
   await raiseReferralFee(row, org.id, made.orgId, "");
   await db.update(clientShares).set({ destOrgId: made.orgId }).where(eq(clientShares.id, row.id));
 

@@ -64,6 +64,15 @@ const GUARD_VOCABULARY = new RegExp([
    * custodianStanding gated on the instrument's tenant.
    */
   "recipientStanding\\(",
+  /*
+   * lib/custody/claims.claimIsDue: a claim's authority to move a machine is
+   * that its notice window has run - the row was noticed against a serial the
+   * claimant matched, the holder and every author were told, and nobody
+   * objected (or the platform decided, which dates the window to now). The
+   * one write in resolveSilently that touches the instrument pointer runs only
+   * after it says yes.
+   */
+  "claimIsDue\\(",
 ].join("|"));
 
 /** Table constants declared with tenantStamp(). */

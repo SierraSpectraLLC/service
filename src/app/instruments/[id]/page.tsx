@@ -74,6 +74,7 @@ import { dayOf } from "@/lib/serviceHistory";
 import { custodyContext } from "@/lib/custody/load";
 import { flagOn } from "@/lib/custody/flags";
 import * as transferLib from "@/lib/custody/transfer";
+import * as claimsLib from "@/lib/custody/claims";
 import SystemCoverage from "@/components/SystemCoverage";
 import CoverageRecorder from "@/components/CoverageRecorder";
 import { HeroKebab, Pill, RecordHero, type HeroStat } from "@/components/ui";
@@ -402,7 +403,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // staff, or the owning organization's editors.
   const isDecider = isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor");
   const requestRows = isDecider
-    ? await db.select({ id: accessRequests.id, kind: accessRequests.kind, requestedBy: accessRequests.requestedBy, message: accessRequests.message, createdAt: accessRequests.createdAt, orgName: orgs.name, orgKind: orgs.kind })
+    ? await db.select({ id: accessRequests.id, kind: accessRequests.kind, requestedBy: accessRequests.requestedBy, message: accessRequests.message, createdAt: accessRequests.createdAt, orgName: orgs.name, orgKind: orgs.kind, noticeEndsAt: accessRequests.noticeEndsAt, resolution: accessRequests.resolution })
         .from(accessRequests).innerJoin(orgs, eq(orgs.id, accessRequests.orgId))
         .where(and(eq(accessRequests.instrumentId, instId), eq(accessRequests.status, "pending")))
         .orderBy(asc(accessRequests.createdAt))
@@ -543,6 +544,19 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // custody.transfers: seal-and-accept on the custody panel. Who may act is
   // decided by lib/custody/transfer from the open epoch, never from the
   // owner pointer - the pointer is what this replaces.
+  // custody.claims: the holder, its steward, or an author of the open tenure
+  // may object while a window runs. Same standing rules as a transfer.
+  const claimStateOf = (c: { resolution: string; noticeEndsAt: Date | null }): "window" | "due" | "disputed" | "resolved" =>
+    c.resolution ? (c.resolution === "disputed" ? "disputed" : "resolved") : (c.noticeEndsAt && new Date() >= c.noticeEndsAt ? "due" : "window");
+  const canObjectToClaim = await (async () => {
+    if (!(await flagOn("custody.claims"))) return false;
+    const actor = { email: user.email, name: user.name, role: user.role, orgId: user.orgId, operatorOrgId: user.operatorOrgId };
+    const open = await transferLib.openEpoch(inst.id);
+    if (open && (await transferLib.custodianStanding(actor, open, inst.tenantOrgId))) return true;
+    const who = await claimsLib.noticeAudience(inst.id);
+    const mine = [user.orgId, user.operatorOrgId].filter((x): x is number => x !== null);
+    return mine.some((id) => who.authorOrgIds.includes(id) || who.stewardOrgId === id);
+  })();
   const transferState = await (async () => {
     if (!(await flagOn("custody.transfers"))) return undefined;
     const actor = { email: user.email, name: user.name, role: user.role, orgId: user.orgId, operatorOrgId: user.operatorOrgId };
@@ -784,6 +798,12 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               accessRequests={requestRows.map((r) => ({
                 id: r.id, orgName: r.orgName, orgKind: r.orgKind, kind: r.kind, requestedBy: r.requestedBy,
                 message: r.message, when: shopTime(r.createdAt),
+                // custody.claims: a claim with a window shows the window.
+                ...(r.kind === "claim" && r.noticeEndsAt ? { claim: {
+                  noticeEndsOn: shopTime(r.noticeEndsAt),
+                  state: claimStateOf({ resolution: r.resolution, noticeEndsAt: r.noticeEndsAt }),
+                  canObject: canObjectToClaim,
+                } } : {}),
               }))}
               ownerOrgId={inst.ownerOrgId}
               canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}

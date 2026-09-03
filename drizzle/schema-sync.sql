@@ -4626,3 +4626,59 @@ BEGIN
       FOR EACH ROW EXECUTE FUNCTION "custody_epochs_closed_is_frozen"();
   END IF;
 END $$;
+
+-- ═══ CUSTODY AND PROVENANCE, phase 6 ═══════════════════════════════════════
+-- Claims for history whose holder will not or cannot seal, and countersigns.
+ALTER TABLE "access_requests" ADD COLUMN IF NOT EXISTS "evidence_attachment_id" integer;
+ALTER TABLE "access_requests" ADD COLUMN IF NOT EXISTS "notice_ends_at" timestamp;
+ALTER TABLE "access_requests" ADD COLUMN IF NOT EXISTS "resolution" text NOT NULL DEFAULT '';
+ALTER TABLE "access_requests" ADD COLUMN IF NOT EXISTS "resolved_at" timestamp;
+ALTER TABLE "access_requests" ADD COLUMN IF NOT EXISTS "dispute_note" text NOT NULL DEFAULT '';
+ALTER TABLE "custody_epochs" ADD COLUMN IF NOT EXISTS "findings_embargo_until" timestamp;
+
+CREATE TABLE IF NOT EXISTS "event_confirmations" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "event_id" integer NOT NULL,
+  "org_id" integer,
+  "named_provider" text NOT NULL DEFAULT '',
+  "status" text NOT NULL DEFAULT 'pending',
+  "requested_by" text NOT NULL DEFAULT '',
+  "requested_at" timestamp NOT NULL DEFAULT now(),
+  "decided_at" timestamp,
+  "decided_by" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS "event_confirmations_event_idx" ON "event_confirmations" ("event_id");
+CREATE INDEX IF NOT EXISTS "event_confirmations_org_idx" ON "event_confirmations" ("org_id");
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'event_confirmations_event_id_fk') THEN
+    ALTER TABLE "event_confirmations" ADD CONSTRAINT "event_confirmations_event_id_fk"
+      FOREIGN KEY ("event_id") REFERENCES "system_events"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'event_confirmations_org_id_fk') THEN
+    ALTER TABLE "event_confirmations" ADD CONSTRAINT "event_confirmations_org_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- The countersign is the second permitted hole in the append-only rule:
+-- who_grade may change when the named provider confirms. It is not hashed, so
+-- the chain does not move. author_org_id stays locked - it IS hashed, and the
+-- confirmation row records who confirmed. CREATE OR REPLACE re-defines the
+-- function in place; the trigger that calls it is unchanged.
+CREATE OR REPLACE FUNCTION "system_events_no_mutation"() RETURNS trigger AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF EXISTS (SELECT 1 FROM instruments WHERE id = OLD.instrument_id) THEN
+      RAISE EXCEPTION 'system_events is append-only: event % cannot be deleted', OLD.id;
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF (to_jsonb(NEW) - 'withheld' - 'epoch_id' - 'who_grade')
+     IS DISTINCT FROM (to_jsonb(OLD) - 'withheld' - 'epoch_id' - 'who_grade') THEN
+    RAISE EXCEPTION 'system_events is append-only: only withheld, epoch_id and who_grade may change (event %)', OLD.id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
