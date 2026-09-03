@@ -15,6 +15,8 @@ type StoredLine = {
   kind: string; description: string; detail: string;
   /** Real units already (thousandths resolved by the caller). */
   qty: number; unitCents: number; covered: boolean; coveredBy: string;
+  /** The catalogued number quoted, where the line came off one. */
+  partNumber?: string;
 };
 
 /**
@@ -32,7 +34,10 @@ export const invoiceLinesForXlsx = (lines: StoredLine[]): DocLine[] =>
       l.detail && ` - ${l.detail}`,
       l.covered && ` (covered${l.coveredBy ? ` by ${l.coveredBy}` : ""})`,
     ].filter(Boolean).join(""),
-    partNumber: "",
+    // The template has always had this column and nothing ever filled it. It
+    // is what a client's purchasing department matches a quote against, and
+    // what the shop reorders by - see quote_lines.part_number.
+    partNumber: l.partNumber ?? "",
     qty: l.qty,
     unitPrice: l.covered ? 0 : l.unitCents / 100,
   }));

@@ -2341,7 +2341,9 @@ export const partCatalog = pgTable("part_catalog", {
   // Their number, when yours is a house number wrapping somebody else's part.
   mfrPartNumber: text("mfr_part_number").notNull().default(""),
   // part | consumable | kit - a kit is a bag of other numbers, sold and stocked
-  // as one thing (see partKitLines).
+  // as one thing (see partKitLines) - plus labor | travel, which are not things
+  // at all: a number a shop quotes an hour or a trip under. See SERVICE_KINDS
+  // in lib/partCatalog for why those belong in the same book.
   kind: text("kind").notNull().default("part"),
   // Which module types this suits, for the picker. [] = anything.
   assetTypes: text("asset_types").array().notNull().default([]),
@@ -2349,6 +2351,15 @@ export const partCatalog = pgTable("part_catalog", {
   // kit is not an LC-30 seal kit. [] = any model of the types above.
   models: text("models").array().notNull().default([]),
   note: text("note").notNull().default(""),
+  /**
+   * What a SERVICE code sells for, per unit. Zero everywhere else, and read
+   * nowhere else: a thing in a box is priced from part_prices plus the
+   * workspace's markup, which is the one formula an invoice uses, and giving a
+   * part a second price here is how a quote and its invoice start disagreeing.
+   */
+  rateCents: integer("rate_cents").notNull().default(0),
+  /** What one of it is - "h", "trip", "day". Blank on a thing you count. */
+  unit: text("unit").notNull().default(""),
   archived: boolean("archived").notNull().default(false),
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -3497,7 +3508,17 @@ export const invoiceLines = pgTable("invoice_lines", {
   kind: text("kind").notNull().default("part"),
   description: text("description").notNull().default(""),
   detail: text("detail").notNull().default(""),        // the second, quieter line
+  /**
+   * The catalogued number this line was quoted off - a part's, or a service
+   * code's (LABOR-LCP, TZ3O). Its own field rather than glued into the
+   * description, because the Excel layout has a part-number column and because
+   * a number is what the client's purchasing system matches on. Blank on a
+   * line somebody typed from nothing, which is still allowed.
+   */
+  partNumber: text("part_number").notNull().default(""),
   qty: integer("qty").notNull().default(1000),          // thousandths, so 4.5 h is 4500
+  /** What one unit is: "h", "trip", "". Blank keeps the old reading of kind. */
+  unit: text("unit").notNull().default(""),
   unitCents: integer("unit_cents").notNull().default(0),
   covered: boolean("covered").notNull().default(false),
   coveredBy: text("covered_by").notNull().default(""),  // the agreement number it burned
@@ -3667,7 +3688,11 @@ export const quoteLines = pgTable("quote_lines", {
   kind: text("kind").notNull().default("part"),
   description: text("description").notNull().default(""),
   detail: text("detail").notNull().default(""),
+  /** The catalogued number quoted - see invoice_lines.part_number. */
+  partNumber: text("part_number").notNull().default(""),
   qty: integer("qty").notNull().default(1000),     // thousandths
+  /** What one unit is: "h", "trip", "". See invoice_lines.unit. */
+  unit: text("unit").notNull().default(""),
   unitCents: integer("unit_cents").notNull().default(0),
   covered: boolean("covered").notNull().default(false),
   coveredBy: text("covered_by").notNull().default(""),

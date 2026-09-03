@@ -40,9 +40,10 @@ import { enforceDeviceLockout } from "@/lib/deviceLockoutData";
 import { clampGraceDays, clampLeaseDays } from "@/lib/leaseGuard";
 import { leaseConfig, LEASE_NOT_CONFIGURED, offlineCodeFor, openLease } from "@/lib/leaseGuardData";
 import {
-  allNumbers, catalogEntry, catalogName, cleanAliases, currentNumber, MAX_PART_PHOTOS,
-  numberClash, PART_KINDS, PART_KIND_LABEL, type PartAlias,
+  allNumbers, catalogEntry, catalogName, CATALOG_KINDS, cleanAliases, currentNumber, isService,
+  MAX_PART_PHOTOS, numberClash, PART_KINDS, PART_KIND_LABEL, type PartAlias,
 } from "@/lib/partCatalog";
+import { HOUSE_SERVICE_CODES, missingServiceCodes } from "@/lib/serviceCodes";
 import { checkRows, type PartImportRow, type RowProblem } from "@/lib/partImport";
 // Aliased: lib/stock exports a KIND_LABEL too (shelf, van, ...), imported below
 // and lexically first, so the bare name here silently meant the wrong map -
@@ -14002,6 +14003,10 @@ export type CatalogInput = {
   kind: string; assetTypes: string[]; models?: string[]; note: string;
   /** The part's OTHER numbers - ours and the makers'. See lib/partCatalog. */
   aliases?: PartAlias[];
+  /** What a labor or travel code sells for, per unit. Ignored on a thing. */
+  rateCents?: number;
+  /** What one of it is - "h", "trip". See unitFor in lib/partCatalog. */
+  unit?: string;
 };
 
 /**
@@ -14052,16 +14057,25 @@ async function writeAliases(catalogId: number, aliases: PartAlias[]) {
   })));
 }
 
-const cleanCatalog = (d: CatalogInput) => ({
-  partNumber: d.partNumber.trim().slice(0, 80),
-  name: d.name.trim().slice(0, 160),
-  manufacturer: d.manufacturer.trim().slice(0, 80),
-  mfrPartNumber: d.mfrPartNumber.trim().slice(0, 80),
-  kind: (PART_KINDS as readonly string[]).includes(d.kind) ? d.kind : "part",
-  assetTypes: [...new Set(d.assetTypes.map((t) => t.trim()).filter(Boolean))],
-  models: [...new Set((d.models ?? []).map((m) => m.trim()).filter(Boolean))],
-  note: d.note.trim().slice(0, 500),
-});
+const cleanCatalog = (d: CatalogInput) => {
+  const kind = (CATALOG_KINDS as readonly string[]).includes(d.kind) ? d.kind : "part";
+  return {
+    partNumber: d.partNumber.trim().slice(0, 80),
+    name: d.name.trim().slice(0, 160),
+    manufacturer: d.manufacturer.trim().slice(0, 80),
+    mfrPartNumber: d.mfrPartNumber.trim().slice(0, 80),
+    kind,
+    assetTypes: [...new Set(d.assetTypes.map((t) => t.trim()).filter(Boolean))],
+    models: [...new Set((d.models ?? []).map((m) => m.trim()).filter(Boolean))],
+    note: d.note.trim().slice(0, 500),
+    // Both are read for service kinds only, and both are cleared on anything
+    // else - a rate left behind by somebody switching a row from Labor to Part
+    // would be a second price on a part, which is the one thing rate_cents is
+    // documented never to be.
+    rateCents: isService(kind) ? Math.max(0, Math.round(Number(d.rateCents) || 0)) : 0,
+    unit: isService(kind) ? (d.unit ?? "").trim().slice(0, 12) : "",
+  };
+};
 
 // ── Catalog reference library ───────────────────────────────────────────────
 // Manuals, links and field notes filed on a model or module type, surfacing on
@@ -14366,6 +14380,8 @@ export async function catalogForLookup(): Promise<{
     kind: string; archived: boolean; aliases: PartAlias[]; photoUrl: string;
     /** Best known offer, staff only - see the redaction note below. */
     vendor: string; priceCents: number | null; isOem: boolean;
+    /** A service code's own price, and what one of it is. See lib/partCatalog. */
+    rateCents: number; unit: string;
   }[];
 }> {
   const u = await requireUser();
@@ -14408,6 +14424,10 @@ export async function catalogForLookup(): Promise<{
         aliases,
         photoUrl: photos.find((ph) => ph.catalogId === r.id)?.url ?? "",
         vendor: best?.vendor ?? "", priceCents: best?.priceCents ?? null, isOem: best?.isOem ?? false,
+        /* Not redacted, unlike the cost above it: a service code's rate is what
+           the client is CHARGED - it is on their quote - where priceCents is
+           what the shop pays a vendor, which is nobody else's business. */
+        rateCents: r.rateCents, unit: r.unit,
       };
     }),
   };
@@ -14435,10 +14455,84 @@ export async function addCatalogPart(data: CatalogInput): Promise<{ error?: stri
   await writeAliases(row.id, aliases);
   await audit({
     actor: u.email, entityType: "part_catalog", entityId: row.id, tenantOrgId: tenant,
-    action: `cataloged ${clean.partNumber}${clean.name ? ` - ${clean.name}` : ""} (${PART_KIND_LABEL[clean.kind].toLowerCase()})`,
+    action: `cataloged ${clean.partNumber}${clean.name ? ` - ${clean.name}` : ""} (${PART_KIND_LABEL[clean.kind].toLowerCase()})`
+      // A rate is a price somebody set; it belongs in the sentence, the way a
+      // vendor price does. Silent on a part, which has none of its own.
+      + (clean.rateCents > 0 ? ` at ${formatCents(clean.rateCents)}${clean.unit ? `/${clean.unit}` : ""}` : ""),
   });
   revalidatePath("/settings/parts");
   return { id: row.id };
+}
+
+/**
+ * The vocabulary the part form needs, fetched when somebody opens it rather
+ * than by every page that might.
+ *
+ * PartDialog is the one form for what a number IS, and the point of having one
+ * is that it can be opened from anywhere - the parts catalog, a model page, and
+ * now the middle of building a quote. Making each of those pages query the
+ * module types, the model book and the maker book on the chance somebody
+ * catalogs something is three queries per page load for a dialog most visits
+ * never open. This is that same data behind one call, made on the click.
+ */
+export async function catalogBook(): Promise<{
+  assetTypes: string[]; modelsByType: Record<string, string[]>; makers: string[]; today: string;
+}> {
+  const u = await requireStaff();
+  const tenant = readTenant(u);
+  const [terms, makers] = await Promise.all([
+    db.select({ name: vocabTerms.name, kind: vocabTerms.kind, assetType: vocabTerms.assetType, categories: vocabTerms.categories })
+      .from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, tenant)).orderBy(asc(vocabTerms.name))
+      .catch(() => []),
+    makerNames(tenant).catch(() => []),
+  ]);
+  const modelsByType: Record<string, string[]> = {};
+  for (const t of terms) {
+    if (t.kind !== "model") continue;
+    // Under the module type AND every system type it is filed in - the same
+    // indexing settings/parts does, so the picker offers the same models
+    // wherever the dialog is opened from.
+    if (t.assetType) (modelsByType[t.assetType] ??= []).push(t.name);
+    for (const c of t.categories ?? []) (modelsByType[c] ??= []).push(t.name);
+  }
+  return {
+    assetTypes: terms.filter((t) => t.kind === "asset_type").map((t) => t.name),
+    modelsByType, makers, today: shopToday(),
+  };
+}
+
+/**
+ * Put the shop's standard labor and travel numbers in the book.
+ *
+ * Four rows somebody would otherwise type four times, and the reason the
+ * catalog learned about service kinds at all: a travel zone and a labor program
+ * are quoted off a number the same way a seal is. Idempotent by construction -
+ * missingServiceCodes matches against every number the book already answers to,
+ * so running this twice writes nothing the second time, and a code the shop has
+ * since renamed or retired is left exactly as it is.
+ *
+ * No rates. What an hour of LC/MS work sells for is the shop's decision, and
+ * seeding a guess would put a number nobody chose on a client's quote - so each
+ * lands at zero, priced on the part the first time somebody quotes it.
+ */
+export async function installServiceCodes(): Promise<{ error?: string; added?: number }> {
+  const u = await requireStaff();
+  const tenant = myTenantOrgId(u);
+  const mine = await db.select().from(partCatalog).where(forTenant(partCatalog.tenantOrgId, tenant));
+  const missing = missingServiceCodes(await loadAliases(mine), HOUSE_SERVICE_CODES);
+  if (!missing.length) return { added: 0 };
+  for (const code of missing) {
+    const [row] = await db.insert(partCatalog).values({
+      tenantOrgId: tenant, createdBy: u.email,
+      partNumber: code.partNumber, name: code.name, kind: code.kind, unit: code.unit,
+    }).returning();
+    await audit({
+      actor: u.email, entityType: "part_catalog", entityId: row.id, tenantOrgId: tenant,
+      action: `cataloged ${code.partNumber} - ${code.name} (${PART_KIND_LABEL[code.kind].toLowerCase()}), no rate set yet`,
+    });
+  }
+  revalidatePath("/settings/parts");
+  return { added: missing.length };
 }
 
 /**
@@ -16785,8 +16879,16 @@ export async function deleteQuote(id: number, reason: string): Promise<{ error?:
 /** What a hand-typed line may be. Tax and fee_ref rows come from the system. */
 const MANUAL_LINE_KINDS = ["part", "labor", "travel", "expense"] as const;
 
-function cleanManualLine(data: { kind: string; description: string; qty: number; unitCents: number }):
-  { error: string } | { kind: string; description: string; qty: number; unitCents: number } {
+export type ManualLine = {
+  kind: string; description: string; qty: number; unitCents: number;
+  /** The catalogued number this came off, when it came off one. */
+  partNumber?: string;
+  /** What one of them is - "h", "trip". Blank reads off the kind, as before. */
+  unit?: string;
+};
+
+function cleanManualLine(data: ManualLine):
+  { error: string } | Required<ManualLine> {
   const description = data.description.trim();
   if (!description) return { error: "Say what the charge is for" };
   if (!(MANUAL_LINE_KINDS as readonly string[]).includes(data.kind)) {
@@ -16796,7 +16898,14 @@ function cleanManualLine(data: { kind: string; description: string; qty: number;
   if (!Number.isFinite(qty) || qty <= 0 || qty > 100000) return { error: "Quantity must be above zero" };
   const unitCents = Math.round(Number(data.unitCents));
   if (!Number.isFinite(unitCents) || unitCents < 0) return { error: "The price cannot be negative" };
-  return { kind: data.kind, description, qty, unitCents };
+  /* Taken as typed, and never checked against the catalog. Same rule the rest
+     of the system follows for a part number: a line quoting a number nobody has
+     described has to be writable, or the estimate waits on the catalog. */
+  return {
+    kind: data.kind, description, qty, unitCents,
+    partNumber: (data.partNumber ?? "").trim().slice(0, 80),
+    unit: (data.unit ?? "").trim().slice(0, 12),
+  };
 }
 
 /**
@@ -17348,7 +17457,7 @@ export async function createBlankQuote(
 
 /** Type a line onto a draft invoice. Sent invoices stay as sent. */
 export async function addInvoiceLine(
-  invoiceId: number, data: { kind: string; description: string; qty: number; unitCents: number },
+  invoiceId: number, data: ManualLine,
 ): Promise<{ error?: string }> {
   const u = await requireStaff();
   const [inv] = await db.select().from(invoices).where(eq(invoices.id, invoiceId));
@@ -17360,12 +17469,14 @@ export async function addInvoiceLine(
     .where(eq(invoiceLines.invoiceId, invoiceId));
   await db.insert(invoiceLines).values({
     invoiceId, kind: clean.kind, description: clean.description,
+    partNumber: clean.partNumber, unit: clean.unit,
     qty: Math.round(clean.qty * 1000), unitCents: clean.unitCents,
     position: existing.length ? Math.max(...existing.map((l) => l.position)) + 1 : 0,
   });
   await audit({
     actor: u.email, entityType: "invoice", entityId: invoiceId, tenantOrgId: inv.tenantOrgId,
-    action: `added a line to ${inv.number}: ${clean.description}, ${formatCents(Math.round(clean.qty * clean.unitCents))}`,
+    action: `added a line to ${inv.number}: ${clean.partNumber ? `${clean.partNumber} - ` : ""}${clean.description}`
+      + `, ${formatCents(Math.round(clean.qty * clean.unitCents))}`,
   });
   revInvoice(inv);
   return {};
@@ -17373,7 +17484,7 @@ export async function addInvoiceLine(
 
 /** Type a line onto a draft quote. */
 export async function addQuoteLine(
-  quoteId: number, data: { kind: string; description: string; qty: number; unitCents: number },
+  quoteId: number, data: ManualLine,
 ): Promise<{ error?: string }> {
   const u = await requireStaff();
   const [q] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
@@ -17385,12 +17496,14 @@ export async function addQuoteLine(
     .where(eq(quoteLines.quoteId, quoteId));
   await db.insert(quoteLines).values({
     quoteId, kind: clean.kind, description: clean.description,
+    partNumber: clean.partNumber, unit: clean.unit,
     qty: Math.round(clean.qty * 1000), unitCents: clean.unitCents,
     position: existing.length ? Math.max(...existing.map((l) => l.position)) + 1 : 0,
   });
   await audit({
     actor: u.email, entityType: "quote", entityId: quoteId, tenantOrgId: q.tenantOrgId,
-    action: `added a line to ${q.number}: ${clean.description}, ${formatCents(Math.round(clean.qty * clean.unitCents))}`,
+    action: `added a line to ${q.number}: ${clean.partNumber ? `${clean.partNumber} - ` : ""}${clean.description}`
+      + `, ${formatCents(Math.round(clean.qty * clean.unitCents))}`,
   });
   revQuote(q);
   return {};

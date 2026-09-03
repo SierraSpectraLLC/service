@@ -11,9 +11,11 @@ import { forTenant, readTenant } from "@/lib/tenancy";
 import { shopToday } from "@/lib/shopday";
 import { makerNames } from "@/lib/makersData";
 import { uncatalogued, type UsedPart } from "@/lib/partCatalog";
+import { missingServiceCodes } from "@/lib/serviceCodes";
 import { parseProcParts, schedulePartsOf } from "@/lib/procedures";
 import PartCatalogPanel from "@/components/PartCatalogPanel";
 import PartImportCard from "@/components/PartImportCard";
+import ServiceCodesCard from "@/components/ServiceCodesCard";
 
 export const dynamic = "force-dynamic";
 
@@ -145,6 +147,7 @@ export default async function PartsCatalogPage({ searchParams }: { searchParams:
           id: r.id, partNumber: r.partNumber, name: r.name, manufacturer: r.manufacturer,
           mfrPartNumber: r.mfrPartNumber, kind: r.kind, assetTypes: r.assetTypes,
           models: r.models, note: r.note, archived: r.archived,
+          rateCents: r.rateCents, unit: r.unit,
           lines: lines.filter((l) => l.kitId === r.id)
             .map((l) => ({ partNumber: l.partNumber, name: l.name, qty: l.qty })),
           aliases: aliasesOf(r.id),
@@ -172,6 +175,11 @@ export default async function PartsCatalogPage({ searchParams }: { searchParams:
         makers={bookNames}
         initialFacet={f}
       />
+      {/* Hours and trips have numbers too - see lib/serviceCodes. Shown only
+          while the shop is missing some, and matched against every number the
+          book already answers to, so a code renamed or retired since is left
+          exactly as it is. */}
+      <ServiceCodesCard missing={missingServiceCodes(withAliases)} />
       <PartImportCard downloadName="parts-catalog" />
       {/* The price book card is HIDDEN, not deleted - see PriceBookCard, which
           still compiles and still works. Its two jobs both have another home

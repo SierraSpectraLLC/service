@@ -13,21 +13,25 @@ import { toast } from "@/components/ui/Toast";
 import { formatCents } from "@/lib/money";
 import { isStalePrice } from "@/lib/sourcing";
 import {
-  ALIAS_KIND_LABEL, ALIAS_KINDS, catalogLabel, isSuperseded, MAX_PART_PHOTOS,
-  PART_KINDS, PART_KIND_LABEL, type PartAlias,
+  ALIAS_KIND_LABEL, ALIAS_KINDS, catalogLabel, CATALOG_KINDS, isService, isSuperseded,
+  MAX_PART_PHOTOS, PART_KIND_LABEL, UNIT_SUGGESTIONS, type PartAlias,
 } from "@/lib/partCatalog";
 import PartNumberField, { forgetCatalog } from "./PartNumberField";
 
 export type PartDraft = {
   partNumber: string; name: string; manufacturer: string; mfrPartNumber: string;
   kind: string; assetTypes: string[]; models: string[]; note: string; aliases: PartAlias[];
+  /** What a labor or travel code sells for, in dollars as typed. See rateCents. */
+  rate: string;
+  /** What one of it is - "h", "trip". Service kinds only. */
+  unit: string;
 };
 
 export type KitLine = { partNumber: string; name: string; qty: number };
 
 export const emptyPartDraft: PartDraft = {
   partNumber: "", name: "", manufacturer: "", mfrPartNumber: "",
-  kind: "part", assetTypes: [], models: [], note: "", aliases: [],
+  kind: "part", assetTypes: [], models: [], note: "", aliases: [], rate: "", unit: "",
 };
 
 export type VendorPrice = {
@@ -83,13 +87,16 @@ export default function PartDialog({
     if (!draft.partNumber.trim()) { setError("A part number is the one thing this needs"); return; }
     setError("");
     startTransition(async () => {
+      // Dollars on screen, cents on the wire - the same conversion every
+      // other price field in the app makes at the boundary.
+      const rateCents = Math.round((Number(draft.rate) || 0) * 100);
       let saved = id;
       if (saved === undefined) {
-        const res = await addCatalogPart(draft);
+        const res = await addCatalogPart({ ...draft, rateCents });
         if (res.error) { setError(res.error); return; }
         saved = res.id;
       } else {
-        const res = await updateCatalogPart(saved, draft);
+        const res = await updateCatalogPart(saved, { ...draft, rateCents });
         if (res.error) { setError(res.error); return; }
       }
       // Contents are a second write, and only for a kit - the parts that are
@@ -203,7 +210,7 @@ export default function PartDialog({
             has to hang off a row - and an upload is immediate rather than
             held to Save, so it is never lost by a validation error on some
             other field. */}
-        {id !== undefined && (() => {
+        {id !== undefined && !isService(draft.kind) && (() => {
           const upl = async (list: FileList | null) => {
             const files = Array.from(list ?? []);
             if (!files.length || id === undefined) return;
@@ -272,11 +279,34 @@ export default function PartDialog({
 
         <label>Kind</label>
         <div className="seg" role="group" aria-label="Kind" style={{ marginBottom: 8 }}>
-          {PART_KINDS.map((k) => (
+          {CATALOG_KINDS.map((k) => (
             <button key={k} type="button" aria-pressed={draft.kind === k}
               onClick={() => setDraft({ ...draft, kind: k })}>{PART_KIND_LABEL[k]}</button>
           ))}
         </div>
+
+        {/* An hour and a trip are sold off a number too - LABOR-LCP, TZ3O -
+            and they need the two things a thing in a box does not: what they
+            sell for, and what one of them IS. A part is deliberately not
+            offered either: its price is the price book plus the workspace
+            markup, which is the one formula an invoice bills with. */}
+        {isService(draft.kind) && (
+          <div className="pf2" style={{ marginBottom: 8 }}>
+            <div>
+              <label htmlFor="pd-rate">What it sells for</label>
+              <input id="pd-rate" value={draft.rate} inputMode="decimal" placeholder="$ per unit"
+                onChange={(e) => setDraft({ ...draft, rate: e.target.value })} />
+            </div>
+            <div>
+              <label htmlFor="pd-unit">Per</label>
+              <input id="pd-unit" value={draft.unit} list="unit-book" placeholder="h"
+                onChange={(e) => setDraft({ ...draft, unit: e.target.value })} />
+              <datalist id="unit-book">
+                {UNIT_SUGGESTIONS.map((u) => <option key={u} value={u} />)}
+              </datalist>
+            </div>
+          </div>
+        )}
 
         {draft.kind === "kit" && (
           <div style={{ marginBottom: 8 }}>
@@ -336,7 +366,12 @@ export default function PartDialog({
 
         {/* Who sells it and for how much: the OEM and the secondary vendors,
             each with a link. Same rows the price book shows; "Request part"
-            on a maintenance job pulls the cheapest offer from here. */}
+            on a maintenance job pulls the cheapest offer from here.
+
+            Nothing to show for an hour or a trip: there is no vendor to buy one
+            from, and its price is the rate above, which is a decision rather
+            than an offer. */}
+        {!isService(draft.kind) && <>
         <label>Vendors &amp; prices</label>
         <div style={{ marginBottom: 8 }}>
           {prices.filter((p) => p.partNumber.toLowerCase() === draft.partNumber.trim().toLowerCase()).map((p) => (
@@ -409,6 +444,7 @@ export default function PartDialog({
             <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>Type the part number first - prices hang off it.</div>
           )}
         </div>
+        </>}
 
         <label>Note</label>
         <textarea value={draft.note} rows={2} style={{ width: "100%", marginBottom: 8 }}

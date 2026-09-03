@@ -139,8 +139,12 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
       <InvoiceLineList
         editable={row.status === "draft"}
         target={{ kind: "invoice", id }}
+        /* The same markup the draft's own lines were priced with, so a part
+           typed on afterwards costs what one composed from the job would. */
+        partsMarkupBps={policy.partsMarkupBps}
         lines={full.lines.map((l) => ({
           id: l.id, kind: l.kind, description: l.description, detail: l.detail,
+          partNumber: l.partNumber, unit: l.unit,
           qty: qtyOf(l), unitCents: l.unitCents, covered: l.covered, coveredBy: l.coveredBy,
         }))}
         totalCents={v.linesCents}

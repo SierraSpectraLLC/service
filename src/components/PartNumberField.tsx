@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { catalogForLookup } from "@/app/actions";
-import { PART_KIND_LABEL, suggestParts, type CatalogEntry, type PartSuggestion } from "@/lib/partCatalog";
+import {
+  PART_KIND_LABEL, PART_KINDS, quotedUnitCents, suggestParts, unitFor,
+  type CatalogEntry, type PartSuggestion,
+} from "@/lib/partCatalog";
 import { formatCents } from "@/lib/money";
 
 export type LookupPart = CatalogEntry & {
@@ -11,6 +14,9 @@ export type LookupPart = CatalogEntry & {
   vendor: string;
   priceCents: number | null;
   isOem: boolean;
+  /** A service code's own price, and what one of it is. See lib/partCatalog. */
+  rateCents: number;
+  unit: string;
 };
 
 /**
@@ -48,6 +54,7 @@ export const forgetCatalog = () => { cache = null; };
 export default function PartNumberField({
   value, onChange, onPick, placeholder = "Part number", className = "mono",
   disabled = false, ariaLabel = "Part number", style, autoFocus = false, insert = "number",
+  kinds = PART_KINDS, sellMarkupBps, onEnter,
 }: {
   value: string;
   onChange: (partNumber: string) => void;
@@ -66,6 +73,27 @@ export default function PartNumberField({
    * lets onPick carry the number to its own field.
    */
   insert?: "number" | "name";
+  /**
+   * Which half of the book to offer. Things by default, because most of these
+   * fields are a shelf line, a purchase order or a kit - none of which may
+   * quote an hour. A quote or an invoice passes CATALOG_KINDS and gets the
+   * labor and travel numbers too.
+   */
+  kinds?: readonly string[];
+  /**
+   * Set where the reader is SELLING rather than buying: the row then shows
+   * what this would be quoted at - a service code's rate, or a part at cost
+   * plus this markup - instead of the vendor's price. On a quote the buying
+   * price is the wrong number to put in front of somebody, and the right one
+   * is lib/billing's, so the two cannot drift.
+   */
+  sellMarkupBps?: number;
+  /**
+   * What Enter means when there is no suggestion to take - submitting the row
+   * this field sits in, usually. Without it a field that grew a dropdown
+   * quietly stops being one you can type into and press Enter on.
+   */
+  onEnter?: () => void;
 }) {
   const [parts, setParts] = useState<LookupPart[] | null>(null);
   const [open, setOpen] = useState(false);
@@ -85,10 +113,12 @@ export default function PartNumberField({
     return () => document.removeEventListener("mousedown", away);
   }, [open]);
 
-  const hits: PartSuggestion<LookupPart>[] = open && parts ? suggestParts(parts, value) : [];
+  const hits: PartSuggestion<LookupPart>[] = open && parts ? suggestParts(parts, value, 8, kinds) : [];
   // Nothing to offer when the typed number IS the only match, spelled the same:
   // a dropdown restating what somebody just typed is noise.
   const worth = hits.filter((h) => h.partNumber.toLowerCase() !== value.trim().toLowerCase() || h.wasQuoted);
+
+  const quoted = (e: LookupPart) => quotedUnitCents(e, sellMarkupBps ?? 0);
 
   const choose = (h: PartSuggestion<LookupPart>) => {
     onChange(insert === "name" ? h.entry.name || h.partNumber : h.partNumber);
@@ -104,10 +134,16 @@ export default function PartNumberField({
         onFocus={() => { wake(); setOpen(true); }}
         onChange={(e) => { wake(); setActive(0); setOpen(true); onChange(e.target.value); }}
         onKeyDown={(e) => {
-          if (!worth.length) return;
+          if (!worth.length) {
+            if (e.key === "Enter") onEnter?.();
+            return;
+          }
           if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => (i + 1) % worth.length); }
           else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => (i - 1 + worth.length) % worth.length); }
-          else if (e.key === "Enter" && open) { e.preventDefault(); choose(worth[active] ?? worth[0]); }
+          else if (e.key === "Enter") {
+            e.preventDefault();
+            if (open) choose(worth[active] ?? worth[0]); else onEnter?.();
+          }
           else if (e.key === "Escape") setOpen(false);
         }}
         style={{ width: "100%" }} />
@@ -135,11 +171,22 @@ export default function PartNumberField({
                   <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)" }}>{h.partNumber}</span>
                   <span style={{ fontSize: 13 }}>{h.name || <span className="mut">unnamed</span>}</span>
                   {/* What it costs, where the reader is allowed to know - the
-                      answer to "is this the one to order" is half price. */}
-                  {h.entry.priceCents !== null && (
+                      answer to "is this the one to order" is half price. Where
+                      the reader is selling, what it would be QUOTED at
+                      instead: same row, the number that matters there. */}
+                  {sellMarkupBps === undefined ? h.entry.priceCents !== null && (
                     <span className="pill good">
                       {formatCents(h.entry.priceCents)}{h.entry.vendor ? ` · ${h.entry.vendor}` : ""}
                     </span>
+                  ) : quoted(h.entry) > 0 ? (
+                    <span className="pill good">
+                      {formatCents(quoted(h.entry))}{unitFor(h.entry) ? ` / ${unitFor(h.entry)}` : ""}
+                    </span>
+                  ) : (
+                    /* Said out loud rather than left blank: a code nobody has
+                       priced adds a $0 line, and the moment to notice that is
+                       before it is on the quote. */
+                    <span className="pill warn">no price on file</span>
                   )}
                 </span>
                 {/* Why this row is here. Being offered 060-65005-91 after typing

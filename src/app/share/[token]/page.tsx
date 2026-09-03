@@ -227,7 +227,7 @@ async function QuoteShare({ link }: { link: typeof shareLinks.$inferSelect }) {
         answeredOn={full.row.answeredOn ?? ""}
         feeClause={feeClause(ctx.policy)}
         lines={full.lines.map((l) => ({
-          id: l.id, description: l.description, detail: l.detail,
+          id: l.id, description: l.description, detail: l.detail, partNumber: l.partNumber,
           qty: l.qty / 1000, unitCents: l.unitCents, covered: l.covered, coveredBy: l.coveredBy,
         }))}
       />
