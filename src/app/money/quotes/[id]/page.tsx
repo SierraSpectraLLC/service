@@ -143,6 +143,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
         billingAddress={org?.billingAddress ?? ""}
         letter={{
           attn: row.attn, greeting: row.greeting, clientAddress: row.clientAddress,
+          specsLeft: row.specsLeft, specsRight: row.specsRight,
           note: row.note, discountPct: row.discountPct, discountCents: row.discountCents,
           discountLabel: row.discountLabel,
         }}

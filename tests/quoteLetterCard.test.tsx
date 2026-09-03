@@ -31,7 +31,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: 
 afterEach(() => { cleanup(); updateQuoteLetter.mockClear(); setQuoteLineDescription.mockClear(); });
 
 const LETTER = {
-  attn: "", greeting: "", clientAddress: "", note: "",
+  attn: "", greeting: "", clientAddress: "", note: "", specsLeft: "", specsRight: "",
   discountPct: 0, discountCents: 0, discountLabel: "",
 };
 
@@ -71,6 +71,51 @@ describe("addressing a quote to a person, at an address", () => {
     expect(updateQuoteLetter.mock.calls[0][1]).toMatchObject({
       attn: "Hideaki", clientAddress: "Box 41\nRichmond, CA",
     });
+  });
+});
+
+describe("the specifics block", () => {
+  it("shows how the two boxes will read, since one character tells them apart", async () => {
+    await card();
+    fireEvent.change(screen.getByLabelText("Specifics, left column"), {
+      target: { value: "Full-Service Unlimited Contract for:\n- System A (Quattro Ultima)" },
+    });
+    // The preview: a heading bold, a point indented under it.
+    expect(screen.getByText("Full-Service Unlimited Contract for:")).toBeTruthy();
+    expect(screen.getByText("- System A (Quattro Ultima)")).toBeTruthy();
+  });
+
+  it("says what the paper will do with an empty block", async () => {
+    await card();
+    expect(screen.getByText(/the quote's own title prints here instead/)).toBeTruthy();
+  });
+
+  it("warns about the lines that will not print rather than dropping them", async () => {
+    // Row 24 is the table's header. Silently deleting somebody's eighth line on
+    // save is worse than telling them it will not print.
+    await card();
+    fireEvent.change(screen.getByLabelText("Specifics, left column"), {
+      target: { value: Array.from({ length: 9 }, (_, i) => `Line ${i + 1}`).join("\n") },
+    });
+    expect(screen.getByText(/2 lines past that will not print/)).toBeTruthy();
+  });
+
+  it("saves both columns as typed, overflow and all", async () => {
+    await card();
+    fireEvent.change(screen.getByLabelText("Specifics, left column"), { target: { value: "Left head\n- point" } });
+    fireEvent.change(screen.getByLabelText("Specifics, right column"), { target: { value: "Right head" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateQuoteLetter).toHaveBeenCalled());
+    expect(updateQuoteLetter.mock.calls[0][1]).toMatchObject({
+      specsLeft: "Left head\n- point", specsRight: "Right head",
+    });
+  });
+
+  it("reads back on a sent quote, with no box to type into", async () => {
+    await card({ editable: false }, { specsLeft: "Full-Service Unlimited Contract for:\n- System A" });
+    expect(screen.queryByLabelText("Specifics, left column")).toBeNull();
+    expect(screen.getByText("Full-Service Unlimited Contract for:")).toBeTruthy();
+    expect(screen.getByText("- System A")).toBeTruthy();
   });
 });
 
@@ -198,6 +243,21 @@ describe("the client's own copy", () => {
     expect(screen.getByText(/HPLC Included w\/Quattro Ultima cost/)).toBeTruthy();
     // The modules the charge covers, under the charge.
     expect(screen.getByText("- Shimadzu LC-10 AS")).toBeTruthy();
+  });
+
+  it("shows the specifics, which is what they read before the price", async () => {
+    await clientQuote({
+      specs: {
+        left: [
+          { text: "Full-Service Unlimited Contract for:", sub: false },
+          { text: "System A (Quattro Ultima)", sub: true },
+        ],
+        right: [{ text: "Unlimited Emergency Service Visits", sub: false }],
+      },
+    });
+    expect(screen.getByText("Full-Service Unlimited Contract for:")).toBeTruthy();
+    expect(screen.getByText("- System A (Quattro Ultima)")).toBeTruthy();
+    expect(screen.getByText("Unlimited Emergency Service Visits")).toBeTruthy();
   });
 
   it("says none of it when the quote says none of it", async () => {

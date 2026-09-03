@@ -7,7 +7,7 @@ import { seesBooksFor } from "@/lib/financeData";
 import { readTenant } from "@/lib/tenancy";
 import { quoteById, qtyOf, quoteSubtotal } from "@/lib/invoiceData";
 import {
-  addressedTo, commentRows, discountLabel, discountOf, greetingLine,
+  addressedTo, commentRows, discountLabel, discountOf, greetingLine, specRows,
 } from "@/lib/quotes";
 import { getBrand } from "@/lib/brand";
 import { xlsxHeaders, docContactLine, invoiceLinesForXlsx } from "@/lib/xlsxDocData";
@@ -56,6 +56,12 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     customer: { name: to.name, address: to.address },
     title: full.row.title,
     greeting: greetingLine(full.row),
+    // The shape of the offer, in the template's own two columns. Capped by
+    // specRows: there is nowhere for an eighth line to go.
+    specs: {
+      left: specRows(full.row.specsLeft),
+      right: specRows(full.row.specsRight),
+    },
     discount: discountOf(subtotal, full.row) / 100,
     discountLabel: discountLabel(full.row),
     comments,

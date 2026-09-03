@@ -41,6 +41,9 @@ export type DocLine = {
 
 export type DocParty = { name: string; address: string };
 
+/** One row of the specifics block: a heading, or a point under one. */
+export type SpecCell = { text: string; sub: boolean };
+
 const templatePath = (file: string) => path.join(process.cwd(), "templates", file);
 
 /** "780 Chadbourne Ave.,\nFairfield, CA" -> up to `n` display lines. */
@@ -48,6 +51,22 @@ const addressLines = (address: string, n: number): string[] => {
   const parts = address.split(/\n|,\s*(?=[A-Z][a-z]+,?\s+[A-Z]{2})/).map((s) => s.trim()).filter(Boolean);
   if (parts.length <= n) return parts;
   return [...parts.slice(0, n - 1), parts.slice(n - 1).join(", ")];
+};
+
+/** Rows the specifics block has per column. Row 24 is the table's header. */
+const SPEC_LINES = 7;
+
+/**
+ * One cell of the specifics block, or a cleared one.
+ *
+ * The style is replaced rather than mutated, for the reason the continuation
+ * rows are: ExcelJS hands every cell sharing a format the same style instance,
+ * so setting .font on one row would reach every other row that looks like it.
+ */
+const writeSpec = (ws: ExcelJS.Worksheet, addr: string, row: SpecCell | undefined) => {
+  const cell = ws.getCell(addr);
+  cell.value = row ? (row.sub ? ` - ${row.text}` : row.text) : null;
+  cell.style = { ...cell.style, font: { ...(cell.font ?? {}), bold: !!row && !row.sub } };
 };
 
 const asDate = (iso: string): Date | string =>
@@ -172,14 +191,23 @@ export async function fillInvoiceXlsx(d: {
 
 // ── Quote: templates/QuoteTemplate.xlsx, sheet "Quote" ──────────────────────
 // C3 date · C5 quote # · I9-I12 customer block (name + 3 address lines) ·
-// B16 greeting · B17 the job · S17-U21 equipment (module/model/serial, 5 rows) ·
-// lines 25-40 as invoice · K41 subtotal · K42 adjustments (H42 its label) ·
-// K45 total (=K41+K42, the template's own) · B43-B47 comments · B51 footer.
+// B16 greeting · B17-B23 / G17-G23 the specifics block, two columns of seven ·
+// S17-U21 equipment (module/model/serial, 5 rows) · lines 25-40 as invoice ·
+// K41 subtotal · K42 adjustments (H42 its label) · K45 total (=K41+K42, the
+// template's own) · B43-B47 comments · B51 footer.
 export async function fillQuoteXlsx(d: {
   number: string; date: string; customer: DocParty;
   title: string; comments: string[]; contactLine: string;
   /** The line at the top, addressed to a person where there is one. */
   greeting?: string;
+  /**
+   * The specifics block under it, as the rows it prints on - left column and
+   * right. Seven each; the caller has already capped them (lib/quotes.specRows),
+   * because row 24 is the table's header and there is nowhere for an eighth to
+   * go. Empty left column leaves `title` in B17, which is what every quote
+   * written before this block existed says.
+   */
+  specs?: { left: SpecCell[]; right: SpecCell[] };
   /** Money off, in DOLLARS and positive. Printed negative, as an adjustment. */
   discount?: number;
   /** What the adjustment is called - "Volume discount (10%)". */
@@ -205,7 +233,27 @@ export async function fillQuoteXlsx(d: {
   // so every quote greeted every client identically. Blank leaves the
   // template's own line exactly where it was.
   if (d.greeting?.trim()) ws.getCell("B16").value = d.greeting.trim();
-  ws.getCell("B17").value = d.title;
+  /*
+   * The block that says what the offer IS. Fourteen cells the template has
+   * always had and nothing ever wrote to but B17, so the shop typed the other
+   * thirteen into the exported file after every send.
+   *
+   * A heading prints bold and a point prints indented under it, which is the
+   * whole of the formatting - and it is set here rather than in the template
+   * because which rows are which is a property of what somebody typed.
+   */
+  const left = d.specs?.left ?? [];
+  const right = d.specs?.right ?? [];
+  if (left.length || right.length) {
+    for (let i = 0; i < SPEC_LINES; i++) {
+      writeSpec(ws, `B${17 + i}`, left[i]);
+      writeSpec(ws, `G${17 + i}`, right[i]);
+    }
+  } else {
+    // Nothing typed: B17 keeps the quote's title, which is what every quote
+    // written before this block existed says.
+    ws.getCell("B17").value = d.title;
+  }
   (d.equipment ?? []).slice(0, 5).forEach((e, i) => {
     ws.getCell(`S${17 + i}`).value = e.module;
     ws.getCell(`T${17 + i}`).value = e.model;
