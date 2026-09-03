@@ -121,8 +121,13 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
       <InvoiceLineList
         editable={row.status === "draft"}
         target={{ kind: "quote", id }}
+        /* So a part picked out of the book arrives priced the way the invoice
+           after it will price the same part: cost plus the shop's markup, one
+           formula (lib/billing.sellPrice), read off this client's policy. */
+        partsMarkupBps={ctx.policy.partsMarkupBps}
         lines={full.lines.map((l) => ({
           id: l.id, kind: l.kind, description: l.description, detail: l.detail,
+          partNumber: l.partNumber, unit: l.unit,
           qty: l.qty / 1000, unitCents: l.unitCents, covered: l.covered, coveredBy: l.coveredBy,
         }))}
         totalCents={total}

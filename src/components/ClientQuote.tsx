@@ -10,6 +10,8 @@ import { Id } from "@/components/ui";
 export type QuoteLine = {
   id: number; description: string; detail: string;
   qty: number; unitCents: number; covered: boolean; coveredBy: string;
+  /** The number quoted, where there is one - what purchasing matches on. */
+  partNumber?: string;
 };
 
 /**
@@ -75,6 +77,14 @@ export default function ClientQuote({
       {lines.map((l) => (
         <div key={l.id} className="row-2" style={{ alignItems: "baseline", padding: "7px 0", borderTop: "1px solid var(--line)" }}>
           <span style={{ flex: 1, minWidth: 0 }}>
+            {/* The number, where the quote was built off one. A client's
+                purchasing system matches on it, and a description alone gives
+                them nothing to raise a PO against. */}
+            {l.partNumber && (
+              <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)", marginRight: 6 }}>
+                {l.partNumber}
+              </span>
+            )}
             <span className="t-body" style={{ fontWeight: 600 }}>{l.description}</span>
             {(l.detail || l.covered) && (
               <span className="mut t-meta" style={{ display: "block" }}>

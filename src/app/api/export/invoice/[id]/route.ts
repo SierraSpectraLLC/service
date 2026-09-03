@@ -50,7 +50,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     terms: full.row.dueOn ? `Payment due ${full.row.dueOn}` : "",
     contactLine: docContactLine(brand),
     lines: invoiceLinesForXlsx(full.lines.map((l) => ({
-      kind: l.kind, description: l.description, detail: l.detail,
+      kind: l.kind, description: l.description, detail: l.detail, partNumber: l.partNumber,
       qty: qtyOf(l), unitCents: l.unitCents, covered: l.covered, coveredBy: l.coveredBy,
     }))),
   });

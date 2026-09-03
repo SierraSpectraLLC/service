@@ -14,8 +14,8 @@ import { toast } from "@/components/ui/Toast";
 import { formatCents } from "@/lib/money";
 import { isStalePrice } from "@/lib/sourcing";
 import {
-  ALIAS_KIND_LABEL, ALIAS_KINDS, catalogLabel, isSuperseded, kitContents, MAX_PART_PHOTOS,
-  PART_KINDS, PART_KIND_LABEL, searchCatalog, type PartAlias,
+  ALIAS_KIND_LABEL, ALIAS_KINDS, catalogLabel, CATALOG_KINDS, isService, isSuperseded, kitContents,
+  MAX_PART_PHOTOS, PART_KIND_LABEL, searchCatalog, unitFor, type PartAlias,
 } from "@/lib/partCatalog";
 import type { UncataloguedPart } from "@/lib/partCatalog";
 import type { Tone } from "@/lib/tones";
@@ -24,6 +24,8 @@ import PartDialog, { type KitLine, type PartDraft } from "./PartDialog";
 export type CatalogRow = {
   id: number; partNumber: string; name: string; manufacturer: string; mfrPartNumber: string;
   kind: string; assetTypes: string[]; models: string[]; note: string; archived: boolean;
+  /** A service code's price and unit. Zero and blank on a thing in a box. */
+  rateCents: number; unit: string;
   lines: { partNumber: string; name: string; qty: number }[];
   /** Its other numbers - ours and the makers'. See lib/partCatalog. */
   aliases: PartAlias[];
@@ -37,12 +39,14 @@ const KIND_TONE: Record<string, Tone> = {
   part: "info",
   consumable: "warn",
   kit: "accent",
+  labor: "good",
+  travel: "neutral",
 };
 
 const emptyDraft = {
   partNumber: "", name: "", manufacturer: "", mfrPartNumber: "",
   kind: "part", assetTypes: [] as string[], models: [] as string[], note: "",
-  aliases: [] as PartAlias[],
+  aliases: [] as PartAlias[], rate: "", unit: "",
 };
 
 /**
@@ -79,8 +83,8 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
-  type Facet = "all" | "part" | "consumable" | "kit" | "retired" | "undescribed";
-  const FACETS: Facet[] = ["all", "part", "consumable", "kit", "retired", "undescribed"];
+  type Facet = "all" | "part" | "consumable" | "kit" | "labor" | "travel" | "retired" | "undescribed";
+  const FACETS: Facet[] = ["all", "part", "consumable", "kit", "labor", "travel", "retired", "undescribed"];
   const facet: Facet = FACETS.includes(initialFacet as Facet) && initialFacet !== "" ? (initialFacet as Facet) : "all";
   // The facet lives in the URL so a filtered book is a link.
   const setFacet = (f: Facet) =>
@@ -105,6 +109,10 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
       partNumber: r.partNumber, name: r.name, manufacturer: r.manufacturer,
       mfrPartNumber: r.mfrPartNumber, kind: r.kind, assetTypes: r.assetTypes,
       models: r.models, note: r.note, aliases: r.aliases.map((a) => ({ ...a })),
+      // Dollars in the form, cents on the row - the same boundary every price
+      // field crosses. Blank rather than "0.00" so an unpriced code reads as
+      // one nobody has priced.
+      rate: r.rateCents > 0 ? (r.rateCents / 100).toFixed(2) : "", unit: r.unit,
     },
     lines: r.lines.map((l) => ({ ...l })),
   });
@@ -156,6 +164,14 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
             {[
               r.manufacturer && `${r.manufacturer}${r.mfrPartNumber ? ` ${r.mfrPartNumber}` : ""}`,
               r.kind === "kit" && r.lines.length ? kitContents(r.lines) : "",
+              /* What a service code sells for, said where a maker would be:
+                 there is no maker, and the rate is the fact somebody opened
+                 this row to check. Unpriced says so - it quotes at $0. */
+              isService(r.kind)
+                ? (r.rateCents > 0
+                    ? `${formatCents(r.rateCents)}${unitFor(r) ? ` / ${unitFor(r)}` : ""}`
+                    : "no rate set")
+                : "",
               r.archived ? "retired" : "",
             ].filter(Boolean).join(" · ")}
           </span>
@@ -221,7 +237,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
           <FacetStrip
             facets={[
               { key: "all", label: "All", count: live.length, on: facet === "all" },
-              ...PART_KINDS.map((k) => ({
+              ...CATALOG_KINDS.map((k) => ({
                 key: k, label: PART_KIND_LABEL[k],
                 count: live.filter((r) => r.kind === k).length || undefined,
                 on: facet === k,

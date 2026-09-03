@@ -1622,6 +1622,17 @@ async function main(): Promise<void> {
       manufacturer: "Metrohm", kind: "part", assetTypes: ["Other"], models: ["930 Compact IC Flex"],
       archived: true, note: "Superseded by the MSM-HC. Kept for the history.",
       createdBy: OWNER, createdAt: at(-300) },
+    // The hours and the trips, quoted off a number like everything above them.
+    // No vendor and no cost: what one sells for is a decision, so it is the
+    // rate on the row rather than the price book. See lib/serviceCodes.
+    { tenantOrgId: T, partNumber: "LABOR-LCP", name: "Labor, LC/MS Preferred", kind: "labor",
+      unit: "h", rateCents: 19500, createdBy: OWNER, createdAt: at(-380) },
+    { tenantOrgId: T, partNumber: "LABOR-TCU", name: "Labor, TOC University", kind: "labor",
+      unit: "h", rateCents: 16500, createdBy: OWNER, createdAt: at(-380) },
+    { tenantOrgId: T, partNumber: "TZ1OP", name: "Travel Zone-1 Overnight, Preferred Client",
+      kind: "travel", unit: "trip", rateCents: 42500, createdBy: OWNER, createdAt: at(-380) },
+    { tenantOrgId: T, partNumber: "TZ3O", name: "Travel Zone-3 Overnight", kind: "travel",
+      unit: "trip", rateCents: 95000, createdBy: OWNER, createdAt: at(-380) },
   ]).returning();
   const cid = (pn: string) => cat.find((c) => c.partNumber === pn)!.id;
 
@@ -1961,22 +1972,28 @@ async function main(): Promise<void> {
   ]).returning();
   const q = (n: string) => qs.find((x) => x.number === n)!.id;
 
+  /* The number is its own field now, not the first word of the description -
+     it fills the part-number column of the Excel layout and it is what the
+     client raises a PO against. The labor and travel lines carry numbers too:
+     LABOR-LCP and TZ3O are catalog rows above, quoted the way a seal is. */
   await db.insert(quoteLines).values([
-    { quoteId: q("Q-3001"), kind: "part", description: "N0790456 Torch box assembly", detail: "OEM, price book +30%", qty: 1000, unitCents: 486_000, position: 0 },
-    { quoteId: q("Q-3001"), kind: "part", description: "N0777021 Purge line, 3 m", detail: "", qty: 1000, unitCents: 24_200, position: 1 },
-    { quoteId: q("Q-3001"), kind: "labor", description: "Refurbishment labour", detail: "Estimated 22.0 h at the standard rate", qty: 22_000, unitCents: 18500, position: 2 },
-    { quoteId: q("Q-3001"), kind: "travel", description: "Travel - Astoria, two visits", detail: "Half rate", qty: 6000, unitCents: 9250, position: 3 },
+    { quoteId: q("Q-3001"), kind: "part", partNumber: "N0790456", description: "Torch box assembly", detail: "OEM, price book +30%", qty: 1000, unitCents: 486_000, position: 0 },
+    { quoteId: q("Q-3001"), kind: "part", partNumber: "N0777021", description: "Purge line, 3 m", detail: "", qty: 1000, unitCents: 24_200, position: 1 },
+    { quoteId: q("Q-3001"), kind: "labor", description: "Refurbishment labour", detail: "Estimated 22.0 h at the standard rate", qty: 22_000, unitCents: 18500, unit: "h", position: 2 },
+    { quoteId: q("Q-3001"), kind: "travel", description: "Travel - Astoria, two visits", detail: "Half rate", qty: 6000, unitCents: 9250, unit: "h", position: 3 },
     { quoteId: q("Q-3001"), kind: "expense", description: "Freight, inbound torch box", detail: "", qty: 1000, unitCents: 21_400, position: 4 },
-    { quoteId: q("Q-3002"), kind: "labor", description: "Checkout to the OQ protocol", detail: "8.0 h at the AGR-2026-11 rate", qty: 8000, unitCents: 14500, covered: true, coveredBy: "AGR-2026-11", position: 0 },
-    { quoteId: q("Q-3002"), kind: "part", description: "5063-6589 Plunger seal kit", detail: "Drawn from the parts allowance", qty: 2000, unitCents: 31_500, covered: true, coveredBy: "AGR-2026-11", position: 1 },
-    { quoteId: q("Q-3002"), kind: "labor", description: "Client familiarisation", detail: "1.5 h, beyond the contract's included hours", qty: 1500, unitCents: 14500, position: 2 },
-    { quoteId: q("Q-3003"), kind: "part", description: "SCX-CP-6500 Curtain plate assembly (OEM)", detail: "Discontinued - last-buy pricing", qty: 1000, unitCents: 742_000, position: 0 },
-    { quoteId: q("Q-3003"), kind: "labor", description: "Source rebuild and verification", detail: "6.0 h", qty: 6000, unitCents: 12500, position: 1 },
+    { quoteId: q("Q-3002"), kind: "labor", description: "Checkout to the OQ protocol", detail: "8.0 h at the AGR-2026-11 rate", qty: 8000, unitCents: 14500, unit: "h", covered: true, coveredBy: "AGR-2026-11", position: 0 },
+    { quoteId: q("Q-3002"), kind: "part", partNumber: "5063-6589", description: "Plunger seal kit", detail: "Drawn from the parts allowance", qty: 2000, unitCents: 31_500, covered: true, coveredBy: "AGR-2026-11", position: 1 },
+    { quoteId: q("Q-3002"), kind: "labor", description: "Client familiarisation", detail: "1.5 h, beyond the contract's included hours", qty: 1500, unitCents: 14500, unit: "h", position: 2 },
+    { quoteId: q("Q-3003"), kind: "part", partNumber: "SCX-CP-6500", description: "Curtain plate assembly (OEM)", detail: "Discontinued - last-buy pricing", qty: 1000, unitCents: 742_000, position: 0 },
+    { quoteId: q("Q-3003"), kind: "labor", partNumber: "LABOR-LCP", description: "Labor, LC/MS Preferred", detail: "Source rebuild and verification", qty: 6000, unitCents: 19500, unit: "h", position: 1 },
+    // The flat charge the unit exists for: one trip, not "1 h" of travel.
+    { quoteId: q("Q-3003"), kind: "travel", partNumber: "TZ3O", description: "Travel Zone-3 Overnight", detail: "One trip, two engineers on site the same day", qty: 1000, unitCents: 95_000, unit: "trip", position: 2 },
     { quoteId: q("Q-3004"), kind: "retainer", description: "Annual coverage - two systems", detail: "Two PM visits, phone support, 8 h labour included", qty: 1000, unitCents: 640_000, position: 0 },
-    { quoteId: q("Q-3005"), kind: "part", description: "MET-SUP-930 Suppressor module", detail: "", qty: 1000, unitCents: 318_000, position: 0 },
-    { quoteId: q("Q-3005"), kind: "labor", description: "Fit and verify", detail: "3.0 h", qty: 3000, unitCents: 18500, position: 1 },
+    { quoteId: q("Q-3005"), kind: "part", partNumber: "MET-SUP-930", description: "Suppressor module", detail: "", qty: 1000, unitCents: 318_000, position: 0 },
+    { quoteId: q("Q-3005"), kind: "labor", description: "Fit and verify", detail: "3.0 h", qty: 3000, unitCents: 18500, unit: "h", position: 1 },
     { quoteId: q("Q-3006"), kind: "part", description: "7890B GC-FID, refurbished", detail: "Budgetary - subject to availability", qty: 1000, unitCents: 2_850_000, position: 0 },
-    { quoteId: q("Q-3006"), kind: "labor", description: "Install, checkout, familiarisation", detail: "Estimated 16 h", qty: 16_000, unitCents: 17000, position: 1 },
+    { quoteId: q("Q-3006"), kind: "labor", partNumber: "LABOR-TCU", description: "Labor, TOC University", detail: "Install, checkout, familiarisation - estimated 16 h", qty: 16_000, unitCents: 16500, unit: "h", position: 1 },
   ]);
 
   // Invoices: one of every lifecycle word, and lines of every kind.

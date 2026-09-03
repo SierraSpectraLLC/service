@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  allNumbers, catalogEntry, catalogLabel, catalogName, cleanAliases, currentNumber, isCatalogued,
-  kitContents, liveNumbers, numberClash, searchCatalog, suggestParts, uncatalogued,
+  allNumbers, catalogEntry, catalogLabel, catalogName, CATALOG_KINDS, cleanAliases, currentNumber,
+  isCatalogued, isService, kitContents, lineKindFor, liveNumbers, numberClash, PART_KINDS,
+  quotedUnitCents, searchCatalog, suggestParts, uncatalogued, unitFor,
 } from "@/lib/partCatalog";
 
 const entry = (over: Partial<import("@/lib/partCatalog").CatalogEntry> = {}) => ({
@@ -340,5 +341,76 @@ describe("completions for a part-number field", () => {
 
   it("carries the entry, so a picker can fill the description too", () => {
     expect(suggestParts(book, "uv bulb")[0].name).toBe("Tungsten/Halogen UV bulb");
+  });
+});
+
+/**
+ * Hours and trips, catalogued.
+ *
+ * The shop quotes "LABOR-LCP" and "TZ3O" off a number the same way it quotes a
+ * seal, and before this those could only be free text on a quote line - a
+ * different spelling and a different price every time. What these pin is the
+ * two things that keep the new kinds out of everybody else's way: a purchase
+ * order may not quote an hour, and a service code is never priced off the
+ * price book.
+ */
+describe("the numbers that are not things", () => {
+  const codes = [
+    entry({
+      id: 30, partNumber: "LABOR-LCP", name: "Labor, LC/MS Preferred", kind: "labor",
+      manufacturer: "", mfrPartNumber: "", rateCents: 18500, unit: "h",
+    }),
+    entry({
+      id: 31, partNumber: "TZ3O", name: "Travel Zone-3 Overnight", kind: "travel",
+      manufacturer: "", mfrPartNumber: "", rateCents: 95000, unit: "trip",
+    }),
+  ];
+  const book = [...catalog, ...codes];
+
+  it("bills as its own kind; everything else bills as a part", () => {
+    expect(lineKindFor("labor")).toBe("labor");
+    expect(lineKindFor("travel")).toBe("travel");
+    // A consumable and a kit are things sold. "Consumable" is a stocking fact,
+    // not a billing one.
+    expect(lineKindFor("consumable")).toBe("part");
+    expect(lineKindFor("kit")).toBe("part");
+    expect(isService("part")).toBe(false);
+  });
+
+  it("keeps hours out of the pickers that order things", () => {
+    // A purchase order, a shelf line and a kit's contents ask for PART_KINDS.
+    expect(suggestParts(book, "labor", 8, PART_KINDS)).toEqual([]);
+    expect(searchCatalog(book, "TZ3O", 20, PART_KINDS)).toEqual([]);
+    // A quote line asks for the whole book and gets them.
+    expect(suggestParts(book, "TZ3O", 8, CATALOG_KINDS).map((s) => s.partNumber)).toEqual(["TZ3O"]);
+    expect(suggestParts(book, "travel zone", 8, CATALOG_KINDS).map((s) => s.partNumber)).toEqual(["TZ3O"]);
+  });
+
+  it("still offers the whole book to a caller that names no kinds", () => {
+    // Every picker that predates service codes passes nothing and must behave
+    // exactly as it did - the DEFAULT lives in the field, not in here.
+    expect(searchCatalog(book, "TZ3O").map((c) => c.partNumber)).toEqual(["TZ3O"]);
+  });
+
+  it("quotes a service code at its own rate, whatever the parts markup is", () => {
+    // There is no vendor to buy an hour from: what it sells for is a decision.
+    expect(quotedUnitCents(codes[0], 4000)).toBe(18500);
+    expect(quotedUnitCents(codes[1], 0)).toBe(95000);
+  });
+
+  it("quotes a thing at cost plus the markup - the formula an invoice bills with", () => {
+    expect(quotedUnitCents({ kind: "part", priceCents: 10000 }, 4000)).toBe(14000);
+    // Nobody has costed it: a $0 line is a question somebody answers before
+    // the quote goes out, where an invented price is one nobody notices.
+    expect(quotedUnitCents({ kind: "part", priceCents: null }, 4000)).toBe(0);
+    // A rate on a part row is not a price. Only service kinds read it.
+    expect(quotedUnitCents({ kind: "part", priceCents: null, rateCents: 9999 }, 0)).toBe(0);
+  });
+
+  it("says what one of it is, so a flat charge stops printing as an hour", () => {
+    expect(unitFor(codes[1])).toBe("trip");
+    // An hour is the sane default for labor and travel with nothing said.
+    expect(unitFor({ kind: "labor" })).toBe("h");
+    expect(unitFor({ kind: "part" })).toBe("");
   });
 });

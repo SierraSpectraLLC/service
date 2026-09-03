@@ -4235,3 +4235,35 @@ CREATE INDEX IF NOT EXISTS "expense_reports_amends_idx" ON "expense_reports" ("a
 ALTER TABLE "stipends" ADD COLUMN IF NOT EXISTS "cadence" text NOT NULL DEFAULT 'months';
 ALTER TABLE "stipends" ADD COLUMN IF NOT EXISTS "every_weeks" integer NOT NULL DEFAULT 1;
 ALTER TABLE "stipends" ADD COLUMN IF NOT EXISTS "weekday" integer NOT NULL DEFAULT 1;
+
+-- A part number for an hour and for a trip.
+--
+-- A service shop sells "LABOR-LCP" and "TZ3O" off a number with an agreed
+-- price the same way it sells a seal, and the only place those could live was
+-- the free-text description of a quote line - retyped, and re-priced, every
+-- time. They are catalog rows now (kind 'labor' | 'travel', see SERVICE_KINDS
+-- in lib/partCatalog), which needs two things a thing in a box does not have:
+-- what it sells for, and what one of it IS.
+--
+-- rate_cents is read for service kinds ONLY. A part is still priced from
+-- part_prices plus the workspace markup - the one formula an invoice bills
+-- with - because a second price on the part row is how a quote and the invoice
+-- that follows it start disagreeing.
+ALTER TABLE "part_catalog" ADD COLUMN IF NOT EXISTS "rate_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "part_catalog" ADD COLUMN IF NOT EXISTS "unit" text NOT NULL DEFAULT '';
+
+-- The number a line was quoted off, and what one of them is.
+--
+-- part_number was previously glued into the description ("G6303-80060 Rotor
+-- seal") or nowhere at all, which left the Excel layout's part-number column
+-- permanently blank and gave a client's purchasing system nothing to match on.
+--
+-- unit is what stops a flat travel charge printing as "1 h": the line list
+-- read the unit off the KIND, so every travel line claimed to be hours whether
+-- it was a zone charge or a drive. Blank means exactly what it meant before -
+-- hours for labor and travel, a bare count for anything else - so every line
+-- already written reads as it always did.
+ALTER TABLE "invoice_lines" ADD COLUMN IF NOT EXISTS "part_number" text NOT NULL DEFAULT '';
+ALTER TABLE "invoice_lines" ADD COLUMN IF NOT EXISTS "unit" text NOT NULL DEFAULT '';
+ALTER TABLE "quote_lines" ADD COLUMN IF NOT EXISTS "part_number" text NOT NULL DEFAULT '';
+ALTER TABLE "quote_lines" ADD COLUMN IF NOT EXISTS "unit" text NOT NULL DEFAULT '';

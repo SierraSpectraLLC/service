@@ -13,16 +13,65 @@
 // record whether or not the shop has catalogued it - so every function takes the
 // catalog and a number, and shrugs politely when the number is unknown.
 
+import { sellPrice } from "@/lib/billing";
 import { normalizePn } from "@/lib/priceBook";
 
 export const PART_KINDS = ["part", "consumable", "kit"] as const;
 export type PartKind = (typeof PART_KINDS)[number];
 
+/**
+ * The kinds that are not things: an hour and a trip.
+ *
+ * A shop quotes "LABOR-LCP" and "TZ3O" the way it quotes a seal - off a number
+ * with an agreed price behind it - and before this the only place those could
+ * live was the free-text description of a line, retyped and re-priced every
+ * time somebody built a quote. They are catalog rows because that is what a
+ * number IS here: one row saying what it means and what it costs.
+ *
+ * They are deliberately NOT stocked, ordered or fitted. Nothing counts them on
+ * a shelf and no purchase order may quote one, which is why every part picker
+ * takes a `kinds` list and the default excludes these two.
+ */
+export const SERVICE_KINDS = ["labor", "travel"] as const;
+export type ServiceKind = (typeof SERVICE_KINDS)[number];
+
+/** Everything the catalog can hold - things and the hours that fit them. */
+export const CATALOG_KINDS = [...PART_KINDS, ...SERVICE_KINDS] as const;
+
 export const PART_KIND_LABEL: Record<string, string> = {
   part: "Part",
   consumable: "Consumable",
   kit: "Kit",
+  labor: "Labor",
+  travel: "Travel",
 };
+
+/** An hour or a trip rather than a thing in a box. */
+export const isService = (kind: string): boolean =>
+  (SERVICE_KINDS as readonly string[]).includes(kind);
+
+/**
+ * The invoice/quote line kind this catalog row bills as.
+ *
+ * A service code carries its own kind - labor bills as labor, travel as travel
+ * - and everything else is a part, consumables and kits included: those are
+ * things sold, and "consumable" is a stocking fact rather than a billing one.
+ */
+export const lineKindFor = (kind: string): string => (isService(kind) ? kind : "part");
+
+/**
+ * What one of it is. "h" for an hour of labor, "trip" for a zone charge, "" for
+ * a thing you count.
+ *
+ * Free text with suggestions rather than an enum: a shop that bills travel by
+ * the day, the mile or the leg is not wrong, and refusing the word it uses
+ * would only push it back into the description.
+ */
+export const UNIT_SUGGESTIONS = ["h", "trip", "day", "mile", "ea"] as const;
+
+/** The unit a code bills in, falling back to the one its kind usually uses. */
+export const unitFor = (e: { kind: string; unit?: string }): string =>
+  (e.unit ?? "").trim() || (isService(e.kind) ? "h" : "");
 
 export type CatalogEntry = {
   id: number;
@@ -38,6 +87,14 @@ export type CatalogEntry = {
    * behaves exactly as it did before they existed.
    */
   aliases?: PartAlias[];
+  /**
+   * What a SERVICE code is billed at, per unit. Meaningless on a thing in a
+   * box, whose price is the price book plus the shop's markup - see
+   * quotedUnitCents, which is the one place that distinction is made.
+   */
+  rateCents?: number;
+  /** What one of it is: "h", "trip", "day". See unitFor. */
+  unit?: string;
 };
 
 /**
@@ -117,7 +174,14 @@ export function catalogLabel(e: Pick<CatalogEntry, "partNumber" | "name" | "manu
  * as often the manufacturer's as it is ours - the whole reason a house number
  * exists is that it wraps somebody else's.
  */
-export function searchCatalog<T extends CatalogEntry>(catalog: T[], query: string, limit = 20): T[] {
+export function searchCatalog<T extends CatalogEntry>(
+  catalog: T[], query: string, limit = 20, kinds?: readonly string[],
+): T[] {
+  // Which half of the book this picker is for. A purchase order may not quote
+  // an hour and a quote line may quote anything, so the caller says - and a
+  // caller that does not care sees the whole book, as every one of them did
+  // before service codes existed.
+  if (kinds) catalog = catalog.filter((c) => kinds.includes(c.kind));
   const q = query.trim().toLowerCase();
   if (!q) return catalog.filter((c) => !c.archived).slice(0, limit);
   const pn = normalizePn(query);
@@ -133,6 +197,28 @@ export function searchCatalog<T extends CatalogEntry>(catalog: T[], query: strin
   const live = catalog.filter((c) => !c.archived && hit(c));
   const gone = catalog.filter((c) => c.archived && hit(c));
   return [...live, ...gone].slice(0, limit);
+}
+
+/**
+ * What one of these is quoted at, in cents.
+ *
+ * The two halves of the book price differently and only this function knows
+ * that. A THING is the price book plus the shop's markup - the same
+ * lib/billing.sellPrice an invoice bills a fitted part with, so a quote and
+ * the bill that follows it cannot disagree. A SERVICE CODE is its own rate,
+ * because there is no vendor and no cost: what an hour of LC/MS work sells for
+ * is a decision, not a purchase.
+ *
+ * Zero when nobody has said - an uncosted part and a rateless code both quote
+ * at nothing, which is a question somebody answers before the quote goes out.
+ * An invented price is one nobody notices.
+ */
+export function quotedUnitCents(
+  e: { kind: string; rateCents?: number; priceCents?: number | null },
+  partsMarkupBps = 0,
+): number {
+  if (isService(e.kind)) return Math.max(0, Math.round(e.rateCents ?? 0));
+  return sellPrice(e.priceCents ?? null, partsMarkupBps);
 }
 
 export type KitLine = { partNumber: string; name: string; qty: number };
@@ -332,12 +418,12 @@ export type PartSuggestion<T extends CatalogEntry = CatalogEntry> = {
  * own number rather than a fresh spelling of it.
  */
 export function suggestParts<T extends CatalogEntry>(
-  catalog: T[], query: string, limit = 8,
+  catalog: T[], query: string, limit = 8, kinds?: readonly string[],
 ): PartSuggestion<T>[] {
   const q = query.trim();
   if (!q) return [];
   const pn = normalizePn(q);
-  return searchCatalog(catalog, q, limit).map((entry) => {
+  return searchCatalog(catalog, q, limit, kinds).map((entry) => {
     const hitAlias = pn.length > 0
       ? (entry.aliases ?? []).find((a) => normalizePn(a.partNumber).includes(pn))
       : undefined;

@@ -13,6 +13,7 @@
 // Pure. Callers hand in the rows.
 
 import { sellPrice } from "@/lib/billing";
+import { isService } from "@/lib/partCatalog";
 import { matchesQuery } from "@/lib/search";
 
 export type StorePart = {
@@ -78,7 +79,12 @@ export function buildStore(
   const stock = opts.stockByPn ?? new Map<string, number>();
   const eta = opts.etaByPn ?? new Map<string, number>();
   return catalog
-    .filter((c) => !c.archived && c.partNumber.trim())
+    /* Things only. The catalog also holds the numbers a shop quotes hours and
+       trips under - LABOR-LCP, TZ3O - and those are not for sale off a shelf:
+       a client cannot put an hour of LC/MS work in a cart, and one listed at
+       "price on request" would be an offer nobody meant to make. They reach a
+       client the one way they should, as a line on a quote somebody wrote. */
+    .filter((c) => !c.archived && c.partNumber.trim() && !isService(c.kind))
     .map((c) => {
       const oemCost = opts.oemCostByPn.get(lc(c.partNumber));
       const altCost = opts.altCostByPn.get(lc(c.partNumber));

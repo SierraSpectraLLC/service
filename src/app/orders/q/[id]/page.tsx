@@ -79,6 +79,12 @@ export default async function ClientQuotePage({ params }: { params: Promise<{ id
         {full.lines.map((l) => (
           <div key={l.id} className="row-2" style={{ alignItems: "baseline", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
             <span style={{ flex: 1, minWidth: 0 }}>
+              {/* The number they would raise a PO against. */}
+              {l.partNumber && (
+                <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)", marginRight: 6 }}>
+                  {l.partNumber}
+                </span>
+              )}
               <span className="t-body" style={{ fontWeight: 600 }}>{l.description}</span>
               {l.detail && <span className="mut t-meta" style={{ display: "block" }}>{l.detail}</span>}
             </span>
