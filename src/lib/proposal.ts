@@ -81,9 +81,14 @@ export type ProposalBlock =
   | { kind: "facts"; rows: [string, string][] }
   | { kind: "head"; text: string }
   | { kind: "sub"; text: string }
-  | { kind: "para"; text: string }
+  /**
+   * `lead` is a caption introducing what follows - a table, usually.
+   * `strong` is the one line of a tier that is a figure rather than a sentence.
+   */
+  | { kind: "para"; text: string; lead?: boolean; strong?: boolean }
   | { kind: "list"; items: string[] }
-  | { kind: "table"; head: string[]; rows: string[][] }
+  /** `lead` tints the first row: the price every other row is read against. */
+  | { kind: "table"; head: string[]; rows: string[][]; lead?: boolean }
   | { kind: "callout"; text: string; body: string[] };
 
 /**
@@ -95,7 +100,7 @@ export type ProposalBlock =
  * between visits, and every convention in it has to be guessable from looking
  * at the box.
  */
-export function parseBody(body: string): ProposalBlock[] {
+export function parseBody(body: string, lead = false): ProposalBlock[] {
   const out: ProposalBlock[] = [];
   let items: string[] = [];
   const flush = () => {
@@ -108,7 +113,7 @@ export function parseBody(body: string): ProposalBlock[] {
     if (line.startsWith("# ")) { flush(); out.push({ kind: "sub", text: line.slice(2).trim() }); continue; }
     if (/^[-•*]\s+/.test(line)) { items.push(line.replace(/^[-•*]\s+/, "")); continue; }
     flush();
-    out.push({ kind: "para", text: line });
+    out.push({ kind: "para", text: line, ...(lead ? { lead: true } : {}) });
   }
   flush();
   return out;
@@ -209,7 +214,13 @@ export function proposalBlocks(p: ProposalInput): ProposalBlock[] {
     if (s.kind === "systems") {
       if (!p.systems.length) continue;
       if (heading) out.push({ kind: "head", text: heading });
-      out.push(...parseBody(s.body));
+      /* A placeholder section's words are a CAPTION for the table under them,
+         not the section's first sentence - "Tiers structured to fit different
+         risk profiles" reads as a note about the table, and the document sets
+         it smaller and italic to say so. A prose section's first paragraph is
+         prose, which is why this is decided here and not by the renderer
+         noticing what came before it. */
+      out.push(...parseBody(s.body, true));
       out.push({
         kind: "table",
         head: ["#", "Instrument", "Model", "Notes"],
@@ -222,8 +233,10 @@ export function proposalBlocks(p: ProposalInput): ProposalBlock[] {
       // to argue with themselves, and it needs somebody to argue against.
       if (p.tiers.length < 2) continue;
       if (heading) out.push({ kind: "head", text: heading });
-      out.push(...parseBody(s.body));
-      out.push({ kind: "table", ...tierMatrix(p.tiers) });
+      out.push(...parseBody(s.body, true));
+      // The comparison's first row is the annual investment, and the document
+      // has always tinted it: it is the figure every other row is read against.
+      out.push({ kind: "table", ...tierMatrix(p.tiers), lead: true });
       continue;
     }
     if (s.kind === "tier_detail") {
@@ -231,7 +244,9 @@ export function proposalBlocks(p: ProposalInput): ProposalBlock[] {
       for (const t of p.tiers) {
         out.push({ kind: "head", text: `${heading || "Tier Detail"}: ${t.name}` });
         if (t.annualCents > 0) {
-          out.push({ kind: "para", text: `Annual Investment: ${formatCents(t.annualCents)}` });
+          // The price, set apart from the sentences around it: it is the line a
+          // reader skips to, and the document has always set it bold.
+          out.push({ kind: "para", text: `Annual Investment: ${formatCents(t.annualCents)}`, strong: true });
         }
         if (t.bestFor.trim()) out.push({ kind: "para", text: `Best for: ${t.bestFor.trim()}` });
         const inc = parseBullets(t.includes);
