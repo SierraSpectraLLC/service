@@ -99,6 +99,93 @@ describe("quote export", () => {
     expect(v("B43")).toBe("Unlimited labor & travel for return visits");
     expect(v("B51")).toBe("Sierra Spectra | quotes@example.com");
   });
+
+  /*
+   * The quote the shop actually sends, rebuilt from the record.
+   *
+   * Every cell below was filled by hand in Excel after the export, because the
+   * record had nowhere to keep it: the greeting was the template's fixed
+   * sentence, the address block took two lines whatever the address was, the
+   * adjustment row was a literal zero, the comment block took three rows, and a
+   * line item that covers seven modules was seven rows typed one at a time.
+   */
+  it("writes the letter: the person, the whole address, the discount and five comments", async () => {
+    const buf = await fillQuoteXlsx({
+      number: "030190_B", date: "2025-09-30",
+      customer: {
+        name: "UCSF Hair Analytical Lab",
+        address: "Room 290, Box 0446\n513 Parnassus Ave.\nSan Francisco, CA 94143",
+      },
+      title: "Full-Service Unlimited Contract",
+      greeting: "Hideaki, thank you for considering us! Here are the specifics of your quote:",
+      discount: 12000,
+      discountLabel: "Pooled repair part allocation",
+      comments: [
+        "HPLC Included w/Quattro Ultima cost", "Dedicated CA-Based Engineer",
+        "Additional coverages can be bought:", "25% deposit due on approval",
+        "Quote good through 2025-10-30",
+      ],
+      contactLine: "Sierra Spectra | quotes@example.com",
+      lines: [line("Quattro Ultima | Full-Service Unlimited 12mo", 1, 18000, "FSC-QULT-UNL")],
+    });
+    const { v } = await read(buf, "Quote");
+    expect(v("B16")).toBe("Hideaki, thank you for considering us! Here are the specifics of your quote:");
+    // Three address rows, not two: a mail stop and a box number are the lines
+    // that used to get folded into the city.
+    expect(v("I9")).toBe("UCSF Hair Analytical Lab");
+    expect(v("I10")).toBe("Room 290, Box 0446");
+    expect(v("I11")).toBe("513 Parnassus Ave.");
+    expect(v("I12")).toBe("San Francisco, CA 94143");
+    // Negative, into the row the template's own total already adds - so the
+    // exported file still recomputes if somebody edits a quantity in Excel.
+    expect(v("K42")).toBe(-12000);
+    expect(v("K45")).toBe("=K41+K42");
+    expect(v("H42")).toBe("Pooled repair part allocation");
+    expect(v("B43")).toBe("HPLC Included w/Quattro Ultima cost");
+    expect(v("B47")).toBe("Quote good through 2025-10-30");
+  });
+
+  it("leaves the template's own greeting and adjustment alone when the quote says nothing", async () => {
+    const buf = await fillQuoteXlsx({
+      number: "030213", date: "2026-03-02", customer: CUSTOMER,
+      title: "PM visit", comments: [], contactLine: "",
+      lines: [line("PM Kit", 1, 3000)],
+    });
+    const { v } = await read(buf, "Quote");
+    expect(v("B16")).toBe("Thank you for considering us! Here are the specifics of the job:");
+    // The template ships a literal 0 here. A quote with no discount must not
+    // start writing to the cell at all.
+    expect(v("K42")).toBe(0);
+    expect(v("H42")).toBe("Adjustments");
+  });
+
+  it("prints a multi-line description as its own rows, priced once, the detail italic", async () => {
+    const buf = await fillQuoteXlsx({
+      number: "030214", date: "2026-03-02", customer: CUSTOMER,
+      title: "Contract", comments: [], contactLine: "",
+      lines: [
+        { description: "LC-10 HPLC | Full-Service Unlimited 12mo", partNumber: "FSC-LC10-UNL", qty: 1, unitPrice: 8000 },
+        { description: "- Shimadzu LC-10 AS", continuation: true },
+        { description: "- Waters 717 Plus", continuation: true },
+        { description: "LC-20 HPLC | Full Service Unlimited 12mo", partNumber: "FSC-LC20-UNL", qty: 1, unitPrice: 10000 },
+      ],
+    });
+    const { ws, v } = await read(buf, "Quote");
+    expect(v("B25")).toBe("LC-10 HPLC | Full-Service Unlimited 12mo");
+    expect(v("H25")).toBe(1);
+    // The detail carries no quantity and no price: the charge is stated once,
+    // and the template's row formula prints "-" beside it.
+    expect(v("B26")).toBe("- Shimadzu LC-10 AS");
+    expect(v("H26")).toBe(null);
+    expect(v("I26")).toBe(null);
+    expect(ws.getCell("B26").font?.italic).toBe(true);
+    // And the charge above it is NOT italic - ExcelJS shares one style object
+    // across every cell of a format, so setting the font on one row once
+    // italicised the whole table.
+    expect(ws.getCell("B25").font?.italic ?? false).toBe(false);
+    expect(ws.getCell("B28").font?.italic ?? false).toBe(false);
+    expect(v("B28")).toBe("LC-20 HPLC | Full Service Unlimited 12mo");
+  });
 });
 
 describe("purchase order export", () => {

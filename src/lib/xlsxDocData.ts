@@ -1,3 +1,4 @@
+import { descriptionLines } from "@/lib/billing";
 import type { Brand } from "@/lib/brand";
 import type { DocLine } from "@/lib/xlsxDocs";
 
@@ -26,18 +27,31 @@ type StoredLine = {
  * sheet, with the covering agreement named - because the sheet's row formula
  * multiplies qty by price, and a covered line priced at list would charge the
  * client for what the contract already paid.
+ *
+ * A description that runs to several lines becomes several ROWS: the charge,
+ * then its detail, each in its own row, priced on the first one only. That is
+ * how the shop's own quotes have always looked - a system on one row and the
+ * seven modules it covers under it - and typing those seven rows by hand into
+ * the exported file is the work this removes.
  */
 export const invoiceLinesForXlsx = (lines: StoredLine[]): DocLine[] =>
-  lines.map((l) => ({
-    description: [
-      l.description,
-      l.detail && ` - ${l.detail}`,
-      l.covered && ` (covered${l.coveredBy ? ` by ${l.coveredBy}` : ""})`,
-    ].filter(Boolean).join(""),
-    // The template has always had this column and nothing ever filled it. It
-    // is what a client's purchasing department matches a quote against, and
-    // what the shop reorders by - see quote_lines.part_number.
-    partNumber: l.partNumber ?? "",
-    qty: l.qty,
-    unitPrice: l.covered ? 0 : l.unitCents / 100,
-  }));
+  lines.flatMap((l) => {
+    const { head, rest } = descriptionLines(l.description);
+    const charge: DocLine = {
+      description: [
+        head,
+        l.detail && ` - ${l.detail}`,
+        l.covered && ` (covered${l.coveredBy ? ` by ${l.coveredBy}` : ""})`,
+      ].filter(Boolean).join(""),
+      // The template has always had this column and nothing ever filled it. It
+      // is what a client's purchasing department matches a quote against, and
+      // what the shop reorders by - see quote_lines.part_number.
+      partNumber: l.partNumber ?? "",
+      qty: l.qty,
+      unitPrice: l.covered ? 0 : l.unitCents / 100,
+    };
+    // No quantity and no price on a continuation row: the charge is stated
+    // once. The template's row formula prints "-" beside them, which is what
+    // the shop's own paper does.
+    return [charge, ...rest.map((r): DocLine => ({ description: r, continuation: true }))];
+  });

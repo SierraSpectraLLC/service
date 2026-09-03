@@ -4267,3 +4267,114 @@ ALTER TABLE "invoice_lines" ADD COLUMN IF NOT EXISTS "part_number" text NOT NULL
 ALTER TABLE "invoice_lines" ADD COLUMN IF NOT EXISTS "unit" text NOT NULL DEFAULT '';
 ALTER TABLE "quote_lines" ADD COLUMN IF NOT EXISTS "part_number" text NOT NULL DEFAULT '';
 ALTER TABLE "quote_lines" ADD COLUMN IF NOT EXISTS "unit" text NOT NULL DEFAULT '';
+
+-- The letter a quote is, around the table it carries.
+--
+-- Five things the shop was retyping into the exported spreadsheet after every
+-- send, because the record had nowhere to put them: who it is addressed to,
+-- the greeting that names them, the address it goes to when that is not
+-- accounts payable, what came off the price, and why.
+--
+-- The discount is two columns because a shop says it two ways - "10% off" and
+-- "$12,000 off" - and exactly one function (lib/quotes.discountOf) decides
+-- which applies, so no screen has to guess. Both default to zero, which is
+-- every quote already written: no discount, total unchanged.
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "attn" text NOT NULL DEFAULT '';
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "greeting" text NOT NULL DEFAULT '';
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "client_address" text NOT NULL DEFAULT '';
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "discount_pct" integer NOT NULL DEFAULT 0;
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "discount_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "discount_label" text NOT NULL DEFAULT '';
+
+-- ── The long document ───────────────────────────────────────────────────────
+-- A quote is a price. A proposal is the argument for it: covered systems,
+-- coverage tiers side by side, what parts coverage actually means, and which
+-- tier we recommend. The shop wrote these in Word, one per client, by copying
+-- last year's and editing every paragraph - so the parts that are the same
+-- every time got re-proofread and the parts that must change got missed.
+--
+-- One per quote and bound to it: the document's own header table says
+-- "Quote #", and the client, the contact and the pricing validity are all the
+-- quote's. See lib/proposal, which assembles it and holds the house template
+-- these rows are COPIED from at creation - a template read live would rewrite
+-- what a client already read.
+CREATE TABLE IF NOT EXISTS "proposals" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "quote_id" integer NOT NULL,
+  "number" text NOT NULL DEFAULT '',
+  "title" text NOT NULL DEFAULT 'Service Contract Proposal',
+  "subtitle" text NOT NULL DEFAULT '',
+  "pricing_valid" text NOT NULL DEFAULT '30 days from issue',
+  "recommended_tier" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "updated_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "proposals_quote_idx" ON "proposals" ("quote_id");
+-- One document per price. A second proposal for one quote is two arguments for
+-- one number, and nothing could say which the client was sent.
+CREATE UNIQUE INDEX IF NOT EXISTS "proposals_quote_unique" ON "proposals" ("quote_id");
+
+CREATE TABLE IF NOT EXISTS "proposal_systems" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "proposal_id" integer NOT NULL,
+  "instrument_id" integer,
+  "name" text NOT NULL DEFAULT '',
+  "model" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "position" integer NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS "proposal_systems_proposal_idx" ON "proposal_systems" ("proposal_id");
+
+CREATE TABLE IF NOT EXISTS "proposal_tiers" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "proposal_id" integer NOT NULL,
+  "key" text NOT NULL,
+  "name" text NOT NULL DEFAULT '',
+  "annual_cents" integer NOT NULL DEFAULT 0,
+  "best_for" text NOT NULL DEFAULT '',
+  "includes" text NOT NULL DEFAULT '',
+  "not_included" text NOT NULL DEFAULT '',
+  "features" text NOT NULL DEFAULT '',
+  "position" integer NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS "proposal_tiers_proposal_idx" ON "proposal_tiers" ("proposal_id");
+
+CREATE TABLE IF NOT EXISTS "proposal_sections" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "proposal_id" integer NOT NULL,
+  "kind" text NOT NULL DEFAULT 'prose',
+  "heading" text NOT NULL DEFAULT '',
+  "body" text NOT NULL DEFAULT '',
+  "position" integer NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS "proposal_sections_proposal_idx" ON "proposal_sections" ("proposal_id");
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'proposals_quote_id_fk') THEN
+    ALTER TABLE "proposals" ADD CONSTRAINT "proposals_quote_id_fk"
+      FOREIGN KEY ("quote_id") REFERENCES "quotes"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'proposals_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "proposals" ADD CONSTRAINT "proposals_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'proposal_systems_proposal_id_fk') THEN
+    ALTER TABLE "proposal_systems" ADD CONSTRAINT "proposal_systems_proposal_id_fk"
+      FOREIGN KEY ("proposal_id") REFERENCES "proposals"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'proposal_systems_instrument_id_fk') THEN
+    ALTER TABLE "proposal_systems" ADD CONSTRAINT "proposal_systems_instrument_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'proposal_tiers_proposal_id_fk') THEN
+    ALTER TABLE "proposal_tiers" ADD CONSTRAINT "proposal_tiers_proposal_id_fk"
+      FOREIGN KEY ("proposal_id") REFERENCES "proposals"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'proposal_sections_proposal_id_fk') THEN
+    ALTER TABLE "proposal_sections" ADD CONSTRAINT "proposal_sections_proposal_id_fk"
+      FOREIGN KEY ("proposal_id") REFERENCES "proposals"("id") ON DELETE CASCADE;
+  END IF;
+END $$;

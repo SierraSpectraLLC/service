@@ -1959,9 +1959,19 @@ async function main(): Promise<void> {
       expiresOn: day(-10), answeredOn: day(-36), answeredBy: "jules@meridianexchange.example",
       answerNote: "Not at that price on a unit we are reselling. Find us a used one or print it.",
       createdBy: OWNER, createdAt: at(-41), updatedAt: at(-36) },
+    /* The quote with the whole letter on it - see lib/quotes. Addressed to a
+       person, sent to the lab rather than to accounts payable, priced with a
+       concession that says what it is, and closing with the shop's own notes.
+       Every one of those was retyped into the exported spreadsheet by hand. */
     { tenantOrgId: T, orgId: keystone.id, number: "Q-3004", status: "sent",
       title: "Keystone Bio - annual coverage, two systems", sentOn: day(-4), expiresOn: day(6),
-      depositPct: 25, note: "Two visits a year, parts allowance, phone support included.",
+      depositPct: 25,
+      attn: "Amara Osei",
+      clientAddress: "Attn: Receiving, Bldg 2\n1100 Corporate Center Dr.\nMonterey Park, CA 91754",
+      discountPct: 0, discountCents: 400_000, discountLabel: "Pooled repair part allocation",
+      note: "Two visits a year, parts allowance, phone support included.\n"
+        + "Dedicated CA-based engineer.\n"
+        + "Additional coverage can be bought: +$6,000 for after-hours response.",
       createdBy: OWNER, createdAt: at(-5), updatedAt: at(-4) },
     { tenantOrgId: T, orgId: harbor.id, number: "Q-3005", status: "expired",
       title: "Suppressor replacement - 930 Compact IC", sentOn: day(-70), expiresOn: day(-40),
@@ -1989,7 +1999,12 @@ async function main(): Promise<void> {
     { quoteId: q("Q-3003"), kind: "labor", partNumber: "LABOR-LCP", description: "Labor, LC/MS Preferred", detail: "Source rebuild and verification", qty: 6000, unitCents: 19500, unit: "h", position: 1 },
     // The flat charge the unit exists for: one trip, not "1 h" of travel.
     { quoteId: q("Q-3003"), kind: "travel", partNumber: "TZ3O", description: "Travel Zone-3 Overnight", detail: "One trip, two engineers on site the same day", qty: 1000, unitCents: 95_000, unit: "trip", position: 2 },
-    { quoteId: q("Q-3004"), kind: "retainer", description: "Annual coverage - two systems", detail: "Two PM visits, phone support, 8 h labour included", qty: 1000, unitCents: 640_000, position: 0 },
+    // One charge, several sentences: the coverage, and what is under it. The
+    // shop used to type those two module lines as $0 rows of their own.
+    { quoteId: q("Q-3004"), kind: "retainer",
+      description: "Annual coverage - two systems\n- Agilent 7890B GC-FID\n- Shimadzu LCMS-8060NX",
+      detail: "Two PM visits, phone support, 8 h labour included",
+      qty: 1000, unitCents: 640_000, position: 0 },
     { quoteId: q("Q-3005"), kind: "part", partNumber: "MET-SUP-930", description: "Suppressor module", detail: "", qty: 1000, unitCents: 318_000, position: 0 },
     { quoteId: q("Q-3005"), kind: "labor", description: "Fit and verify", detail: "3.0 h", qty: 3000, unitCents: 18500, unit: "h", position: 1 },
     { quoteId: q("Q-3006"), kind: "part", description: "7890B GC-FID, refurbished", detail: "Budgetary - subject to availability", qty: 1000, unitCents: 2_850_000, position: 0 },

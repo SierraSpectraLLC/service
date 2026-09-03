@@ -4,13 +4,18 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
-import { addInvoiceLine, addQuoteLine, removeInvoiceLine, removeQuoteLine } from "@/app/actions";
+import {
+  addInvoiceLine, addQuoteLine, removeInvoiceLine, removeQuoteLine,
+  setInvoiceLineDescription, setQuoteLineDescription,
+} from "@/app/actions";
+import { descriptionLines } from "@/lib/billing";
 import { formatCents } from "@/lib/money";
 import {
   CATALOG_KINDS, lineKindFor, quotedUnitCents, unitFor,
 } from "@/lib/partCatalog";
 import PartNumberField, { type LookupPart } from "@/components/PartNumberField";
 import NewPartButton from "@/components/NewPartButton";
+import InlineEdit from "@/components/ui/InlineEdit";
 import { Panel } from "@/components/ui";
 
 export type Line = {
@@ -62,9 +67,10 @@ const emptyDraft = {
  * an invoice or quote with no job behind it gets its content.
  */
 export default function InvoiceLineList({
-  lines, totalCents, editable, target, partsMarkupBps = 0,
+  lines, totalCents, editable, target, partsMarkupBps = 0, discount,
 }: {
   lines: Line[];
+  /** What is owed - the lines less any discount. See lib/quotes.netCents. */
   totalCents: number;
   editable: boolean;
   /** Set on drafts to enable add and remove. Absent = read-only history. */
@@ -75,6 +81,12 @@ export default function InvoiceLineList({
    * Zero means cost, which is what a shop that has set no markup charges.
    */
   partsMarkupBps?: number;
+  /**
+   * Money off, when there is any. Given rather than computed here so the
+   * subtotal, the discount and the total on screen are the same three numbers
+   * the client's copy and the spreadsheet carry - lib/quotes decides them.
+   */
+  discount?: { label: string; cents: number };
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -85,6 +97,17 @@ export default function InvoiceLineList({
     .reduce((n, l) => n + Math.round(l.qty * l.unitCents), 0);
 
   const canEdit = editable && target !== undefined;
+
+  const reword = (l: Line, description: string) => {
+    if (!target) return;
+    startTransition(async () => {
+      const res = target.kind === "invoice"
+        ? await setInvoiceLineDescription(l.id, description)
+        : await setQuoteLineDescription(l.id, description);
+      if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
+      router.refresh();
+    });
+  };
 
   const remove = async (l: Line) => {
     if (!target) return;
@@ -171,11 +194,30 @@ export default function InvoiceLineList({
                     purchasing system matches on and what the shop reorders by,
                     and it used to be glued into the description or lost. */}
                 {l.partNumber && (
-                  <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)", marginRight: 6 }}>
+                  <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)", marginRight: 8 }}>
                     {l.partNumber}
                   </span>
                 )}
-                <span className="t-body" style={{ fontWeight: 600 }}>{l.description}</span>
+                {/* One charge, several sentences: the thing on top and what is
+                    inside it under it. Editable in place on a draft, because a
+                    module list is exactly the sort of prose that gets revised
+                    twice before the quote goes out. */}
+                {canEdit ? (
+                  <span className="t-body" style={{ fontWeight: 600 }}>
+                    <InlineEdit multiline value={l.description} label="line description"
+                      onSave={(next) => reword(l, next)} />
+                  </span>
+                ) : (
+                  <>
+                    <span className="t-body" style={{ fontWeight: 600 }}>{descriptionLines(l.description).head}</span>
+                    {descriptionLines(l.description).rest.map((r, i) => (
+                      <span key={i} className="mut t-meta"
+                        style={{ display: "block", paddingLeft: 12, fontStyle: "italic" }}>
+                        {r}
+                      </span>
+                    ))}
+                  </>
+                )}
                 {(l.detail || l.covered) && (
                   <span className="mut t-meta" style={{ display: "block" }}>
                     {l.detail}
@@ -196,7 +238,33 @@ export default function InvoiceLineList({
               )}
             </div>
           ))}
-          <div className="row-2" style={{ alignItems: "baseline", padding: "9px 0 0", borderTop: "2px solid var(--line)" }}>
+          {/* Subtotal, what came off, and what is owed - the three rows the
+              client's own copy shows. Only drawn when something came off: a
+              quote with no discount says one number, as it always did. */}
+          {discount && discount.cents > 0 && (
+            <>
+              <div className="row-2" style={{ alignItems: "baseline", padding: "9px 0 0", borderTop: "2px solid var(--line)" }}>
+                <span className="sp" />
+                <span className="mut t-body">Subtotal</span>
+                <span className="mut t-body" style={{ width: 110, textAlign: "right" }}>
+                  {formatCents(totalCents + discount.cents)}
+                </span>
+                {canEdit && <span style={{ width: 54 }} />}
+              </div>
+              <div className="row-2" style={{ alignItems: "baseline", padding: "3px 0 0" }}>
+                <span className="sp" />
+                <span className="t-body" style={{ color: "var(--t-good-fg)" }}>{discount.label}</span>
+                <b className="t-body" style={{ width: 110, textAlign: "right", color: "var(--t-good-fg)" }}>
+                  -{formatCents(discount.cents)}
+                </b>
+                {canEdit && <span style={{ width: 54 }} />}
+              </div>
+            </>
+          )}
+          <div className="row-2" style={{
+            alignItems: "baseline", padding: "9px 0 0",
+            borderTop: discount && discount.cents > 0 ? "1px solid var(--line)" : "2px solid var(--line)",
+          }}>
             <span className="sp" />
             <span className="t-body" style={{ fontWeight: 700 }}>Total</span>
             <b className="t-page" style={{ width: 110, textAlign: "right" }}>{formatCents(totalCents)}</b>
@@ -243,7 +311,7 @@ export default function InvoiceLineList({
           {/* The number that is not in the book yet. Catalogued from here, in
               the form the parts catalog uses, so the estimate does not wait on
               a trip to Settings - and so the next quote finds it. */}
-          <div className="row-2" style={{ marginTop: 6 }}>
+          <div className="row-2" style={{ marginTop: 8 }}>
             <NewPartButton
               seed={{
                 partNumber: draft.partNumber,
@@ -254,6 +322,7 @@ export default function InvoiceLineList({
               onSaved={(partNumber) => setDraft((d) => ({ ...d, partNumber }))} />
             <span className="mut t-meta">
               Not in the book? Catalog it here and it is on the next quote too.
+              {" "}Click a description to give it more lines.
             </span>
           </div>
           {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}

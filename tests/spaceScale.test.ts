@@ -45,7 +45,7 @@ const NOT_SPACING = new Set([0, 1, 1.5, 2, 3]);
  * primitive from ui/Layout) rather than to bump the constant - that is the
  * lesson the last sweep paid for.
  */
-const OFF_GRID_BUDGET = 740;
+const OFF_GRID_BUDGET = 737;
 
 const tsxFiles = (dir: string): string[] =>
   readdirSync(dir).flatMap((n) => {

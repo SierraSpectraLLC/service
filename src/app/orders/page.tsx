@@ -6,6 +6,7 @@ import { orgs, quoteLines as quoteLinesTable, quotes as quotesTable, shareLinks 
 import { requireUser } from "@/lib/authz";
 import { maySeeOrgMoney } from "@/lib/tenancy";
 import { isStaffRole } from "@/lib/tenants";
+import { descriptionLines } from "@/lib/billing";
 import { formatCents } from "@/lib/money";
 import { shopMonthDay, shopToday } from "@/lib/shopday";
 import { asStatementRow, invoicesForOrg } from "@/lib/invoiceData";
@@ -65,8 +66,12 @@ export default async function OrdersPage({ searchParams }: {
   ]);
 
   const summarize = (names: string[]) => {
-    const shown = names.filter(Boolean).slice(0, 2).join(" · ");
-    return names.length > 2 ? `${shown} +${names.length - 2}` : shown || "Order";
+    // The charge, not its detail. A line item can run to several lines - the
+    // system, then the modules it covers - and a one-row summary that ran them
+    // together would read as one very long sentence in a table cell.
+    const heads = names.map((n) => descriptionLines(n).head);
+    const shown = heads.filter(Boolean).slice(0, 2).join(" · ");
+    return heads.length > 2 ? `${shown} +${heads.length - 2}` : shown || "Order";
   };
 
   const rows: Row[] = [

@@ -5,7 +5,10 @@ import { orgs } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { seesBooksFor } from "@/lib/financeData";
 import { readTenant } from "@/lib/tenancy";
-import { quoteById, qtyOf } from "@/lib/invoiceData";
+import { quoteById, qtyOf, quoteSubtotal } from "@/lib/invoiceData";
+import {
+  addressedTo, commentRows, discountLabel, discountOf, greetingLine,
+} from "@/lib/quotes";
 import { getBrand } from "@/lib/brand";
 import { xlsxHeaders, docContactLine, invoiceLinesForXlsx } from "@/lib/xlsxDocData";
 import { fillQuoteXlsx } from "@/lib/xlsxDocs";
@@ -34,17 +37,27 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     getBrand(),
   ]);
 
-  const comments = [
-    full.row.note,
+  /* The shop's own words first, the standing terms after them, and the last
+     row held for the terms so a long note cannot push the deposit off a
+     document somebody is about to sign. See commentRows. */
+  const comments = commentRows(full.row.note, [
     full.row.depositPct > 0 ? `${full.row.depositPct}% deposit due on approval` : "",
     full.row.expiresOn ? `Quote good through ${full.row.expiresOn}` : "",
-  ].filter(Boolean);
+  ].filter(Boolean), 5);
+
+  // Where it is addressed, and to whom - the quote's own address when it has
+  // one, the client's accounts-payable address when it has not.
+  const to = addressedTo(full.row, org);
+  const subtotal = quoteSubtotal(full);
 
   const buf = await fillQuoteXlsx({
     number: full.row.number,
     date: full.row.sentOn || shopToday(),
-    customer: { name: org?.name ?? "", address: org?.billingAddress ?? "" },
+    customer: { name: to.name, address: to.address },
     title: full.row.title,
+    greeting: greetingLine(full.row),
+    discount: discountOf(subtotal, full.row) / 100,
+    discountLabel: discountLabel(full.row),
     comments,
     contactLine: docContactLine(brand),
     lines: invoiceLinesForXlsx(full.lines.map((l) => ({

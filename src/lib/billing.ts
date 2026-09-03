@@ -52,6 +52,29 @@ export type DraftLine = {
   sourceId: number | null;
 };
 
+/**
+ * A line's description, as the lines it prints on.
+ *
+ * One line item is often several sentences: the thing, and then what is inside
+ * it. "LC-20 HPLC | Full Service Unlimited 12mo" followed by the seven modules
+ * that covers is one charge with one price, not eight charges - and typing the
+ * modules into seven $0 rows by hand, which is what the shop was doing, is a
+ * table that no longer adds up in any way a reader can check.
+ *
+ * The FIRST line is the charge. The rest are its detail, and every surface
+ * renders them quieter - indented on screen, italic on the spreadsheet - so the
+ * shape of the thing is legible without inventing a markup language for a text
+ * box. A description with no newlines behaves exactly as it always did.
+ */
+export function descriptionLines(description: string): { head: string; rest: string[] } {
+  const all = (description ?? "").split(/\r?\n/).map((l) => l.trimEnd());
+  const head = (all[0] ?? "").trim();
+  // Leading blanks between paragraphs are somebody's spacing, not content, and
+  // a spreadsheet row costs more than a screen line does.
+  const rest = all.slice(1).map((l) => l.trim()).filter(Boolean);
+  return { head, rest };
+}
+
 /** What a line adds to the bill. Covered lines add nothing, by definition. */
 export const lineAmount = (l: Pick<DraftLine, "qty" | "unitCents" | "covered">): number =>
   l.covered ? 0 : Math.round(l.qty * l.unitCents);

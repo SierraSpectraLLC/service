@@ -52,7 +52,7 @@ export default function ServiceCodesCard({ missing }: {
           <span className="t-body" style={{ flex: 1, minWidth: 0 }}>{c.name}</span>
         </div>
       ))}
-      <div style={{ marginTop: 10 }}>
+      <div style={{ marginTop: 12 }}>
         <button className="btn sm accent" disabled={pending} onClick={install}>
           {pending ? "Adding..." : "Add these to the catalog"}
         </button>
