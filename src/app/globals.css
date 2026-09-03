@@ -895,6 +895,38 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 .drag-handle { touch-action: none; cursor: grab; }
 .drag-handle:active { cursor: grabbing; }
 
+/* ── A document's lines, reordered by hand ──────────────────────────────────
+   A grip on the left edge of each draft line. Drag it, or focus it and use
+   the arrow keys; the row being carried fades, and a bar shows where it lands.
+   The same shapes the dashboard's arrange mode uses (.panel-slot.dragging,
+   .dropbefore), drawn again here because a line is a flex row, not a panel.
+
+   HTML5 drag raises no events on touch, so where there is no hover the grip
+   gives way to a pair of nudge buttons - PdfStudio's rule, for the same
+   reason. */
+.line-row { position: relative; }
+.line-row.dragging { opacity: 0.4; }
+.line-row.dropbefore::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -2px; height: 3px;
+  background: var(--navy); border-radius: 2px;
+}
+.line-grip {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; align-self: stretch; margin-right: 2px;
+  border: none; background: none; padding: 0;
+  color: var(--t-faint-fg); font-size: var(--fs-body); line-height: 1; letter-spacing: -2px;
+  touch-action: none; cursor: grab;
+}
+.line-grip:hover { color: var(--navy); }
+.line-grip:active { cursor: grabbing; }
+.line-grip:focus-visible { outline: 2px solid var(--sky); outline-offset: 1px; border-radius: 2px; }
+.line-nudge { display: none; flex-direction: column; gap: 2px; margin-right: 2px; }
+.line-nudge .btn { padding: 0 6px; min-height: 18px; font-size: var(--fs-micro); line-height: 1; }
+@media (hover: none) {
+  .line-grip { display: none; }
+  .line-nudge { display: inline-flex; }
+}
+
 /* Sign-off packet: browser print / save-as-PDF is the export path. */
 @media print {
   .app-header, .app-footer, .no-print, .crumb { display: none !important; }

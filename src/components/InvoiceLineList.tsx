@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 import {
   addInvoiceLine, addQuoteLine, removeInvoiceLine, removeQuoteLine,
+  reorderInvoiceLines, reorderQuoteLines,
   setInvoiceLineDescription, setQuoteLineDescription,
 } from "@/app/actions";
 import { descriptionLines } from "@/lib/billing";
@@ -109,6 +110,61 @@ export default function InvoiceLineList({
     });
   };
 
+  /*
+   * The order on screen, which is the order on the paper.
+   *
+   * Kept locally so a drag or an arrow key moves the row NOW, and the write
+   * follows. A drop writes at once; the arrow keys write after a short pause,
+   * so walking a line four rows up is one audit line and not four. Whatever
+   * the server has is re-read on refresh and replaces this, which is what the
+   * effect below does when the lines prop changes under it.
+   */
+  const [order, setOrder] = useState<Line[]>(lines);
+  const ids = lines.map((l) => l.id).join(",");
+  useEffect(() => { setOrder(lines); }, [ids]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [dragId, setDragId] = useState<number | null>(null);
+  const [overId, setOverId] = useState<number | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const persist = (next: Line[]) => {
+    if (!target) return;
+    startTransition(async () => {
+      const res = target.kind === "invoice"
+        ? await reorderInvoiceLines(target.id, next.map((l) => l.id))
+        : await reorderQuoteLines(target.id, next.map((l) => l.id));
+      if (res.error) { toast({ message: res.error, tone: "bad" }); router.refresh(); return; }
+      router.refresh();
+    });
+  };
+  const persistSoon = (next: Line[]) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => { saveTimer.current = null; persist(next); }, 600);
+  };
+  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
+
+  /** Carry `id` to sit before `beforeId` (or at the end), then write it. */
+  const dropAt = (id: number, beforeId: number | null) => {
+    const from = order.findIndex((l) => l.id === id);
+    if (from < 0) return;
+    const without = order.filter((l) => l.id !== id);
+    const at = beforeId === null ? without.length : without.findIndex((l) => l.id === beforeId);
+    if (at < 0) return;
+    const next = [...without.slice(0, at), order[from], ...without.slice(at)];
+    if (next.every((l, i) => l.id === order[i].id)) return;
+    setOrder(next);
+    persist(next);
+  };
+  /** One step up or down, from the keyboard or a nudge button. */
+  const nudge = (id: number, delta: -1 | 1) => {
+    const i = order.findIndex((l) => l.id === id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= order.length) return;
+    const next = [...order];
+    [next[i], next[j]] = [next[j], next[i]];
+    setOrder(next);
+    persistSoon(next);
+  };
+
   const remove = async (l: Line) => {
     if (!target) return;
     const why = await confirmReason({
@@ -186,8 +242,40 @@ export default function InvoiceLineList({
       {(lines.length > 0 || canEdit) && <>
       {lines.length > 0 && (
         <>
-          {lines.map((l) => (
-            <div key={l.id} className="row-2" style={{ alignItems: "baseline", padding: "7px 0", borderTop: "1px solid var(--line)" }}>
+          {order.map((l, idx) => (
+            <div key={l.id}
+              className={`row-2 line-row${dragId === l.id ? " dragging" : ""}${overId === l.id && dragId !== l.id ? " dropbefore" : ""}`}
+              style={{ alignItems: "baseline", padding: "7px 0", borderTop: "1px solid var(--line)" }}
+              onDragOver={canEdit && dragId !== null ? (e) => { e.preventDefault(); setOverId(l.id); } : undefined}
+              onDragLeave={canEdit && dragId !== null ? () => setOverId((o) => (o === l.id ? null : o)) : undefined}
+              onDrop={canEdit && dragId !== null ? (e) => {
+                e.preventDefault(); dropAt(dragId, l.id); setDragId(null); setOverId(null);
+              } : undefined}>
+              {canEdit && (
+                <>
+                  {/* The grip. Drag it with a mouse; with a keyboard, focus it
+                      and use the arrow keys. Where there is no hover, the
+                      nudge buttons beside it take over - a drag raises no
+                      events on touch. */}
+                  <button type="button" className="line-grip" draggable
+                    aria-label={`Move line ${idx + 1}: ${descriptionLines(l.description).head}`}
+                    title="Drag to reorder, or use the arrow keys"
+                    onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setDragId(l.id); }}
+                    onDragEnd={() => { setDragId(null); setOverId(null); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowUp") { e.preventDefault(); nudge(l.id, -1); }
+                      else if (e.key === "ArrowDown") { e.preventDefault(); nudge(l.id, 1); }
+                    }}>
+                    ⋮⋮
+                  </button>
+                  <span className="line-nudge">
+                    <button type="button" className="btn" aria-label={`Move line ${idx + 1} up`}
+                      disabled={idx === 0} onClick={() => nudge(l.id, -1)}>▲</button>
+                    <button type="button" className="btn" aria-label={`Move line ${idx + 1} down`}
+                      disabled={idx === order.length - 1} onClick={() => nudge(l.id, 1)}>▼</button>
+                  </span>
+                </>
+              )}
               <span className="pill neutral">{KIND_LABEL[l.kind] ?? l.kind}</span>
               <span style={{ flex: 1, minWidth: 0 }}>
                 {/* The number leads, where there is one. It is what the client's
@@ -238,6 +326,13 @@ export default function InvoiceLineList({
               )}
             </div>
           ))}
+          {/* Dropping below the last line puts it last. The total row is the
+              only thing under the lines, so it is the tail target. */}
+          {canEdit && dragId !== null && (
+            <div className={`line-row${overId === -1 ? " dropbefore" : ""}`} style={{ height: 8 }}
+              onDragOver={(e) => { e.preventDefault(); setOverId(-1); }}
+              onDrop={(e) => { e.preventDefault(); dropAt(dragId, null); setDragId(null); setOverId(null); }} />
+          )}
           {/* Subtotal, what came off, and what is owed - the three rows the
               client's own copy shows. Only drawn when something came off: a
               quote with no discount says one number, as it always did. */}

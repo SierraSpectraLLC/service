@@ -75,6 +75,29 @@ export function descriptionLines(description: string): { head: string; rest: str
   return { head, rest };
 }
 
+/**
+ * The positions to write after somebody reorders lines, and only the ones
+ * that change.
+ *
+ * The named ids first, in the order given; anything of the document's the
+ * list did not mention keeps its relative order after them - a stale screen
+ * that never saw a line added since is not an instruction to lose it. Ids the
+ * document does not own are ignored rather than refused, for the same reason.
+ * Returned as a diff, so a drag that put a line back where it was writes
+ * nothing and audits nothing.
+ */
+export function orderOf(
+  rows: { id: number; position: number }[], orderedIds: number[],
+): { id: number; position: number }[] {
+  const known = new Map(rows.map((r) => [r.id, r]));
+  const named = orderedIds.filter((id, i) => known.has(id) && orderedIds.indexOf(id) === i);
+  const rest = rows.filter((r) => !named.includes(r.id))
+    .sort((a, b) => a.position - b.position || a.id - b.id).map((r) => r.id);
+  return [...named, ...rest]
+    .map((id, position) => ({ id, position }))
+    .filter(({ id, position }) => known.get(id)!.position !== position);
+}
+
 /** What a line adds to the bill. Covered lines add nothing, by definition. */
 export const lineAmount = (l: Pick<DraftLine, "qty" | "unitCents" | "covered">): number =>
   l.covered ? 0 : Math.round(l.qty * l.unitCents);
