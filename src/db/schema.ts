@@ -4696,3 +4696,110 @@ export const systemEvents = pgTable("system_events", {
   unique("system_events_source_unique").on(t.sourceKind, t.sourceId),
   unique("system_events_chain_unique").on(t.instrumentId, t.prevHash),
 ]);
+
+/**
+ * CUSTODY AS A SPAN, not a pointer.
+ *
+ * instruments.owner_org_id answers "who owns it now" and cannot answer "who
+ * held it in 2023", which is the question a machine's history is made of. An
+ * epoch is one holder's tenure: opened by an event, closed by one, and closed
+ * IN A PARTICULAR WAY - because "sold with a sealed record" and "the holder
+ * folded and nobody sealed anything" are worth very different money, and a
+ * chain that rendered them the same would pay people to disappear.
+ *
+ * Exactly one open epoch per instrument, enforced by a partial unique index in
+ * drizzle/schema-sync.sql (drizzle's builder cannot express the WHERE, and
+ * deploys apply that file rather than drizzle-kit).
+ */
+export const custodyEpochs = pgTable("custody_epochs", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  /** 1-based per instrument, dense. lib/custody/view's anchor compares on this. */
+  n: integer("n").notNull(),
+  /** Null is house stewardship: real, and not a missing value. */
+  custodianOrgId: integer("custodian_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  /** Kept as text too, so the record stays readable after an org is offboarded. */
+  custodianName: text("custodian_name").notNull().default(""),
+  openedByEventId: integer("opened_by_event_id"),
+  closedByEventId: integer("closed_by_event_id"),
+  /** open | sealed | steward_sealed | dormant | claimed - see lib/custody/types. */
+  closeKind: text("close_kind").notNull().default("open"),
+  sealedAt: timestamp("sealed_at"),
+  /** The last event hash at the moment of sealing: what the frozen bundle covers. */
+  sealHash: text("seal_hash"),
+  /** Whoever brokered the transfer that CLOSED this epoch. A party to it, forever. */
+  brokerOrgId: integer("broker_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  /** When the outgoing custodian last looked at what would travel. Null = never. */
+  redactionReviewedAt: timestamp("redaction_reviewed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  unique("custody_epoch_n_unique").on(t.instrumentId, t.n),
+  index("custody_epochs_instrument_idx").on(t.instrumentId),
+]);
+
+/**
+ * ACCESS AS A GRANT ON A SPAN.
+ *
+ * system_shares is one row per (system, org) with no clock and no tenure: it
+ * says a provider can see a machine, and cannot say which holder let them in or
+ * when it stopped. That is fine for a working board and useless for a record -
+ * a buyer needs to know that the shop who wrote the 2023 PM was working under
+ * the 2023 owner's grant, and a provider needs their own view of their own work
+ * to survive being revoked.
+ *
+ * A GRANT THAT ENDED STILL HAPPENED. Nothing here is ever deleted; ending one
+ * writes ended_at and a reason. lib/custody/view treats party-ness as
+ * historical for exactly that reason - revoking a provider is a decision about
+ * future access, and reading it as "and now you cannot see your own service
+ * records" would make revocation unusable and the record unreliable at once.
+ */
+export const grants = pgTable("grants", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  epochId: integer("epoch_id").notNull().references(() => custodyEpochs.id, { onDelete: "cascade" }),
+  granteeOrgId: integer("grantee_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  /** Who let them in. Null = the operator acting as steward. */
+  grantedByOrgId: integer("granted_by_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  /** service | broker | assessor | view */
+  kind: text("kind").notNull().default("service"),
+  /** What they may reach. {} = the whole record for this epoch. */
+  scope: jsonb("scope").notNull().default({}),
+  startsAt: timestamp("starts_at").notNull().defaultNow(),
+  /** Null = no clock. An assessor link always has one. */
+  endsAt: timestamp("ends_at"),
+  endedAt: timestamp("ended_at"),
+  endedBy: integer("ended_by").references(() => orgs.id, { onDelete: "set null" }),
+  /** revoked | released | epoch_closed | expired - who ended it and why. */
+  endReason: text("end_reason").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("grants_instrument_idx").on(t.instrumentId),
+  index("grants_grantee_idx").on(t.granteeOrgId),
+  index("grants_epoch_idx").on(t.epochId),
+]);
+
+/**
+ * Where the derived custodian and the stored pointer disagree.
+ *
+ * The pointer moves by hand in places the handoff chain never hears about, and
+ * the whole point of deriving custody is that the derivation is the truth. But
+ * flipping every read onto the derived answer without first LOOKING at the
+ * disagreements would silently reassign machines. Modelled on sheet_diffs,
+ * which does the same job for the Google-sheet parity run: write the
+ * difference down, let a person read it, decide afterwards.
+ */
+export const custodyDiffs = pgTable("custody_diffs", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  externalId: text("external_id").notNull().default(""),
+  /** What instruments.owner_org_id says. */
+  storedOrgId: integer("stored_org_id"),
+  storedName: text("stored_name").notNull().default(""),
+  /** What the open epoch says. */
+  derivedOrgId: integer("derived_org_id"),
+  derivedName: text("derived_name").notNull().default(""),
+  note: text("note").notNull().default(""),
+  resolved: boolean("resolved").notNull().default(false),
+  checkedAt: timestamp("checked_at").notNull().defaultNow(),
+}, (t) => [index("custody_diffs_instrument_idx").on(t.instrumentId)]);

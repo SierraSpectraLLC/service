@@ -70,6 +70,8 @@ import {
 } from "@/lib/clientView";
 import { advisoryByCoverage, coverageOf, type CoverageAgreement } from "@/lib/coverage";
 import { dayOf } from "@/lib/serviceHistory";
+import { custodyContext } from "@/lib/custody/load";
+import { flagOn } from "@/lib/custody/flags";
 import SystemCoverage from "@/components/SystemCoverage";
 import CoverageRecorder from "@/components/CoverageRecorder";
 import { HeroKebab, Pill, RecordHero, type HeroStat } from "@/components/ui";
@@ -533,17 +535,34 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
      a Done task and never a work order - so a panel reading only closed work
      orders said "nothing closed on this record yet" about an annual PM we had
      just performed. Same rule as the landing: see lib/serviceHistory. */
-  const lastClosed: { day: string; number: string; title: string } | undefined = [
-    ...woRows.flatMap((w) => (w.closedAt === null ? [] : [{
-      day: dayOf(w.closedAt), number: w.number, title: w.title,
-    }])),
-    ...taskRows.flatMap((t) => (
-      t.state !== "Done" || t.completedAt === null
-        || (t.origin !== "pm" && t.origin !== "pm_request")
-        ? []
-        : [{ day: dayOf(t.completedAt), number: "", title: t.title }]
-    )),
-  ].sort((a, b) => b.day.localeCompare(a.day))[0];
+  const lastClosed: { day: string; number: string; title: string } | undefined = (
+    await flagOn("custody.readPath")
+      /* The same answer, read off the machine's own chain. Every custody read
+         goes through custodyContext so the rules live in one place - see
+         lib/custody/view for why five places was the problem. The viewer's own
+         org decides what comes back, which is what the two tables below could
+         never ask. */
+      ? (await custodyContext(user.orgId, inst.id)).chain.events.flatMap((e) =>
+          e.sourceKind === "work_order" || e.sourceKind === "task"
+            ? [{
+                day: dayOf(e.occurredAt),
+                number: String((e.private as { number?: string }).number ?? ""),
+                title: String((e.provenance as { title?: string; summary?: string }).title
+                  ?? (e.private as { title?: string }).title ?? ""),
+              }]
+            : [])
+      : [
+        ...woRows.flatMap((w) => (w.closedAt === null ? [] : [{
+          day: dayOf(w.closedAt), number: w.number, title: w.title,
+        }])),
+        ...taskRows.flatMap((t) => (
+          t.state !== "Done" || t.completedAt === null
+            || (t.origin !== "pm" && t.origin !== "pm_request")
+            ? []
+            : [{ day: dayOf(t.completedAt), number: "", title: t.title }]
+        )),
+      ]
+  ).sort((a, b) => b.day.localeCompare(a.day))[0];
 
   /* Dismissing speaks for the whole organization - their colleagues stop
      seeing the line and the shop reads the name as a receipt - so it takes the

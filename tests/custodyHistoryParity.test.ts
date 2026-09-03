@@ -36,6 +36,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await client.exec(`
+    DELETE FROM grants; DELETE FROM custody_epochs;
     DELETE FROM checkout_verdicts; DELETE FROM custody_events;
     DELETE FROM task_results; DELETE FROM checklist_items; DELETE FROM tasks;
     DELETE FROM work_orders; DELETE FROM parts;
@@ -208,12 +209,43 @@ describe("appending", () => {
     for (const [i, r] of rows.entries()) expect(r.prevHash).toBe(i === 0 ? "" : rows[i - 1].hash);
   });
 
-  it("refuses to target an epoch before epochs exist", async () => {
+  it("refuses to file into an epoch that does not exist", async () => {
     await expect(appendEvent({
       instrumentId: INST, kind: "note", occurredAt: new Date(), authorOrgId: null,
       custodianOrgId: null, whoGrade: "attested", howGrade: "typed",
-      sourceKind: "manual", epochId: 1,
-    })).rejects.toThrow(/epochId is not settable/);
+      sourceKind: "manual", epochId: 999,
+    })).rejects.toThrow(/does not exist/);
+  });
+
+  it("refuses to file into an epoch that has been sealed", async () => {
+    // The holder sealed a bundle over exactly these events and somebody else
+    // received it. Appending afterwards rewrites a record that has left.
+    await client.exec(`
+      INSERT INTO custody_epochs (id, instrument_id, n, custodian_org_id, close_kind, sealed_at)
+      VALUES (77, ${INST}, 1, ${EMERY}, 'sealed', now());
+    `);
+    await expect(appendEvent({
+      instrumentId: INST, kind: "note", occurredAt: new Date(), authorOrgId: null,
+      custodianOrgId: EMERY, whoGrade: "attested", howGrade: "typed",
+      sourceKind: "manual", epochId: 77,
+    })).rejects.toThrow(/closed as 'sealed' and is frozen/);
+  });
+
+  it("does not re-judge an event that is already recorded", async () => {
+    // The backfill runs over rows the live path already wrote, and by then the
+    // epoch they landed in may have closed. Idempotence comes first.
+    await closeWo(1, "2026-03-04", "Down");
+    await emitWorkOrderClosed(1);
+    const [row] = await testDb.select().from(systemEvents);
+    await client.exec(`
+      INSERT INTO custody_epochs (id, instrument_id, n, custodian_org_id, close_kind, sealed_at)
+      VALUES (78, ${INST}, 2, ${EMERY}, 'sealed', now());
+    `);
+    await expect(appendEvent({
+      instrumentId: INST, kind: "repair", occurredAt: new Date(), authorOrgId: SIERRA,
+      custodianOrgId: EMERY, whoGrade: "third_party", howGrade: "typed",
+      sourceKind: "work_order", sourceId: "1", epochId: 78,
+    })).resolves.toMatchObject({ created: false, id: row.id });
   });
 });
 

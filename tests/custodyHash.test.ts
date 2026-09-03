@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GENESIS, canonical, eventHash, verifyChain, type ChainLink } from "@/lib/custody/hash";
-import { closeKindFor, custodianAt, spanAt, spansOf, type CustodyRow } from "@/lib/custody/spans";
+import { CLOSES_A_SPAN, closeKindFor, custodianAt, spanAt, spansOf, type CustodyRow } from "@/lib/custody/spans";
 
 /**
  * The chain is worth exactly what it costs to edit around, and its two useful
@@ -154,5 +154,22 @@ describe("spans of custody", () => {
 
   it("has no spans at all for a machine nothing has ever been recorded about", () => {
     expect(spansOf([], { custodianOrgId: 7, custodianName: "x" })).toEqual([]);
+  });
+
+  it("gives a handoff instant to the incoming holder for work and the outgoing one for the handoff", () => {
+    // Both are true at once and the answer differs by event: a PM recorded that
+    // day was done for the new owner, while the transfer is the last line of
+    // the record the old one hands over - and sealing freezes a bundle over
+    // exactly the closing epoch's events.
+    const moved = new Date("2022-06-01T12:00:00Z");
+    expect(spanAt(spans, moved)?.n).toBe(2);
+    expect(spanAt(spans, moved, "closes")?.n).toBe(1);
+    expect(CLOSES_A_SPAN.has("transfer")).toBe(true);
+    expect(CLOSES_A_SPAN.has("pm")).toBe(false);
+  });
+
+  it("falls back to opening for an intake, which has nothing before it to close", () => {
+    const first = new Date("2020-01-01T12:00:00Z");
+    expect(spanAt(spans, first, "closes")?.n).toBe(1);
   });
 });

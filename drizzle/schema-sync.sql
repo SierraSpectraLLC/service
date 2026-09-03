@@ -4409,3 +4409,103 @@ BEGIN
       FOR EACH ROW EXECUTE FUNCTION "system_events_no_mutation"();
   END IF;
 END $$;
+
+-- ═══ CUSTODY AND PROVENANCE, phase 3 ═══════════════════════════════════════
+-- Custody as spans, access as grants on spans. Neither is tenant-stamped: a
+-- machine outlives the workspace that typed it in.
+CREATE TABLE IF NOT EXISTS "custody_epochs" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "n" integer NOT NULL,
+  "custodian_org_id" integer,
+  "custodian_name" text NOT NULL DEFAULT '',
+  "opened_by_event_id" integer,
+  "closed_by_event_id" integer,
+  "close_kind" text NOT NULL DEFAULT 'open',
+  "sealed_at" timestamp,
+  "seal_hash" text,
+  "broker_org_id" integer,
+  "redaction_reviewed_at" timestamp,
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "custody_epoch_n_unique" UNIQUE ("instrument_id", "n")
+);
+CREATE INDEX IF NOT EXISTS "custody_epochs_instrument_idx" ON "custody_epochs" ("instrument_id");
+-- EXACTLY ONE OPEN EPOCH PER MACHINE. Two would mean two people hold it at
+-- once, which is the one thing custody cannot mean. Partial, so the closed ones
+-- are unconstrained; drizzle's builder cannot express the WHERE, and this file
+-- is what deploys apply.
+CREATE UNIQUE INDEX IF NOT EXISTS "custody_epochs_one_open" ON "custody_epochs" ("instrument_id") WHERE "close_kind" = 'open';
+
+CREATE TABLE IF NOT EXISTS "grants" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "epoch_id" integer NOT NULL,
+  "grantee_org_id" integer NOT NULL,
+  "granted_by_org_id" integer,
+  "kind" text NOT NULL DEFAULT 'service',
+  "scope" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "starts_at" timestamp NOT NULL DEFAULT now(),
+  "ends_at" timestamp,
+  "ended_at" timestamp,
+  "ended_by" integer,
+  "end_reason" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "grants_instrument_idx" ON "grants" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "grants_grantee_idx" ON "grants" ("grantee_org_id");
+CREATE INDEX IF NOT EXISTS "grants_epoch_idx" ON "grants" ("epoch_id");
+
+CREATE TABLE IF NOT EXISTS "custody_diffs" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "external_id" text NOT NULL DEFAULT '',
+  "stored_org_id" integer,
+  "stored_name" text NOT NULL DEFAULT '',
+  "derived_org_id" integer,
+  "derived_name" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "resolved" boolean NOT NULL DEFAULT false,
+  "checked_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "custody_diffs_instrument_idx" ON "custody_diffs" ("instrument_id");
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'custody_epochs_instrument_id_fk') THEN
+    ALTER TABLE "custody_epochs" ADD CONSTRAINT "custody_epochs_instrument_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'custody_epochs_custodian_org_id_fk') THEN
+    ALTER TABLE "custody_epochs" ADD CONSTRAINT "custody_epochs_custodian_org_id_fk"
+      FOREIGN KEY ("custodian_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'custody_epochs_broker_org_id_fk') THEN
+    ALTER TABLE "custody_epochs" ADD CONSTRAINT "custody_epochs_broker_org_id_fk"
+      FOREIGN KEY ("broker_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'grants_instrument_id_fk') THEN
+    ALTER TABLE "grants" ADD CONSTRAINT "grants_instrument_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'grants_epoch_id_fk') THEN
+    ALTER TABLE "grants" ADD CONSTRAINT "grants_epoch_id_fk"
+      FOREIGN KEY ("epoch_id") REFERENCES "custody_epochs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'grants_grantee_org_id_fk') THEN
+    ALTER TABLE "grants" ADD CONSTRAINT "grants_grantee_org_id_fk"
+      FOREIGN KEY ("grantee_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'grants_granted_by_org_id_fk') THEN
+    ALTER TABLE "grants" ADD CONSTRAINT "grants_granted_by_org_id_fk"
+      FOREIGN KEY ("granted_by_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'grants_ended_by_fk') THEN
+    ALTER TABLE "grants" ADD CONSTRAINT "grants_ended_by_fk"
+      FOREIGN KEY ("ended_by") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'custody_diffs_instrument_id_fk') THEN
+    ALTER TABLE "custody_diffs" ADD CONSTRAINT "custody_diffs_instrument_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+END $$;

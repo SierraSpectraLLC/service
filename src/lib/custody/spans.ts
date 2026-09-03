@@ -107,12 +107,36 @@ export function custodianAt(spans: Span[], at: Date): { orgId: OrgId | null; nam
   return { orgId: null, name: "" };
 }
 
-/** The span a moment falls in, for stamping an event with its epoch. */
-export function spanAt(spans: Span[], at: Date): Span | null {
+/**
+ * The span a moment falls in, for stamping an event with its epoch.
+ *
+ * A HANDOFF INSTANT BELONGS TO TWO SPANS AND THE ANSWER DIFFERS BY EVENT.
+ *
+ *   'opens'  - work recorded at the moment the machine moved was done for the
+ *              incoming holder. The default, and what every ordinary event
+ *              wants.
+ *   'closes' - the handoff itself terminates the OUTGOING tenure, so it belongs
+ *              to that one. This is not a nicety: sealing freezes a bundle over
+ *              the events of the epoch being closed, and the transfer is the
+ *              last line of the record its holder hands over. Phase 5 appends
+ *              it before the close for exactly this reason, and a backfill that
+ *              filed old handoffs the other way would leave two conventions in
+ *              one table.
+ *
+ * The first span has nothing before it, so an intake falls back to opening.
+ */
+export function spanAt(spans: Span[], at: Date, boundary: "opens" | "closes" = "opens"): Span | null {
   const t = at.getTime();
+  if (boundary === "closes") {
+    const closed = spans.find((s) => s.to !== null && s.to.getTime() === t);
+    if (closed) return closed;
+  }
   for (const s of spans) {
     if (t < s.from.getTime()) continue;
     if (s.to === null || t < s.to.getTime()) return s;
   }
   return null;
 }
+
+/** Handoff kinds, whose events close the tenure they end rather than open one. */
+export const CLOSES_A_SPAN = new Set(["transfer", "claim", "release"]);

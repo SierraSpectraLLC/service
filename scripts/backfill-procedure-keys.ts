@@ -20,7 +20,7 @@ import { db } from "../src/db";
 import { procedures, procedureTypes } from "../src/db/schema";
 import { keyCollisions, procedureKey, slug, type KeyedRow } from "../src/lib/custody/keys";
 
-async function main() {
+export async function main() {
   const apply = process.argv.includes("--apply");
   const rows = await db.select({
     id: procedures.id, tenantOrgId: procedures.tenantOrgId, name: procedures.name,
@@ -78,4 +78,7 @@ async function main() {
   if (!apply) console.log("[procedure-keys] dry run; pass --apply to write");
 }
 
-main().catch((e) => { console.error("[procedure-keys] failed:", e); process.exit(1); });
+// Auto-runs when you run it, and stays quiet when a test imports it to
+// drive main() against a database of its own. A backfill nobody can
+// exercise is a backfill nobody knows the behaviour of.
+if (!process.env.VITEST) main().catch((e) => { console.error("[procedure-keys] failed:", e); process.exit(1); });

@@ -34,7 +34,7 @@ import {
 
 type Job = { at: Date; source: string; run: () => Promise<unknown> };
 
-async function main() {
+export async function main() {
   const only = (() => {
     const i = process.argv.indexOf("--instrument");
     return i === -1 ? null : Number(process.argv[i + 1]);
@@ -148,4 +148,7 @@ async function main() {
   if (after === before) console.log("[events] nothing new - already backfilled");
 }
 
-main().catch((e) => { console.error("[events] failed:", e); process.exit(1); });
+// Auto-runs when you run it, and stays quiet when a test imports it to
+// drive main() against a database of its own. A backfill nobody can
+// exercise is a backfill nobody knows the behaviour of.
+if (!process.env.VITEST) main().catch((e) => { console.error("[events] failed:", e); process.exit(1); });

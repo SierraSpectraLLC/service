@@ -18,7 +18,7 @@
 
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { systemEvents } from "@/db/schema";
+import { custodyEpochs, systemEvents } from "@/db/schema";
 import { GENESIS, eventHash } from "@/lib/custody/hash";
 import type {
   EventKind, HowGrade, OrgId, ProcedureKeyEntry, SourceKind, WhoGrade,
@@ -74,17 +74,30 @@ async function existingBySource(sourceKind: string, sourceId: string): Promise<n
  * decision in twelve places instead of one.
  */
 export async function appendEvent(input: AppendInput): Promise<AppendResult> {
-  if (input.epochId != null) {
-    // Phase 3 replaces this with the real check - an epoch that has been sealed
-    // is frozen, and an append into it would rewrite a record somebody already
-    // received. Until custody_epochs exists there is nothing to target.
-    throw new Error("appendEvent: epochId is not settable until custody_epochs exists (phase 3)");
-  }
-
   const sourceId = input.sourceId ?? null;
   if (sourceId !== null) {
     const already = await existingBySource(input.sourceKind, sourceId);
     if (already !== null) return { id: already, created: false, why: "already recorded" };
+  }
+
+  // Checked AFTER idempotence on purpose: a row that is already recorded is not
+  // an append, and judging it against a since-closed epoch would make the
+  // backfill fail on its own previous run.
+  if (input.epochId != null) {
+    // A CLOSED EPOCH IS FROZEN. Its holder sealed a bundle over exactly these
+    // events and somebody else received it; appending into it afterwards would
+    // rewrite a record that has already left the building. Enforced here now
+    // and in a trigger in Phase 5 - two layers, because this one is worth one
+    // forgotten call site.
+    const [epoch] = await db.select({ closeKind: custodyEpochs.closeKind, instrumentId: custodyEpochs.instrumentId })
+      .from(custodyEpochs).where(eq(custodyEpochs.id, input.epochId)).limit(1);
+    if (!epoch) throw new Error(`appendEvent: epoch ${input.epochId} does not exist`);
+    if (epoch.instrumentId !== input.instrumentId) {
+      throw new Error(`appendEvent: epoch ${input.epochId} belongs to another machine`);
+    }
+    if (epoch.closeKind !== "open") {
+      throw new Error(`appendEvent: epoch ${input.epochId} closed as '${epoch.closeKind}' and is frozen`);
+    }
   }
 
   const procedureKeys = input.procedureKeys ?? [];
@@ -107,7 +120,7 @@ export async function appendEvent(input: AppendInput): Promise<AppendResult> {
       const [row] = await db.insert(systemEvents).values({
         instrumentId: input.instrumentId,
         assetId: input.assetId ?? null,
-        epochId: null,
+        epochId: input.epochId ?? null,
         kind: input.kind,
         occurredAt: input.occurredAt,
         recordedAt: input.recordedAt ?? new Date(),

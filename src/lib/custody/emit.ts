@@ -17,34 +17,58 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  assets, checkoutVerdicts, checklistItems, custodyEvents, instruments, parts,
-  procedures, pmSchedules, tasks, taskResults, workOrders,
+  assets, checkoutVerdicts, checklistItems, custodyEpochs, custodyEvents, instruments,
+  parts, procedures, pmSchedules, tasks, taskResults, workOrders,
 } from "@/db/schema";
 import { appendEvent, type AppendResult } from "@/lib/custody/append";
 import { howGradeFor, whoGradeFor } from "@/lib/custody/grades";
-import { custodianAt, spansOf, type CustodyRow } from "@/lib/custody/spans";
+import { custodianAt, spanAt, spansOf, type CustodyRow } from "@/lib/custody/spans";
 import type { EventKind, OrgId, ProcedureKeyEntry } from "@/lib/custody/types";
 
 /**
- * Who held the machine at a moment, from the handoffs on file.
+ * WHERE IN THE MACHINE'S LIFE A MOMENT FALLS: who held it, and which span.
  *
- * Read fresh per emit rather than cached: an emitter fires once, and a stale
- * custodian is the one field on an event that can never be corrected afterwards
- * (the trigger sees to that).
+ * Both answers come from one call to spansOf, which is the point - deriving the
+ * custodian one way and the epoch another is how two surfaces end up disagreeing
+ * about the same event, and the custodian is the one field on an event that can
+ * never be corrected afterwards (the trigger sees to that).
+ *
+ * Read fresh per emit. Before scripts/backfill-epochs has run there are no
+ * epoch rows, and epochId comes back null: the event is still correct, the
+ * backfill places it later, and nothing reads epochs until the flag is on.
  */
-export async function custodianOfAt(instrumentId: number, at: Date): Promise<OrgId | null> {
+export async function placeOf(
+  instrumentId: number, at: Date,
+): Promise<{ custodianOrgId: OrgId | null; epochId: number | null }> {
   const [inst] = await db.select({ ownerOrgId: instruments.ownerOrgId })
     .from(instruments).where(eq(instruments.id, instrumentId)).limit(1);
-  if (!inst) return null;
+  if (!inst) return { custodianOrgId: null, epochId: null };
   const rows = await db.select({
     id: custodyEvents.id, kind: custodyEvents.kind,
     fromOrgId: custodyEvents.fromOrgId, toOrgId: custodyEvents.toOrgId,
     fromName: custodyEvents.fromName, toName: custodyEvents.toName, at: custodyEvents.at,
   }).from(custodyEvents).where(eq(custodyEvents.instrumentId, instrumentId));
   const spans = spansOf(rows as CustodyRow[], { custodianOrgId: inst.ownerOrgId, custodianName: "" });
-  if (!spans.length) return inst.ownerOrgId;
-  return custodianAt(spans, at).orgId;
+  if (!spans.length) return { custodianOrgId: inst.ownerOrgId, epochId: null };
+
+  // Live emitters place ordinary work; a handoff's own event is placed by the
+  // seal in Phase 5, which is the only thing that knows which tenure it ends.
+  const span = spanAt(spans, at);
+  if (span === null) {
+    // Before the first handoff on file: somebody's history we have none of, and
+    // no epoch to file it under. Not "the first owner, probably".
+    return { custodianOrgId: custodianAt(spans, at).orgId, epochId: null };
+  }
+  // Epochs are numbered by the same spansOf, so n is the join. Looking up by n
+  // rather than by date is what keeps the emitter and the backfill in step.
+  const [epoch] = await db.select({ id: custodyEpochs.id }).from(custodyEpochs)
+    .where(and(eq(custodyEpochs.instrumentId, instrumentId), eq(custodyEpochs.n, span.n))).limit(1);
+  return { custodianOrgId: span.custodianOrgId, epochId: epoch?.id ?? null };
 }
+
+/** Just the custodian, for callers that do not file an event. */
+export const custodianOfAt = async (instrumentId: number, at: Date): Promise<OrgId | null> =>
+  (await placeOf(instrumentId, at)).custodianOrgId;
 
 /**
  * Never let the chain break a customer's day.
@@ -98,7 +122,7 @@ export async function emitWorkOrderClosed(woId: number): Promise<AppendResult | 
       )),
   ]);
 
-  const custodianOrgId = await custodianOfAt(wo.instrumentId, at);
+  const { custodianOrgId, epochId } = await placeOf(wo.instrumentId, at);
   const planned = wo.severity === "Planned";
 
   return appendEvent({
@@ -129,6 +153,7 @@ export async function emitWorkOrderClosed(woId: number): Promise<AppendResult | 
     },
     sourceKind: "work_order",
     sourceId: String(wo.id),
+    epochId,
   });
 }
 
@@ -167,7 +192,7 @@ export async function emitPmTask(taskId: number): Promise<AppendResult | null> {
       }]
     : [];
 
-  const custodianOrgId = await custodianOfAt(t.instrumentId, t.completedAt);
+  const { custodianOrgId, epochId } = await placeOf(t.instrumentId, t.completedAt);
 
   return appendEvent({
     instrumentId: t.instrumentId,
@@ -191,6 +216,7 @@ export async function emitPmTask(taskId: number): Promise<AppendResult | null> {
     },
     sourceKind: "task",
     sourceId: String(t.id),
+    epochId,
   });
 }
 
@@ -206,7 +232,7 @@ export async function emitPmTask(taskId: number): Promise<AppendResult | null> {
 export async function emitCheckoutVerdict(verdictId: number): Promise<AppendResult | null> {
   const [v] = await db.select().from(checkoutVerdicts).where(eq(checkoutVerdicts.id, verdictId)).limit(1);
   if (!v || v.instrumentId === null) return null;
-  const custodianOrgId = await custodianOfAt(v.instrumentId, v.recordedAt);
+  const { custodianOrgId, epochId } = await placeOf(v.instrumentId, v.recordedAt);
   let metrics: unknown = [];
   try { metrics = v.metrics ? JSON.parse(v.metrics) : []; } catch { metrics = []; }
 
@@ -227,6 +253,7 @@ export async function emitCheckoutVerdict(verdictId: number): Promise<AppendResu
     private: { reportAttachmentId: v.reportAttachmentId, recordedBy: v.recordedBy, projectId: v.projectId },
     sourceKind: "checkout_verdict",
     sourceId: String(v.id),
+    epochId,
   });
 }
 
