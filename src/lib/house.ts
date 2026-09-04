@@ -6,7 +6,7 @@ import { db } from "@/db";
 import { appSettings, houseMembers } from "@/db/schema";
 import { parseList } from "@/lib/allowMatch";
 import {
-  houseEmailsFrom, houseIdentityFor, houseRoleFor, rootOwner,
+  houseEmailsFrom, houseIdentityFor, houseOwnerEmailsFrom, houseRoleFor, rootOwner,
   type HouseRole, type MemberRow,
 } from "@/lib/houseRole";
 
@@ -61,6 +61,19 @@ export async function houseIdentityForEmail(email: string): Promise<{
   const [members, rootOrgId] = await Promise.all([houseMemberRows(), rootOperatorOrgId()]);
   const id = houseIdentityFor(email, envStaff(), members, rootOrgId);
   return id && { ...id, rootOrgId };
+}
+
+/**
+ * The owners of one workspace, for news that names a company the owner chose
+ * to deal with - see houseOwnerEmailsFrom. A workspace with no owner on file
+ * is a misconfiguration, and dropping the message would make it a silent one,
+ * so that case falls back to the workspace's staff rather than to nobody.
+ */
+export async function houseOwnerEmails(tenantOrgId: number | null): Promise<string[]> {
+  const [members, rootOrgId] = await Promise.all([houseMemberRows(), rootOperatorOrgId()]);
+  const env = envStaff();
+  const owners = houseOwnerEmailsFrom(env, members, tenantOrgId, rootOrgId);
+  return owners.length ? owners : houseEmailsFrom(env, members, tenantOrgId, rootOrgId);
 }
 
 /**
