@@ -142,6 +142,7 @@ import { VIEW_LABEL, isViewPref, viewAllowed, type ViewMode } from "@/lib/viewMo
 import { gasesForSystemWithUnits, gasesForUnit, missingGases } from "@/lib/catalogGas";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail, isOffSystem } from "@/lib/eodEmail";
+import { isOwnEodRow } from "@/lib/eodLines";
 import {
   allowanceFor, isPerDiemKind, needsApproval, perDiemOffer, resolveExpensePolicy,
 } from "@/lib/expensePolicy";
@@ -4462,6 +4463,64 @@ function eodDay(on?: string): { date: string } | { error: string } {
   return { date: wanted };
 }
 
+/**
+ * Write the caller's OWN line for a target and a day - one row per (target,
+ * day, author), see db/schema.eodUpdates - creating it if this is their first
+ * word on that system today.
+ *
+ * The one wrinkle is a row from before authorship: no stamp, and the name of
+ * whoever last wrote it. If that is the caller (or the row says nothing at
+ * all - a bare skip, a click into the box and back out), the row is claimed
+ * and stamped rather than a second line opened beside it, so the day after
+ * the change reads as one line per person like every day after it.
+ */
+async function upsertEodLine(
+  u: Awaited<ReturnType<typeof requireStaff>>,
+  target: { instrumentId: number | null; assetId: number | null },
+  date: string,
+  set: Partial<{ systemUpdate: string; actionItem: string; skipped: boolean; internal: boolean }>,
+): Promise<void> {
+  const author = u.email.toLowerCase();
+  const stamp = { updatedBy: u.name, updatedAt: new Date() };
+  // The record's own workspace, and the caller had better be in it: the id
+  // came off the wire, and a line written onto another company's system
+  // would land on that company's client report.
+  const t = readTenant(u);
+  let tenantOrgId: number | null;
+  let base: { instrumentId: number | null; assetId: number | null; ownerOrgId: number | null };
+  let key: { col: typeof eodUpdates.instrumentId | typeof eodUpdates.assetId; id: number };
+  let conflict: (typeof eodUpdates.instrumentId | typeof eodUpdates.assetId | typeof eodUpdates.date | typeof eodUpdates.author)[];
+  if (target.instrumentId !== null) {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.id, target.instrumentId));
+    if (!inst || (t !== null && inst.tenantOrgId !== t)) throw new Error("Not found");
+    tenantOrgId = inst.tenantOrgId;
+    base = { instrumentId: inst.id, assetId: null, ownerOrgId: inst.ownerOrgId };
+    key = { col: eodUpdates.instrumentId, id: inst.id };
+    conflict = [eodUpdates.instrumentId, eodUpdates.date, eodUpdates.author];
+  } else if (target.assetId !== null) {
+    const [a] = await db.select().from(assets).where(eq(assets.id, target.assetId));
+    if (!a || (t !== null && a.tenantOrgId !== t)) throw new Error("Not found");
+    tenantOrgId = a.tenantOrgId;
+    base = { instrumentId: null, assetId: a.id, ownerOrgId: a.ownerOrgId };
+    key = { col: eodUpdates.assetId, id: a.id };
+    conflict = [eodUpdates.assetId, eodUpdates.date, eodUpdates.author];
+  } else {
+    throw new Error("Not found");
+  }
+  const [legacy] = await db.select().from(eodUpdates)
+    .where(and(eq(key.col, key.id), eq(eodUpdates.date, date), eq(eodUpdates.author, "")));
+  if (legacy && (legacy.updatedBy === u.name || (!legacy.systemUpdate && !legacy.actionItem))) {
+    await db.update(eodUpdates).set({ ...set, author, ...stamp }).where(eq(eodUpdates.id, legacy.id));
+    return;
+  }
+  // owner_org_id is stamped on the way in and deliberately absent from the
+  // conflict SET: the line belongs to whoever owned the system the day it was
+  // written, forever, whatever happens to the system afterwards.
+  await db.insert(eodUpdates)
+    .values({ tenantOrgId, ...base, date, author, ...set, ...stamp })
+    .onConflictDoUpdate({ target: conflict, set: { ...set, ...stamp } });
+}
+
 export async function saveEodUpdate(
   target: EodTarget,
   data: { systemUpdate: string; actionItem: string },
@@ -4486,35 +4545,18 @@ export async function saveEodUpdate(
   const systemUpdate = data.systemUpdate.trim();
   const actionItem = data.actionItem.trim();
   if (target.eodId != null) {
-    await eodRowFor(u, target.eodId);
-    await db.update(eodUpdates).set({ systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
-      .where(eq(eodUpdates.id, target.eodId));
+    const row = await eodRowFor(u, target.eodId);
+    // Correcting a colleague's words does not make them yours: the byline
+    // stays theirs. Your own line (stamped, or a pre-authorship row in your
+    // name) is claimed and stamped as you save it.
+    const own = isOwnEodRow(row, u);
+    await db.update(eodUpdates).set({
+      systemUpdate, actionItem, updatedAt: new Date(),
+      ...(own ? { updatedBy: u.name, author: u.email.toLowerCase() } : {}),
+    }).where(eq(eodUpdates.id, target.eodId));
     return;
   }
-  // owner_org_id is stamped on the way in and deliberately absent from the
-  // conflict SET: the line belongs to whoever owned the system the day it was
-  // written, forever, whatever happens to the system afterwards.
-  if (target.instrumentId !== null) {
-    const [inst] = await db.select().from(instruments).where(eq(instruments.id, target.instrumentId));
-    if (!inst) throw new Error("Not found");
-    await db.insert(eodUpdates)
-      .values({ tenantOrgId: inst.tenantOrgId, instrumentId: target.instrumentId, date, ownerOrgId: inst.ownerOrgId, systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
-      .onConflictDoUpdate({
-        target: [eodUpdates.instrumentId, eodUpdates.date],
-        set: { systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() },
-      });
-  } else if (target.assetId !== null) {
-    const [a] = await db.select().from(assets).where(eq(assets.id, target.assetId));
-    if (!a) throw new Error("Not found");
-    await db.insert(eodUpdates)
-      .values({ tenantOrgId: a.tenantOrgId, assetId: target.assetId, date, ownerOrgId: a.ownerOrgId, systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
-      .onConflictDoUpdate({
-        target: [eodUpdates.assetId, eodUpdates.date],
-        set: { systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() },
-      });
-  } else {
-    throw new Error("Not found");
-  }
+  await upsertEodLine(u, target, date, { systemUpdate, actionItem });
   // No revalidatePath here on purpose: autosave fires on every typing pause,
   // and a revalidate would make the client re-fetch the whole page each time
   // (visible jank on mobile). The typist's screen is already current; other
@@ -4560,6 +4602,7 @@ export async function logOffSystemWork(
     tenantOrgId: tenant,
     instrumentId: null, assetId: null,
     date: day.date, ownerOrgId: orgId,
+    author: u.email.toLowerCase(),
     title, person,
     minutes: Math.max(0, Math.min(24 * 60, Math.round(data.minutes || 0))),
     systemUpdate: data.systemUpdate.trim(), actionItem: data.actionItem.trim(),
@@ -4663,31 +4706,21 @@ export async function sendEodEmail(orgId: number | null): Promise<{ error?: stri
   return { sent: to.length };
 }
 
-/** Leave a system out of (or bring it back into) today's client email. Keeps any saved text. */
-export async function setEodSkip(
-  target: { instrumentId: number | null; assetId: number | null }, skipped: boolean,
-) {
+/**
+ * Leave a line out of (or bring it back into) today's client email. Keeps any
+ * saved text. By row id it reaches anybody's line - leaving a colleague's
+ * out of the report is a report decision, not an edit of their words - and
+ * by target it is the caller's own.
+ */
+export async function setEodSkip(target: EodTarget, skipped: boolean) {
   const u = await requireStaff();
-  const date = shopToday();
-  if (target.instrumentId !== null) {
-    const [inst] = await db.select().from(instruments).where(eq(instruments.id, target.instrumentId));
-    if (!inst) throw new Error("Not found");
-    await db.insert(eodUpdates)
-      .values({ tenantOrgId: inst.tenantOrgId, instrumentId: target.instrumentId, date, ownerOrgId: inst.ownerOrgId, skipped, updatedBy: u.name, updatedAt: new Date() })
-      .onConflictDoUpdate({
-        target: [eodUpdates.instrumentId, eodUpdates.date],
-        set: { skipped, updatedBy: u.name, updatedAt: new Date() },
-      });
-  } else if (target.assetId !== null) {
-    const [a] = await db.select().from(assets).where(eq(assets.id, target.assetId));
-    if (!a) throw new Error("Not found");
-    await db.insert(eodUpdates)
-      .values({ tenantOrgId: a.tenantOrgId, assetId: target.assetId, date, ownerOrgId: a.ownerOrgId, skipped, updatedBy: u.name, updatedAt: new Date() })
-      .onConflictDoUpdate({
-        target: [eodUpdates.assetId, eodUpdates.date],
-        set: { skipped, updatedBy: u.name, updatedAt: new Date() },
-      });
-  } else throw new Error("Not found");
+  if (target.eodId != null) {
+    await eodRowFor(u, target.eodId);
+    await db.update(eodUpdates).set({ skipped, updatedAt: new Date() }).where(eq(eodUpdates.id, target.eodId));
+    revalidatePath("/eod");
+    return;
+  }
+  await upsertEodLine(u, target, shopToday(), { skipped });
   revalidatePath("/eod");
 }
 
@@ -4700,33 +4733,15 @@ export async function setEodInternal(
   target: EodTarget, internal: boolean,
 ) {
   const u = await requireStaff();
-  const date = shopToday();
   if (target.eodId != null) {
     await eodRowFor(u, target.eodId);
-    await db.update(eodUpdates).set({ internal, updatedBy: u.name, updatedAt: new Date() })
+    // Like skip: a report decision about the line, so the byline stays.
+    await db.update(eodUpdates).set({ internal, updatedAt: new Date() })
       .where(eq(eodUpdates.id, target.eodId));
     revalidatePath("/eod");
     return;
   }
-  if (target.instrumentId !== null) {
-    const [inst] = await db.select().from(instruments).where(eq(instruments.id, target.instrumentId));
-    if (!inst) throw new Error("Not found");
-    await db.insert(eodUpdates)
-      .values({ tenantOrgId: inst.tenantOrgId, instrumentId: target.instrumentId, date, ownerOrgId: inst.ownerOrgId, internal, updatedBy: u.name, updatedAt: new Date() })
-      .onConflictDoUpdate({
-        target: [eodUpdates.instrumentId, eodUpdates.date],
-        set: { internal, updatedBy: u.name, updatedAt: new Date() },
-      });
-  } else if (target.assetId !== null) {
-    const [a] = await db.select().from(assets).where(eq(assets.id, target.assetId));
-    if (!a) throw new Error("Not found");
-    await db.insert(eodUpdates)
-      .values({ tenantOrgId: a.tenantOrgId, assetId: target.assetId, date, ownerOrgId: a.ownerOrgId, internal, updatedBy: u.name, updatedAt: new Date() })
-      .onConflictDoUpdate({
-        target: [eodUpdates.assetId, eodUpdates.date],
-        set: { internal, updatedBy: u.name, updatedAt: new Date() },
-      });
-  } else throw new Error("Not found");
+  await upsertEodLine(u, target, shopToday(), { internal });
   revalidatePath("/eod");
 }
 

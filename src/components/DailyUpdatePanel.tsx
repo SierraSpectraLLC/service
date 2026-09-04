@@ -26,8 +26,14 @@ const AUTOSAVE_MS = 2500;
  *    land out of order and persist the older draft over the newer one. A
  *    second save waits for the first and then re-sends whatever is current.
  */
-export default function DailyUpdatePanel({ target, systemUpdate, actionItem, updatedBy, canEdit }: {
+export default function DailyUpdatePanel({ target, systemUpdate, actionItem, updatedBy, canEdit, others = [] }: {
   target: WorkTarget; systemUpdate: string; actionItem: string; updatedBy: string; canEdit: boolean;
+  /**
+   * Colleagues' lines on the same day. Each person writes their own - see
+   * db/schema.eodUpdates - so what the editor holds is the viewer's, and
+   * everybody else's is read under it, with their name on it.
+   */
+  others?: { by: string; systemUpdate: string; actionItem: string }[];
 }) {
   const [draft, setDraft] = useState({ systemUpdate, actionItem });
   const [state, setState] = useState<"" | "dirty" | "saving" | "saved">("");
@@ -87,18 +93,25 @@ export default function DailyUpdatePanel({ target, systemUpdate, actionItem, upd
   // A card like every other panel. It used to be a bare fragment with a top
   // margin, from when it sat inside the identity block; standing on its own it
   // read as loose text dropped on the page.
+  const line = (l: { by: string; systemUpdate: string; actionItem: string }, i: number) => (
+    <div key={i} className="t-body" style={{ marginTop: 8 }}>
+      {l.systemUpdate && <div style={{ whiteSpace: "pre-wrap" }}>{l.systemUpdate}</div>}
+      {l.actionItem && (
+        <div style={{ marginTop: 4 }}>
+          <span className="eyebrow" style={{ marginRight: 6 }}>Action</span>{l.actionItem}
+        </div>
+      )}
+      {l.by && <div className="mut t-meta" style={{ marginTop: 2 }}>{l.by}</div>}
+    </div>
+  );
+
   if (!canEdit) {
-    if (!systemUpdate && !actionItem) return null;
+    if (!systemUpdate && !actionItem && !others.length) return null;
     return (
       <div className="card">
         <div className="card-title" style={{ marginBottom: 6 }}>Today&apos;s update</div>
-        {systemUpdate && <div className="t-body" style={{ whiteSpace: "pre-wrap" }}>{systemUpdate}</div>}
-        {actionItem && (
-          <div className="t-body" style={{ marginTop: 4 }}>
-            <span className="eyebrow" style={{ marginRight: 6 }}>Action</span>{actionItem}
-          </div>
-        )}
-        {updatedBy && <div className="mut t-meta" style={{ marginTop: 2 }}>{updatedBy}</div>}
+        {(systemUpdate || actionItem) && line({ by: updatedBy, systemUpdate, actionItem }, -1)}
+        {others.map(line)}
       </div>
     );
   }
@@ -120,6 +133,11 @@ export default function DailyUpdatePanel({ target, systemUpdate, actionItem, upd
         onChange={(e) => edit({ actionItem: e.target.value })}
         onBlur={() => { if (unsaved()) flush(); }}
         placeholder="Action item - next step or what we need" />
+      {others.length > 0 && (
+        <div style={{ marginTop: 8, borderTop: "1px solid var(--line)" }}>
+          {others.map(line)}
+        </div>
+      )}
     </div>
   );
 }

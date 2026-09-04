@@ -18,6 +18,7 @@ import SalePanel from "@/components/SalePanel";
 import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import { getModules } from "@/lib/flags";
 import { shopDay, shopTime, shopToday } from "@/lib/shopday";
+import { eodAuthorName, isOwnEodRow } from "@/lib/eodLines";
 import { formatHours } from "@/lib/hours";
 import { ASSET_TONE, GASES } from "@/lib/stages";
 import { schedulePartsOf } from "@/lib/procedures";
@@ -186,10 +187,16 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   // Today's client-facing update for this unit, picked up by the EOD page.
   const modules = await getModules();
   const ownerIsViewer = asset.ownerOrgId !== null && asset.ownerOrgId === user.orgId;
-  const [todayUpdate] = modules.eod && (isStaff || ownerIsViewer)
+  // Every person's line for today: the viewer's own is the one the editor
+  // holds, and colleagues' are read under it. See db/schema.eodUpdates.
+  const todayRows = modules.eod && (isStaff || ownerIsViewer)
     ? await db.select().from(eodUpdates)
         .where(and(eq(eodUpdates.assetId, assetId), eq(eodUpdates.date, shopToday())))
     : [];
+  const todayUpdate = todayRows.find((r) => isOwnEodRow(r, user));
+  const todayOthers = todayRows
+    .filter((r) => r !== todayUpdate && (r.systemUpdate || r.actionItem))
+    .map((r) => ({ by: eodAuthorName(r), systemUpdate: r.systemUpdate, actionItem: r.actionItem }));
   const label = new Map(insts.map((i) => [i.id, i.externalId]));
   const home = asset.instrumentId !== null ? insts.find((i) => i.id === asset.instrumentId) : undefined;
   const totalMinutes = taggedTime.reduce((n, t) => n + t.minutes, 0);
@@ -526,7 +533,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
              modules.eod && (isStaff || ownerIsViewer) && (
               <DailyUpdatePanel target={target}
                 systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
-                updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} />
+                updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} others={todayOthers} />
             )
           ) },
           { key: "history", label: "Service history", node: (

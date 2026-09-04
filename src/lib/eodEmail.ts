@@ -14,6 +14,7 @@ import { getSystemLabels } from "@/lib/systemLabel";
 import { brandForTenant, getBrand } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
 import { EMAIL, emailShell, esc } from "@/lib/emailTheme";
+import { eodAuthorName, groupEodEntries, isOwnEodRow, type EodViewer } from "@/lib/eodLines";
 
 const SEP = "-".repeat(50);
 
@@ -42,6 +43,16 @@ export type EodEntry = {
   /** offsystem only: who did it, and how long it took. */
   person?: string;
   minutes?: number;
+  /**
+   * WHOSE LINE. The saved row's id (null for a line nobody has written yet),
+   * the author stamp, the name it is attributed to, and whether it is the
+   * viewer's own - the one they type into. A system two people worked is two
+   * entries here, one per person; see db/schema.eodUpdates.
+   */
+  eodId: number | null;
+  author: string;
+  by: string;
+  mine: boolean;
 };
 
 /**
@@ -131,6 +142,13 @@ export async function collectEodEntries(
    * behaviour for platform-level callers and pre-tenancy instances.
    */
   tenantOrgId: number | null = null,
+  /**
+   * Who is reading, when somebody is: their own line comes first on each
+   * system and is marked `mine`, and a system they have not written on yet
+   * gets a blank line of theirs to type into. Absent for a composed email,
+   * which has no reader and needs no blanks.
+   */
+  viewer: EodViewer | null = null,
 ): Promise<EodEntry[]> {
   const [rows, saved, directory, orgRow] = await Promise.all([
     // This workspace's systems: includesSystem then decides, so an
@@ -154,17 +172,48 @@ export async function collectEodEntries(
   const mine = rows.filter((i) => includesSystem(i, orgId, mode, recorded, clientLed));
 
   const labels = await getSystemLabels(mine);
-  const entries: EodEntry[] = mine.map((i) => {
-    const u = saved.find((s) => s.instrumentId === i.id);
+  /*
+   * One system, several people's lines. The viewer's own first - it is the one
+   * they came to write - then everybody else's in the order they were written.
+   * With no line of their own yet, the viewer gets a blank one to type into;
+   * without a viewer at all, a system nobody wrote on is one blank entry, as
+   * it always was, so the report's count of "lines" still has a denominator.
+   */
+  const linesFor = (
+    saved: (typeof eodUpdates.$inferSelect)[],
+    blank: Omit<EodEntry, "systemUpdate" | "actionItem" | "skipped" | "internal" | "written" | "eodId" | "author" | "by" | "mine">,
+  ): EodEntry[] => {
+    const own = saved.filter((s) => isOwnEodRow(s, viewer));
+    const theirs = saved.filter((s) => !isOwnEodRow(s, viewer))
+      .sort((a, b) => a.updatedAt.getTime() - b.updatedAt.getTime());
+    const shape = (u: typeof eodUpdates.$inferSelect, isMine: boolean): EodEntry => ({
+      ...blank,
+      systemUpdate: u.systemUpdate, actionItem: u.actionItem,
+      skipped: u.skipped, internal: u.internal,
+      written: !!(u.systemUpdate || u.actionItem),
+      eodId: u.id, author: u.author, by: eodAuthorName(u), mine: isMine,
+    });
+    const out = [...own.map((u) => shape(u, true)), ...theirs.map((u) => shape(u, false))];
+    if (viewer && !own.length) {
+      out.unshift({
+        ...blank, systemUpdate: "", actionItem: "", skipped: false, internal: false, written: false,
+        eodId: null, author: viewer.email.trim().toLowerCase(), by: viewer.name, mine: true,
+      });
+    } else if (!viewer && !out.length) {
+      out.push({
+        ...blank, systemUpdate: "", actionItem: "", skipped: false, internal: false, written: false,
+        eodId: null, author: "", by: "", mine: false,
+      });
+    }
+    return out;
+  };
+
+  const entries: EodEntry[] = mine.flatMap((i) => {
     const named = labels.get(i.id) ?? "";
-    return {
+    return linesFor(saved.filter((s) => s.instrumentId === i.id), {
       kind: "system", id: i.id, externalId: i.externalId,
       label: named ? `${i.externalId} - ${named}` : i.externalId,
-      systemUpdate: u?.systemUpdate ?? "", actionItem: u?.actionItem ?? "",
-      skipped: u?.skipped ?? false,
-      internal: u?.internal ?? false,
-      written: !!(u?.systemUpdate || u?.actionItem),
-    };
+    });
   });
 
   // Asset-level updates: a unit this org owns, written on its own page. Live,
@@ -180,15 +229,13 @@ export async function collectEodEntries(
          ownership. Backfill takes either, for the same reason systems do. */
       .filter((a) => (mode !== "live" || ((a.ownerOrgId ?? null) === orgId && a.instrumentId === null)));
     for (const a of owned) {
-      const u = assetUpdates.find((s) => s.assetId === a.id)!;
-      entries.push({
+      // Written lines only: a unit is written on its own page, so no blank
+      // is offered here - the viewer's own line, if any, still leads.
+      entries.push(...linesFor(assetUpdates.filter((s) => s.assetId === a.id), {
         kind: "asset", id: a.id,
         externalId: a.serial ? `SN ${a.serial}` : a.kind,
         label: `${a.kind}${a.model ? ` - ${a.model}` : ""}${a.serial ? ` (SN ${a.serial})` : ""}`,
-        systemUpdate: u.systemUpdate, actionItem: u.actionItem, skipped: u.skipped,
-        internal: u.internal,
-        written: !!(u.systemUpdate || u.actionItem),
-      });
+      }).filter((e) => e.eodId !== null));
     }
   }
 
@@ -204,6 +251,7 @@ export async function collectEodEntries(
       internal: u.internal,
       written: true,
       person: u.person, minutes: u.minutes,
+      eodId: u.id, author: u.author, by: eodAuthorName(u), mine: isOwnEodRow(u, viewer),
     });
   }
   return entries;
@@ -294,8 +342,15 @@ export async function composeEodEmail(
   const url = appUrl();
 
   let filled = 0;
-  const blocks = included.map((e, idx) => {
-    if (e.written) filled++;
+  /*
+   * Numbered by what each line is ABOUT, not by line: a system two people
+   * wrote about is "System 3" once, with each person's update under it and
+   * their name on it. One person's line keeps the shape the report has always
+   * had, so a day nobody shared reads exactly as before.
+   */
+  const blocks = groupEodEntries(included).map((group, idx) => {
+    const e = group[0];
+    for (const g of group) if (g.written) filled++;
     const label = esc(e.label);
     // Off-system work has no page to link to - that is what makes it
     // off-system - so its heading is plain text and carries who did it
@@ -310,7 +365,9 @@ export async function composeEodEmail(
     const heading = url
       ? `<a href="${href}" style="color:${EMAIL.link};">${noun} ${idx + 1}: ${label}</a>`
       : `${noun} ${idx + 1}: ${label}`;
-    return `${heading}\n\nSystem Update: ${esc(e.systemUpdate)}\nAction Item: ${esc(e.actionItem)}\n\n${SEP}`;
+    const body = (g: EodEntry) => `System Update: ${esc(g.systemUpdate)}\nAction Item: ${esc(g.actionItem)}`;
+    if (group.length === 1) return `${heading}\n\n${body(e)}\n\n${SEP}`;
+    return `${heading}\n\n${group.map((g) => `${esc(g.by || "Unsigned")}:\n${body(g)}`).join("\n\n")}\n\n${SEP}`;
   });
 
   const body = [`${dateMDY} - Daily Updates`, "", SEP, ...blocks].join("\n");

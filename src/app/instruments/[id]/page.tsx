@@ -25,6 +25,7 @@ import { consentModeFor, remoteAbility } from "@/lib/remoteAccess";
 import { linkedDevice } from "@/lib/remote";
 import { getModules } from "@/lib/flags";
 import { shopDay, shopMonthDay, shopTime, shopToday } from "@/lib/shopday";
+import { eodAuthorName, isOwnEodRow } from "@/lib/eodLines";
 import { getStageDefs } from "@/lib/stageDefs";
 import { BLOCKED_STAGE, partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
@@ -351,10 +352,16 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   };
   // Today's client-facing update, written here and picked up by the EOD page.
   const ownerIsViewer = inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId;
-  const [todayUpdate] = modules.eod && (isStaff || ownerIsViewer)
+  // Every person's line for today: the viewer's own is the one the editor
+  // holds, and colleagues' are read under it. See db/schema.eodUpdates.
+  const todayRows = modules.eod && (isStaff || ownerIsViewer)
     ? await db.select().from(eodUpdates)
         .where(and(eq(eodUpdates.instrumentId, instId), eq(eodUpdates.date, shopToday())))
     : [];
+  const todayUpdate = todayRows.find((r) => isOwnEodRow(r, user));
+  const todayOthers = todayRows
+    .filter((r) => r !== todayUpdate && (r.systemUpdate || r.actionItem))
+    .map((r) => ({ by: eodAuthorName(r), systemUpdate: r.systemUpdate, actionItem: r.actionItem }));
 
   // Discussion. The thread is scoped by the system (checked above), but each
   // post carries its own audience: an internal note belongs to the party that
@@ -1034,7 +1041,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
              modules.eod && (isStaff || ownerIsViewer) && (
               <DailyUpdatePanel target={{ instrumentId: inst.id, assetId: null }}
                 systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
-                updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} />
+                updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} others={todayOthers} />
             )
           ) },
           { key: "discussion", label: "Discussion", node: (
