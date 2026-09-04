@@ -5001,9 +5001,10 @@ export async function setNotificationPref(kind: string, emailOn: boolean): Promi
   if (!isNotifyKind(kind)) return { error: "Unknown notification kind" };
   /* And not one this person can never receive. Hiding the switch is what the
      inbox does; this is the door behind it, so a hand-made call cannot leave a
-     client holding a preference row for the operator's usage report. Absent
-     rather than forbidden: naming the kind back would confirm it exists. */
-  if (!mayReceiveKind(kind, isStaffRole(u.role))) return { error: "Unknown notification kind" };
+     client - or an engineer - holding a preference row for the owner's usage
+     report. Absent rather than forbidden: naming the kind back would confirm
+     it exists. */
+  if (!mayReceiveKind(kind, u.role)) return { error: "Unknown notification kind" };
   const email = u.email.toLowerCase();
   await db.insert(notificationPrefs)
     .values({ email, kind, emailOn })
@@ -18860,8 +18861,11 @@ export async function shareClient(orgId: number, data: {
       createdBy: u.email,
     }).returning();
     const [to] = await db.select().from(orgs).where(eq(orgs.id, toOrgId));
+    // Their owners, not their shop: a client share is the owner's decision,
+    // and naming the company that sent it is the same list /network keeps
+    // from the engineers.
     await notifyClientShared({
-      to: await houseEmails(toOrgId),
+      to: await houseOwnerEmails(toOrgId),
       fromName: brand.operatorName || brand.name,
       // A blind offer stays blind in the email too. An inbox line naming the
       // client would undo the whole thing in the one place nobody thinks to
@@ -19722,8 +19726,9 @@ export async function postLead(data: {
 
   const brand = await brandForTenant(mine);
   for (const toOrgId of picked) {
+    // Their owners, as with a client share.
     await notifyLeadOffered({
-      to: await houseEmails(toOrgId),
+      to: await houseOwnerEmails(toOrgId),
       fromName: brand.operatorName || brand.name,
       summary: leadSummary({ region: data.region, systems }),
       equipment: equipmentLine(systems),

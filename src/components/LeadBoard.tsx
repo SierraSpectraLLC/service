@@ -36,15 +36,9 @@ const blank = (): Row => ({ category: "", model: "", count: "1" });
  * And the race is stated rather than discovered. A shop that reads this on
  * Thursday and acts on Monday should already know why it was gone.
  */
-export default function LeadBoard({ mine, offered, providers, outbound }: {
+export default function LeadBoard({ mine, offered, providers }: {
   mine: LeadRow[]; offered: LeadRow[];
   providers: { id: number; name: string }[];
-  /**
-   * Whether this reader offers leads as well as takes them. The owner does;
-   * their engineers see only what has been offered TO the shop, because the
-   * outbound half names the companies the owner deals with - see /network.
-   */
-  outbound: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -171,7 +165,6 @@ export default function LeadBoard({ mine, offered, providers, outbound }: {
         </Panel>
       )}
 
-      {outbound && (
       <Panel title="Leads you have offered" count={mine.length || undefined}
         hint="Inquiries you are not taking on. The contact details stay with you until somebody claims it.">
         {mine.map((l) => (
@@ -201,7 +194,6 @@ export default function LeadBoard({ mine, offered, providers, outbound }: {
           </div>
         )}
       </Panel>
-      )}
 
       {open && (
         <Dialog open onClose={() => setOpen(false)} size="md"

@@ -4,7 +4,6 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { notificationPrefs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { isStaffRole } from "@/lib/tenants";
 import { navSection } from "@/lib/navData";
 import SectionShell from "@/components/SectionShell";
 import NotificationPrefs from "@/components/NotificationPrefs";
@@ -31,7 +30,7 @@ export default async function AccountNotificationsPage() {
     <SectionShell section={section} active="/account/notifications"
       title="Notifications"
       sub={<>Everything reaches your <Link href="/inbox">inbox</Link> either way; these decide what else happens.</>}>
-      <NotificationPrefs prefs={prefs} isStaff={isStaffRole(user.role)} />
+      <NotificationPrefs prefs={prefs} role={user.role} />
     </SectionShell>
   );
 }

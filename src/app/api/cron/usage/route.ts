@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cronAuthorized } from "@/lib/cronAuth";
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { houseEmails } from "@/lib/house";
+import { houseOwnerEmails } from "@/lib/house";
 import { ACTIVE_DAYS, QUIET_DAYS, daysAgo, rollup } from "@/lib/loginLog";
 import { loginsSince } from "@/lib/loginLogData";
 import { notifyUsageReport } from "@/lib/notify";
@@ -51,7 +51,8 @@ export async function GET(req: Request) {
         mine,
         now,
       );
-      const to = await houseEmails(operatorOrgId);
+      // The owners: who is using the portal is theirs to watch, not the shop's.
+      const to = await houseOwnerEmails(operatorOrgId);
       if (!to.length) continue;
       await notifyUsageReport({
         to,

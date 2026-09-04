@@ -16,14 +16,14 @@ import { buildNav, navIndex, sectionTone, isActive, type NavContext, type NavTre
  * label.
  */
 const BASE: NavContext = {
-  signedIn: true, isStaff: false, resells: false, isClientOrg: false, hasOrg: false,
+  signedIn: true, isStaff: false, isOwner: false, resells: false, isClientOrg: false, hasOrg: false,
   modules: { eod: false, remote: false, sheetSync: false },
   hasStock: false, orgRemoteOn: false, seesBooks: false, seesPayroll: false,
   seesOwnMoney: true, adminsPeople: false, openDiffs: 0, settingsHref: null,
 };
 
 const OWNER: NavContext = {
-  ...BASE, isStaff: true, hasStock: true, seesBooks: true, seesPayroll: true,
+  ...BASE, isStaff: true, isOwner: true, hasStock: true, seesBooks: true, seesPayroll: true,
   adminsPeople: true, openDiffs: 3, settingsHref: "/settings",
   modules: { eod: true, remote: true, sheetSync: true },
 };

@@ -19,15 +19,16 @@ import { toast } from "@/components/ui/Toast";
  * Only the opt-OUTS are stored (no row means email is on), which is why every
  * box starts ticked for a new account - see lib/inbox.
  */
-export default function NotificationPrefs({ prefs, isStaff }: {
+export default function NotificationPrefs({ prefs, role }: {
   prefs: { kind: string; emailOn: boolean }[];
   /**
-   * Staff get every switch; a client gets only the kinds that can actually
-   * reach them. See notifyKindsFor - a switch that can never do anything is
-   * not a neutral extra row, it is a claim about this instance being read by
-   * somebody it was not written for.
+   * The owner gets every switch, their staff every switch but the owner's
+   * own, and a client only the kinds that can actually reach them. See
+   * notifyKindsFor - a switch that can never do anything is not a neutral
+   * extra row, it is a claim about this instance being read by somebody it
+   * was not written for.
    */
-  isStaff: boolean;
+  role: string;
 }) {
   const [pending, startTransition] = useTransition();
   const emailOn = (kind: string) => prefs.find((p) => p.kind === kind)?.emailOn ?? true;
@@ -35,7 +36,7 @@ export default function NotificationPrefs({ prefs, isStaff }: {
   return (
     <>
       <Panel title="Email" hint="Which kinds also email you. Everything still lands in your inbox either way.">
-        {notifyKindsFor(isStaff).map((k) => (
+        {notifyKindsFor(role).map((k) => (
           <label key={k.kind} className="t-body" style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", cursor: "pointer" }}>
             <input type="checkbox" checked={emailOn(k.kind)} disabled={pending} className="check"
               onChange={(e) => {

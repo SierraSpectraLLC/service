@@ -68,6 +68,8 @@ export type NavContext = {
   /** Signed in at all. A signed-out request gets an empty tree. */
   signedIn: boolean;
   isStaff: boolean;
+  /** The workspace's owner, rather than one of its engineers. */
+  isOwner: boolean;
   /** A client who works the reselling half of their company. See lib/viewMode. */
   resells: boolean;
   /** Their organization is a client rather than another provider. */
@@ -287,7 +289,12 @@ function staffSections(ctx: NavContext): NavSection[] {
          sign-ins, sharing, report recipients - and stays the owner's; this is
          the roster. Two questions, so two rooms, cross-linked. */
       { href: "/clients", label: "Clients" },
-      { href: "/network", label: "Service companies" },
+      /* The owner, not every staff member: the room is the companies the
+         owner deals with - the ones they added, offered clients and leads
+         to, or invited - and who the owner deals with is not the engineers'
+         to read. The page refuses them too; this keeps the door off the
+         wall. */
+      ...(ctx.isOwner ? [{ href: "/network", label: "Service companies" }] : []),
       ...(ctx.adminsPeople ? [{ href: "/people", label: "People" }] : []),
       /* Purchasing and Reimbursements, for the readers who have no Financial
          menu to find them in.

@@ -15,6 +15,14 @@ export const DESKTOP_KEY = "notify:desktop";
  * staff - so the notification cannot reach a client no matter what they set.
  * "all" means a client genuinely can be on the recipient list.
  *
+ * "owner" is narrower than the house: the workspace's owners, through
+ * houseOwnerEmails(), and never its engineers. It is for news that is the
+ * owner's business rather than the shop's - who the owner deals with (another
+ * service company offering work, or answering an offer), and who is using
+ * the portal. An engineer offered a switch for "another service company
+ * shares a client with us" has been told, by the switch alone, that such
+ * companies exist and that he is in that loop. He is not.
+ *
  * This is an audience fact, not a permission: preferences here only MUTE the
  * email on a notification somebody was already going to get. Nothing a client
  * switched on ever subscribed them to anything. But the list was shown whole
@@ -25,7 +33,7 @@ export const DESKTOP_KEY = "notify:desktop";
  * portal use is watched and reported on. That is the operator's business to
  * disclose in their own words, not a checkbox's to leak on their behalf.
  */
-export type NotifyAudience = "house" | "all";
+export type NotifyAudience = "owner" | "house" | "all";
 
 /**
  * A kind whose email waits for the burst to finish, and the plural it uses
@@ -57,23 +65,25 @@ export const NOTIFY_KINDS = [
   { kind: "issue", label: "A client reports a problem", audience: "house" },
   { kind: "pm_request", label: "A client asks for maintenance", audience: "house" },
   { kind: "renewal", label: "A contract is coming up for renewal", audience: "house" },
-  // Somebody on our own staff hit a snag in the software. House-only: a client
-  // has no business being told the shop's engineers are filing bug reports,
-  // and the switch alone would say so.
-  { kind: "bug_report", label: "Somebody reports a problem with the software", audience: "house" },
+  // Somebody on our own staff hit a snag in the software. It goes to the
+  // owners to triage - see actions.reportBug - and a client has no business
+  // being told the shop's engineers are filing bug reports.
+  { kind: "bug_report", label: "Somebody reports a problem with the software", audience: "owner" },
   // Asked OF the owner, so the owner hears it too.
   { kind: "parts_request", label: "We're asked to order parts for our systems", audience: "all" },
   { kind: "message", label: "Somebody messages me directly", audience: "all" },
   { kind: "drop", label: "Files arrive through a drop link I made", audience: "all" },
   { kind: "model_proposal", label: "A model not in the catalog gets recorded", audience: "house" },
-  { kind: "sign_in", label: "Somebody signs in to the portal for the first time", audience: "house" },
-  { kind: "usage_report", label: "The weekly report of who is using the portal", audience: "house" },
-  // Another service company hands us a client. House only: it is a decision
-  // about taking on work, and it arrives from outside the workspace entirely.
-  { kind: "client_share", label: "Another service company shares a client with us", audience: "house" },
-  // Work somebody is offering us, and the answer to one we offered. House
-  // only: it is a decision about taking on work, from outside the workspace.
-  { kind: "lead", label: "A lead is offered to us, or one of ours is taken", audience: "house" },
+  // Who is using the portal is the owner's to watch, not the shop's.
+  { kind: "sign_in", label: "Somebody signs in to the portal for the first time", audience: "owner" },
+  { kind: "usage_report", label: "The weekly report of who is using the portal", audience: "owner" },
+  // Another service company hands us a client. The owner's alone: it is a
+  // decision about taking on work from a company the owner deals with, and
+  // which companies those are is not the engineers' to read - see /network.
+  { kind: "client_share", label: "Another service company shares a client with us", audience: "owner" },
+  // Work somebody is offering us, and the answer to one we offered. The
+  // owner's, for the same reason as a client share.
+  { kind: "lead", label: "A lead is offered to us, or one of ours is taken", audience: "owner" },
 ] as const satisfies readonly {
   kind: string; label: string; audience: NotifyAudience; hold?: NotifyHold;
 }[];
@@ -81,18 +91,23 @@ export const NOTIFY_KINDS = [
 export type NotifyKind = (typeof NOTIFY_KINDS)[number]["kind"];
 
 /**
- * The kinds worth offering this person a switch for.
+ * The kinds worth offering this person a switch for, by their role.
  *
  * A switch that can never do anything is not a neutral extra row: it is a
  * claim about what happens on this instance, read by somebody who is not
- * supposed to be reading it.
+ * supposed to be reading it. An owner gets every switch, their staff every
+ * switch but the owner's own, and a client only the kinds that can reach a
+ * client. Pure on the role word so the two surfaces that render the list and
+ * the door behind them all answer alike.
  */
-export const notifyKindsFor = (isStaff: boolean): readonly (typeof NOTIFY_KINDS)[number][] =>
-  isStaff ? NOTIFY_KINDS : NOTIFY_KINDS.filter((k) => k.audience === "all");
+export const notifyKindsFor = (role: string): readonly (typeof NOTIFY_KINDS)[number][] =>
+  role === "owner" ? NOTIFY_KINDS
+    : role === "staff" ? NOTIFY_KINDS.filter((k) => k.audience !== "owner")
+      : NOTIFY_KINDS.filter((k) => k.audience === "all");
 
 /** Can this kind ever reach this person at all? */
-export const mayReceiveKind = (kind: string, isStaff: boolean): boolean =>
-  notifyKindsFor(isStaff).some((k) => k.kind === kind);
+export const mayReceiveKind = (kind: string, role: string): boolean =>
+  notifyKindsFor(role).some((k) => k.kind === kind);
 
 export const isNotifyKind = (k: string): k is NotifyKind =>
   NOTIFY_KINDS.some((n) => n.kind === k);
