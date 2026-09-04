@@ -764,6 +764,8 @@ ALTER TABLE "stockrooms" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
 ALTER TABLE "purchase_orders" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
 ALTER TABLE "part_prices" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
 ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+-- Each person writes their own EOD line: author joins the day key below.
+ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "author" text NOT NULL DEFAULT '';
 ALTER TABLE "remote_devices" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
 ALTER TABLE "audit_log" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
 
@@ -971,11 +973,22 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'gases_instrument_gas') THEN
     ALTER TABLE "instrument_gases" ADD CONSTRAINT "gases_instrument_gas" UNIQUE ("instrument_id","gas");
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_instrument_date') THEN
-    ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_instrument_date" UNIQUE ("instrument_id","date");
+  -- One EOD line per (target, day) became one per (target, day, author).
+  -- Strictly LOOSER than what it replaces - every row the old key accepted
+  -- has author '' and is still unique under the new one - so the swap cannot
+  -- fail on existing data. Old constraint out first: an insert for a second
+  -- author on the same day is exactly what it forbade.
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_instrument_date') THEN
+    ALTER TABLE "eod_updates" DROP CONSTRAINT "eod_instrument_date";
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_asset_date') THEN
-    ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_asset_date" UNIQUE ("asset_id","date");
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_asset_date') THEN
+    ALTER TABLE "eod_updates" DROP CONSTRAINT "eod_asset_date";
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_instrument_date_author') THEN
+    ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_instrument_date_author" UNIQUE ("instrument_id","date","author");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_asset_date_author') THEN
+    ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_asset_date_author" UNIQUE ("asset_id","date","author");
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'allowlist_entry_unique') THEN
     ALTER TABLE "client_allowlist" ADD CONSTRAINT "allowlist_entry_unique" UNIQUE ("entry");
