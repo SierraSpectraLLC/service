@@ -110,6 +110,30 @@ export function houseEmailsFrom(
   return [...out];
 }
 
+/**
+ * The OWNERS of one workspace, for a message that is the owner's business rather
+ * than the shop's: who accepted a hand-off, who took a lead. Each of those names
+ * a company the owner chose to deal with, and the owner's engineers do not get
+ * that list - the network page keeps it from them - so the mail that would hand
+ * it over one company at a time goes to the owners alone.
+ *
+ * Resolved through houseIdentityFor for every address the environment or the
+ * table knows, so it cannot disagree with the sign-in path about who is an owner
+ * or of whom: the root owner counts for the workspace its row names, or the root
+ * workspace when it has none, and a 'none' row is nobody.
+ */
+export function houseOwnerEmailsFrom(
+  envStaff: string[], members: MemberRow[], orgId: number | null, rootOrgId: number | null,
+): string[] {
+  const out = new Set<string>();
+  for (const e of [...envStaff, ...members.map((m) => m.email)].map(norm)) {
+    if (!e) continue;
+    const id = houseIdentityFor(e, envStaff, members, rootOrgId);
+    if (id?.role === "owner" && id.orgId === orgId) out.add(e);
+  }
+  return [...out];
+}
+
 /** Effective owners, so the last one can't be removed. */
 export function ownerEmails(envStaff: string[], members: MemberRow[]): string[] {
   const out = new Set<string>();

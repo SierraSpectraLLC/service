@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  houseIdentityFor, houseRoleFor, houseEmailsFrom, memberGuard, ownerEmails, rootOwner, validHouseEmail,
+  houseIdentityFor, houseRoleFor, houseEmailsFrom, houseOwnerEmailsFrom, memberGuard, ownerEmails,
+  rootOwner, validHouseEmail,
 } from "@/lib/houseRole";
 
 const ENV = ["joe@x.com", "legacy@x.com"];
@@ -204,5 +205,47 @@ describe("houseIdentityFor", () => {
 
   it("is nobody for a client", () => {
     expect(houseIdentityFor("lab@acme.com", ENV, [], ROOT)).toBeNull();
+  });
+});
+
+describe("houseOwnerEmailsFrom", () => {
+  /*
+   * Who accepted a hand-off, who took a lead: news that names a company the
+   * owner chose to deal with, which the owner's engineers do not get to read.
+   * The mail goes to the workspace's owners and to nobody else on it.
+   */
+  const ENV = ["joe@sierra.com", "bill@sierra.com"];
+  const SIERRA = 2, PLATFORM = 26;
+  const members = [
+    { email: "joe@sierra.com", role: "owner", orgId: SIERRA },
+    { email: "bill@sierra.com", role: "staff", orgId: SIERRA },
+    { email: "ann@sierra.com", role: "owner", orgId: SIERRA },
+    { email: "gone@sierra.com", role: "none", orgId: SIERRA },
+    { email: "admin@platform.com", role: "owner", orgId: PLATFORM },
+  ];
+
+  it("names one workspace's owners and none of its staff", () => {
+    expect(houseOwnerEmailsFrom(ENV, members, SIERRA, PLATFORM).sort())
+      .toEqual(["ann@sierra.com", "joe@sierra.com"]);
+  });
+
+  it("does not cross workspaces, in either direction", () => {
+    expect(houseOwnerEmailsFrom(ENV, members, PLATFORM, PLATFORM)).toEqual(["admin@platform.com"]);
+    expect(houseOwnerEmailsFrom(ENV, members, 99, PLATFORM)).toEqual([]);
+  });
+
+  it("files the root owner where its row says, and at the root when it has none", () => {
+    // Joe is STAFF_EMAILS[0] and has a Sierra row: Sierra's owner, not the platform's.
+    expect(houseOwnerEmailsFrom(ENV, members, PLATFORM, PLATFORM)).not.toContain("joe@sierra.com");
+    const rowless = members.filter((m) => m.email !== "joe@sierra.com");
+    expect(houseOwnerEmailsFrom(ENV, rowless, PLATFORM, PLATFORM).sort())
+      .toEqual(["admin@platform.com", "joe@sierra.com"]);
+    expect(houseOwnerEmailsFrom(ENV, rowless, SIERRA, PLATFORM)).toEqual(["ann@sierra.com"]);
+  });
+
+  it("ignores a rowless legacy env entry and a revoked row", () => {
+    // bill is in the env with no owner row: staff, so not here.
+    expect(houseOwnerEmailsFrom(ENV, members, SIERRA, PLATFORM)).not.toContain("bill@sierra.com");
+    expect(houseOwnerEmailsFrom(ENV, members, SIERRA, PLATFORM)).not.toContain("gone@sierra.com");
   });
 });

@@ -160,7 +160,7 @@ import {
 import { PO_LABEL, poEditable, poReceivable, poTotals, statusAfterReceipt } from "@/lib/po";
 import { canKick } from "@/lib/queue";
 import { assetDupeKey, duplicateIds, importPlanner } from "@/lib/assetDupe";
-import { houseEmails, houseMemberRows } from "@/lib/house";
+import { houseEmails, houseMemberRows, houseOwnerEmails } from "@/lib/house";
 import { pmHandoff } from "@/lib/pmQueue";
 import { isPmPosture } from "@/lib/pmPosture";
 import { canDeleteNote, canEditNote, isAuthor } from "@/lib/notes";
@@ -19090,8 +19090,10 @@ export async function acceptHandoff(token: string, data: {
     action: `opened a workspace for "${name}" by accepting ${sender?.name ?? "a"} hand-off`
       + ` - ${payload.client.name}, ${made.systems} systems`,
   });
+  // The owners, not the shop: which company took the client is the owner's
+  // relationship, and the same rule keeps it off the engineers' network page.
   await notifyHandoffJoined({
-    to: await houseEmails(row.tenantOrgId),
+    to: await houseOwnerEmails(row.tenantOrgId),
     company: name, clientName: payload.client.name, systems: made.systems,
   }).catch(() => {});
   await notifyInvite({ to: row.toEmail, inviterName: sender?.name ?? "Ridgeline", orgName: name })
@@ -19809,8 +19811,10 @@ export async function claimLead(leadId: number, choice = ""): Promise<{ error?: 
   });
 
   const [me] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, mine));
+  // Owners only, as with a hand-off: the mail names the shop that took it,
+  // and the engineers do not get the list of shops the owner offers work to.
   await notifyLeadClaimed({
-    to: await houseEmails(found.lead.tenantOrgId),
+    to: await houseOwnerEmails(found.lead.tenantOrgId),
     byName: me?.name ?? "another service company",
     summary: leadSummary({
       region: found.lead.region, systems: parseSystems(found.lead.systems),
