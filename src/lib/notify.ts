@@ -6,7 +6,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, users, notifications, notificationPrefs } from "@/db/schema";
-import { houseEmails } from "@/lib/house";
+import { houseEmails, houseOwnerEmails } from "@/lib/house";
 import { sendEmail } from "@/lib/email";
 import { emailAllowed, holdFor, type NotifyKind } from "@/lib/inbox";
 import { queueEmail } from "@/lib/outboxData";
@@ -860,7 +860,8 @@ export async function notifyFirstSignIn(opts: {
   operatorOrgId: number | null; method: string;
 }) {
   try {
-    const to = await houseEmails(opts.operatorOrgId);
+    // The owners: who is using the portal is theirs to watch, not the shop's.
+    const to = await houseOwnerEmails(opts.operatorOrgId);
     // Never to the arriving person themselves - on a one-person instance the
     // owner's own first sign-in would otherwise mail them about themselves.
     const others = to.filter((e) => e.toLowerCase() !== opts.email.toLowerCase());
