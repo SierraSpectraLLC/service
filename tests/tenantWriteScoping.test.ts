@@ -55,6 +55,16 @@ const GUARD_VOCABULARY = new RegExp([
    * about - is the one that did not, and its own houseOf call is still there.
    */
   "workableReport\\(",
+  /*
+   * app/actions.eodRowFor and upsertEodLine, the two doors every EOD write
+   * goes through. eodRowFor loads a line by id and refuses one whose
+   * tenantOrgId is not the caller's workspace (readTenant, "Not found").
+   * upsertEodLine resolves the system or unit the line is about and refuses
+   * one from another workspace the same way, then stamps the row with that
+   * record's tenant. Each person's own line is keyed by (target, day,
+   * author), so neither can reach another company's report.
+   */
+  "eodRowFor\\(", "upsertEodLine\\(",
 ].join("|"));
 
 /** Table constants declared with tenantStamp(). */
@@ -195,8 +205,15 @@ describe("writes to a tenant-stamped table", () => {
    * it; the scan reads three lines past a write, and submitDraftReport's grew
    * a line, which is the kind of accident a ceiling measured this way absorbs
    * in the wrong direction. Reviewing the helper is the fix, not padding.
+   *
+   * 42 -> 39: eodRowFor and upsertEodLine joined the vocabulary when each
+   * person got their own EOD line. saveEodUpdate, setEodSkip and
+   * setEodInternal had passed on the word "tenantOrgId" in their own inline
+   * inserts; the shared helper carries that stamp now AND refuses a system or
+   * unit from another workspace, which the inline inserts never did. The
+   * off-system edit and delete were always behind eodRowFor.
    */
-  const CEILING = 42;
+  const CEILING = 39;
 
   it(`no more than ${CEILING} unreviewed write sites`, () => {
     const sites = unguardedWrites(tables).filter((s) => !(s.fn in REVIEWED));

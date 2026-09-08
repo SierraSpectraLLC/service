@@ -38,12 +38,24 @@ const nextConfig = {
 };
 
 export default function config(phase) {
-  // Sync the database schema during every Vercel production build. Hooked here
+  // Sync the database schema during every Vercel PRODUCTION build. Hooked here
   // (not in a package script) so it runs no matter how the build is invoked -
   // dashboard build-command overrides and the framework preset both end up
   // evaluating next.config. Guarded by an env flag because build workers
   // re-evaluate the config; they inherit the flag and skip.
+  //
+  // Production deployments only. PHASE_PRODUCTION_BUILD is `next build` in
+  // every environment, previews included, and a preview build that reaches
+  // the production database rewrites its schema for code that is not
+  // deployed: a branch that swapped the EOD unique constraints was built as
+  // a preview and every EOD save on the live code was refused from then on.
+  // The preview itself is not gated either - a preview that needs a column
+  // production lacks was never going to work against production data.
   if (phase === PHASE_PRODUCTION_BUILD && process.env.VERCEL && !process.env.__SCHEMA_PUSH_DONE) {
+    if (process.env.VERCEL_ENV !== "production") {
+      console.log(`[schema] ${process.env.VERCEL_ENV || "non-production"} build - schema sync skipped; only a production build touches the database`);
+      return nextConfig;
+    }
     process.env.__SCHEMA_PUSH_DONE = "1";
     // Apply the idempotent, additive schema sync (never destructive, so it
     // can't hit drizzle-kit push's spurious-diff rollback), then independently

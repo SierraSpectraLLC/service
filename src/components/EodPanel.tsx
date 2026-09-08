@@ -31,20 +31,32 @@ export type EodLine = {
   /** offsystem only: who did it, and how long it took. */
   person?: string;
   minutes?: number;
+  /**
+   * Whose line: the saved row (null until first written), its author stamp,
+   * the name it is attributed to, and whether it is the viewer's own - the
+   * one they type into. A system two people worked is two lines here.
+   */
+  eodId: number | null;
+  author: string;
+  by: string;
+  mine: boolean;
 };
 type Draft = { systemUpdate: string; actionItem: string };
 type SaveState = "dirty" | "saving" | "saved";
 
 const SEP = "-".repeat(50);
 const AUTOSAVE_MS = 900;
-const keyOf = (e: EodLine) => `${e.kind}:${e.id}`;
+// One system can carry several people's lines, so the author is part of the key.
+const keyOf = (e: EodLine) => `${e.kind}:${e.id}:${e.author}`;
+/** What a line is about, for numbering: two people's lines on one system share a number. */
+const aboutOf = (e: EodLine) => (e.kind === "offsystem" ? `off:${e.id}` : `${e.kind}:${e.id}`);
 /**
- * How to address this line when writing to it. Off-system work has no record
- * behind it, so it is addressed by its own row id; everything else by what it
- * is about.
+ * How to address this line when writing to it. A saved row - anybody's - by
+ * its own id; a line not yet written by what it is about, which the server
+ * files under the caller.
  */
 const targetOf = (e: EodLine) =>
-  e.kind === "offsystem" ? { instrumentId: null, assetId: null, eodId: e.id }
+  e.eodId !== null ? { instrumentId: null, assetId: null, eodId: e.eodId }
     : e.kind === "system" ? { instrumentId: e.id, assetId: null }
       : { instrumentId: null, assetId: e.id };
 
@@ -179,8 +191,13 @@ export default function EodPanel({
   const included = entries.filter((e) => !e.skipped);
   // Written first - that's what the email will actually carry.
   const filled = included.filter(hasText);
-  const blanks = included.filter((e) => !hasText(e));
+  // Only the viewer's own blanks are theirs to fill; a colleague's empty row
+  // is not a line waiting for anybody here.
+  const blanks = included.filter((e) => !hasText(e) && e.mine);
   const skipped = entries.filter((e) => e.skipped);
+  // Numbered by what a line is about, as the report numbers them.
+  const numbers = new Map<string, number>();
+  for (const e of filled) if (!numbers.has(aboutOf(e))) numbers.set(aboutOf(e), numbers.size + 1);
 
   // Fill only what's empty - a suggestion never overwrites something typed.
   const autofill = (e: EodLine) => {
@@ -197,8 +214,8 @@ export default function EodPanel({
 
   const emailText = [
     `${dateMDY} - Daily Updates`, "", SEP,
-    ...filled.flatMap((e, i) => [
-      `${nounOf(e)} ${i + 1}: ${e.label}${e.kind === "offsystem" && bylineOf(e) ? ` (${bylineOf(e)})` : ""}`, "",
+    ...filled.flatMap((e) => [
+      `${nounOf(e)} ${numbers.get(aboutOf(e))}: ${e.label}${(e.kind === "offsystem" ? bylineOf(e) : e.by) ? ` (${e.kind === "offsystem" ? bylineOf(e) : e.by})` : ""}`, "",
       `${e.kind === "offsystem" ? "What happened" : "System Update"}: ${draftOf(e).systemUpdate}`,
       `Action Item: ${draftOf(e).actionItem}`, "", SEP,
     ]),
@@ -238,10 +255,14 @@ export default function EodPanel({
         {e.kind === "asset" && <span className="pill neutral">unit</span>}
         {e.kind === "offsystem" && <span className="pill info">off-system</span>}
         {e.kind === "offsystem" && bylineOf(e) && <span className="mut t-meta">{bylineOf(e)}</span>}
+        {/* Whose line. Yours says so; a colleague's is read here, not edited. */}
+        {e.kind !== "offsystem" && e.by && (
+          <span className="mut t-meta">{e.mine ? `${e.by} (you)` : e.by}</span>
+        )}
         {e.internal && <span className="pill warn">internal only</span>}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
           <span className="mut t-meta">{saveLabel(status[keyOf(e)])}</span>
-          {canAutofill(e) && (
+          {e.mine && canAutofill(e) && (
             <button className="btn link" onClick={() => autofill(e)} disabled={pending} title="Draft from today's activity and open items">autofill</button>
           )}
           {/* Two different "not in the email": internal keeps the line on our
@@ -280,19 +301,32 @@ export default function EodPanel({
           )}
         </div>
       </div>
-      <Field label={e.kind === "offsystem" ? "What happened" : "System Update"}>
-        <textarea rows={2} value={draftOf(e).systemUpdate}
-          onChange={(ev) => setDraft(e, { systemUpdate: ev.target.value })}
-          onBlur={() => { if (status[keyOf(e)] === "dirty") flush(e); }}
-          placeholder={e.suggestedUpdate || (e.kind === "offsystem" ? "What was asked, and what you told them" : "What happened today")}
-          style={{ resize: "vertical" }} />
-      </Field>
-      <Field label="Action Item">
-        <input value={draftOf(e).actionItem}
-          onChange={(ev) => setDraft(e, { actionItem: ev.target.value })}
-          onBlur={() => { if (status[keyOf(e)] === "dirty") flush(e); }}
-          placeholder={e.suggestedAction || "Next step / what we need"} />
-      </Field>
+      {e.mine ? (
+        <>
+          <Field label={e.kind === "offsystem" ? "What happened" : "System Update"}>
+            <textarea rows={2} value={draftOf(e).systemUpdate}
+              onChange={(ev) => setDraft(e, { systemUpdate: ev.target.value })}
+              onBlur={() => { if (status[keyOf(e)] === "dirty") flush(e); }}
+              placeholder={e.suggestedUpdate || (e.kind === "offsystem" ? "What was asked, and what you told them" : "What happened today")}
+              style={{ resize: "vertical" }} />
+          </Field>
+          <Field label="Action Item">
+            <input value={draftOf(e).actionItem}
+              onChange={(ev) => setDraft(e, { actionItem: ev.target.value })}
+              onBlur={() => { if (status[keyOf(e)] === "dirty") flush(e); }}
+              placeholder={e.suggestedAction || "Next step / what we need"} />
+          </Field>
+        </>
+      ) : (
+        /* Somebody else's line: their words, read as written. Skip and
+           internal above still apply - leaving a line out of the report is a
+           report decision - but the words are theirs to change on their own
+           screen. */
+        <div className="t-body" style={{ whiteSpace: "pre-wrap" }}>
+          {e.systemUpdate && <div>{e.systemUpdate}</div>}
+          {e.actionItem && <div style={{ marginTop: 4 }}><span className="eyebrow" style={{ marginRight: 8 }}>Action</span>{e.actionItem}</div>}
+        </div>
+      )}
     </div>
   );
 
@@ -338,7 +372,7 @@ export default function EodPanel({
         </div>
       )}
 
-      {filled.map((e, i) => editable(e, i + 1))}
+      {filled.map((e) => editable(e, numbers.get(aboutOf(e)) ?? 0))}
 
       {blanks.length > 0 && (
         <>

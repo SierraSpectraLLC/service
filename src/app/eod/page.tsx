@@ -65,7 +65,8 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
     && a.createdAt.toLocaleDateString("en-CA", { timeZone: tz }) === date);
 
   const built = await Promise.all(groups.map(async (g) => {
-    const entries = await collectEodEntries(date, g.orgId, mode, readTenant(user));
+    // Who is reading: their own line leads each system and is the one they type into.
+    const entries = await collectEodEntries(date, g.orgId, mode, readTenant(user), { email: user.email, name: user.name });
     const sysIds = entries.filter((e) => e.kind === "system").map((e) => e.id);
     const [taskRows, partRows, gasRows] = sysIds.length
       ? await Promise.all([

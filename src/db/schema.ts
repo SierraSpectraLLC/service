@@ -1836,10 +1836,16 @@ export const signoffs = pgTable("signoffs", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("signoffs_instrument_idx").on(t.instrumentId), index("signoffs_asset_idx").on(t.assetId)]);
 
-// One row per (system or asset, day): the client-facing end-of-day update.
-// Written where the work happens - on the system's or asset's own page - and
-// assembled by /eod into one email per client, which is why the row can hang
-// off either target. Exactly one of instrument_id / asset_id is set.
+// One row per (system or asset, day, AUTHOR): the client-facing end-of-day
+// update. Written where the work happens - on the system's or asset's own
+// page - and assembled by /eod into one email per client, which is why the row
+// can hang off either target. Exactly one of instrument_id / asset_id is set.
+//
+// Author is part of the key. It used to be one shared line per system per
+// day, and the second engineer on a system overwrote the first - or, more
+// often, did not write at all because the box was already full of somebody
+// else's day. Each person now writes their own line, and every reading of
+// the day (the client's report, the digest, the system's page) says whose.
 export const eodUpdates = pgTable("eod_updates", {
   id: serial("id").primaryKey(),
   tenantOrgId: tenantStamp(),
@@ -1888,11 +1894,23 @@ export const eodUpdates = pgTable("eod_updates", {
    */
   minutes: integer("minutes").notNull().default(0),
 
+  /**
+   * Whose line this is: the writer's email, lowercased, stamped at the first
+   * write and never changed. The key half of "each person writes their own".
+   *
+   * Empty on rows from before authorship existed. Those read as belonging to
+   * whoever `updated_by` names, and the first save by that person claims the
+   * row (sets author) rather than opening a second line beside it - see
+   * actions.upsertEodLine. `updated_by` stays the display name: the row's
+   * author wrote it, so the two agree from the first write on.
+   */
+  author: text("author").notNull().default(""),
+
   updatedBy: text("updated_by").notNull().default(""),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
-  unique("eod_instrument_date").on(t.instrumentId, t.date),
-  unique("eod_asset_date").on(t.assetId, t.date),
+  unique("eod_instrument_date_author").on(t.instrumentId, t.date, t.author),
+  unique("eod_asset_date_author").on(t.assetId, t.date, t.author),
   index("eod_date_idx").on(t.date),
 ]);
 

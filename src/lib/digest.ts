@@ -32,8 +32,9 @@ import { and, asc, eq, gte, inArray, isNull, lt, or } from "drizzle-orm";
 import { forTenant } from "@/lib/tenancy";
 import { db } from "@/db";
 import {
-  appSettings, auditLog, eodUpdates, instrumentGases, instruments, orgs, parts, procedures, taskResults, tasks, workOrders,
+  appSettings, assets, auditLog, eodUpdates, instrumentGases, instruments, orgs, parts, procedures, taskResults, tasks, workOrders,
 } from "@/db/schema";
+import { eodAuthorName } from "@/lib/eodLines";
 import { blockSide } from "@/lib/blocks";
 import { isMadeState, BLOCKED_STAGE, GAS_TONE, STAGE_COLOR, gasAttention, partOpen } from "@/lib/stages";
 import { TONE_HEX } from "@/lib/tones";
@@ -313,7 +314,14 @@ type FailedTest = {
  * the house only, so the internal edition prints everything and the client
  * edition prints exactly what the EOD report would have shown them.
  */
-export type WorkLine = { text: string; internal: boolean };
+/**
+ * One line of the window's narrative. `by` is who wrote it, when the line is
+ * somebody's EOD update: each person writes their own now, and a digest that
+ * ran two people's days together under one system would be the old shared
+ * box all over again. The record's own lines (a task done, an order closed)
+ * carry no byline.
+ */
+export type WorkLine = { text: string; internal: boolean; by?: string };
 export type WorkBlock = { externalId: string; label: string; lines: WorkLine[] };
 type BoardRow = {
   externalId: string; label: string; stages: string[];
@@ -437,6 +445,14 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
   const orgName = (id: number | null) =>
     id === null ? brand.operatorName : (orgRows.find((o) => o.id === id)?.name ?? "another organization");
 
+  // The units written on directly. Their rows came in with the off-system
+  // ones (no instrument to scope them) and were then dropped on the floor,
+  // because nothing below looked for an asset_id - a day spent on a shelf
+  // unit read as no day at all.
+  const assetIds = [...new Set(updateRows.map((u) => u.assetId).filter((x): x is number => x !== null))];
+  const assetRows = assetIds.length
+    ? await db.select().from(assets).where(inArray(assets.id, assetIds)) : [];
+
   // One section per owning organization, house-stewarded work first.
   const owners: (number | null)[] = [];
   for (const r of rows) {
@@ -526,8 +542,9 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
       const ups = updateRows.filter((x) => x.instrumentId === i.id && !x.skipped)
         .sort((a, b) => a.date.localeCompare(b.date));
       for (const u of ups) {
-        if (u.systemUpdate?.trim()) lines.push({ text: `${tagOfDay(u.date)}${u.systemUpdate.trim()}`, internal: u.internal });
-        if (u.actionItem?.trim()) lines.push({ text: `${tagOfDay(u.date)}Next: ${u.actionItem.trim()}`, internal: u.internal });
+        const by = eodAuthorName(u);
+        if (u.systemUpdate?.trim()) lines.push({ text: `${tagOfDay(u.date)}${u.systemUpdate.trim()}`, internal: u.internal, by });
+        if (u.actionItem?.trim()) lines.push({ text: `${tagOfDay(u.date)}Next: ${u.actionItem.trim()}`, internal: u.internal, by });
       }
       for (const t of taskRows.filter((t) => t.instrumentId === i.id && t.state === "Done" && t.completedAt && t.completedAt >= cutoff)) {
         // A completed test carries its verdict: "Completed: Flow Check" says
@@ -547,6 +564,27 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
       if (lines.length) section.work.push({ externalId: i.externalId, label, lines });
     }
 
+    // Units written on directly, under their own heading each, in the order
+    // they were written. A unit that sits in a system is still its own line
+    // here: the row was written on the unit's page, about the unit.
+    for (const a of assetRows) {
+      const ups = updateRows.filter((x) => x.assetId === a.id && !x.skipped && (x.ownerOrgId ?? null) === ownerId)
+        .sort((p, q) => p.date.localeCompare(q.date));
+      const lines: WorkLine[] = [];
+      for (const u of ups) {
+        const by = eodAuthorName(u);
+        if (u.systemUpdate?.trim()) lines.push({ text: `${tagOfDay(u.date)}${u.systemUpdate.trim()}`, internal: u.internal, by });
+        if (u.actionItem?.trim()) lines.push({ text: `${tagOfDay(u.date)}Next: ${u.actionItem.trim()}`, internal: u.internal, by });
+      }
+      if (lines.length) {
+        section.work.push({
+          externalId: a.serial ? `SN ${a.serial}` : a.kind,
+          label: `${a.kind}${a.model ? ` - ${a.model}` : ""}`,
+          lines,
+        });
+      }
+    }
+
     // Off the bench: this owner's jobs with no system behind them, finished in
     // the window. A move that closed on Tuesday is the week's news for the
     // client who asked for it, and nothing else in the digest would carry it.
@@ -562,11 +600,24 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
     }
 
     // Off the bench: this owner's phone calls and walkthroughs in the window.
+    // The line leads with what it WAS and who did it, the way the client's
+    // report says it: "+ Log work" takes a title, a person and a duration and
+    // makes the rest optional, so a call logged as just its title used to
+    // reach the report and never the digest.
     for (const u of updateRows
       .filter((x) => x.instrumentId === null && x.assetId === null && !x.skipped
         && (x.ownerOrgId ?? null) === ownerId)
       .sort((a, b) => a.date.localeCompare(b.date))) {
-      if (u.systemUpdate?.trim()) section.offSystem.push({ text: `${tagOfDay(u.date)}${u.systemUpdate.trim()}`, internal: u.internal });
+      const title = u.title.trim();
+      const who = [eodAuthorName(u), u.minutes ? `${u.minutes} min` : ""].filter(Boolean).join(" · ");
+      const head = `${title}${who ? ` (${who})` : ""}`;
+      const said = u.systemUpdate?.trim();
+      if (title || said) {
+        section.offSystem.push({
+          text: `${tagOfDay(u.date)}${title && said ? `${head}: ${said}` : title ? head : said}`,
+          internal: u.internal,
+        });
+      }
       if (u.actionItem?.trim()) section.offSystem.push({ text: `${tagOfDay(u.date)}Next: ${u.actionItem.trim()}`, internal: u.internal });
     }
 
@@ -704,10 +755,14 @@ function renderWork(section: DigestSection, internal: boolean, window: string): 
     .filter((w) => w.lines.length);
   const off = section.offSystem.filter(visible);
   if (!work.length && !off.length && !(internal && section.activity)) return "";
+  // A byline on each person's own words, muted, after the text: who said it
+  // is the second thing a reader wants, and the first is what was said.
+  const byline = (l: WorkLine) =>
+    l.by ? ` <span style="color:${EMAIL.muted};font-size:12px;">· ${esc(l.by)}</span>` : "";
   const blocks = work.map((w) => `
     <div style="margin:6px 0;">
       <div>${sysId(w.externalId)} <span style="color:${EMAIL.muted};font-size:12px;">${esc(w.label)}</span></div>
-      ${w.lines.map((l) => `<div style="margin:1px 0 1px 10px;white-space:pre-wrap;">${esc(l.text)}</div>`).join("")}
+      ${w.lines.map((l) => `<div style="margin:1px 0 1px 10px;white-space:pre-wrap;">${esc(l.text)}${byline(l)}</div>`).join("")}
     </div>`).join("");
   const offBlock = off.length ? `
     <div style="margin:6px 0;">
