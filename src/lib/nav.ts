@@ -118,6 +118,7 @@ const hasFinanceMenu = (ctx: NavContext) => ctx.seesBooks || ctx.seesPayroll;
 export const LABEL = {
   today: "Today",
   work: "Work orders",
+  systems: "Systems",
   assets: "Assets",
   stock: "Inventory",
   inbox: "Inbox",
@@ -154,6 +155,13 @@ function primaryOf(ctx: NavContext): NavLeaf[] {
     return [
       { href: "/", label: LABEL.today },
       { href: "/work", label: LABEL.work },
+      /* The flat list of every system on record, beside the flat list of
+         every unit. The board (Today) groups the working fleet by stage and
+         had been the only way to a system - through whichever column it sat
+         in - while /assets listed every unit one row each. Both flat lists
+         exist now; this is the systems one. Not on the tab bar, which holds
+         five and is full: it is a header and drawer door. */
+      { href: "/instruments", label: LABEL.systems },
       { href: "/assets", label: LABEL.assets },
       ...(ctx.hasStock ? [{ href: "/stock", label: LABEL.stock }] : []),
       /* Money is staff work and it is a SECTION rather than a primary row -

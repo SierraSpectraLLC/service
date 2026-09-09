@@ -77,6 +77,7 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
         actions={
           <>
             {user.role !== "client_viewer" && <a className="btn link" href="/import">Import CSV</a>}
+            {isStaff && <a className="btn link" href="/instruments">All systems</a>}
             <a className="btn link" href="/api/export/assets">Export assets</a>
             <a className="btn link" href="/api/export/systems">Export systems</a>
           </>
