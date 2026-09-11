@@ -26,8 +26,18 @@ const AUTOSAVE_MS = 2500;
  *    land out of order and persist the older draft over the newer one. A
  *    second save waits for the first and then re-sends whatever is current.
  */
-export default function DailyUpdatePanel({ target, systemUpdate, actionItem, updatedBy, canEdit, others = [] }: {
+export default function DailyUpdatePanel({
+  target, systemUpdate, actionItem, updatedBy, canEdit, others = [],
+  title = "Today's update", hint = "goes on today's client report",
+}: {
   target: WorkTarget; systemUpdate: string; actionItem: string; updatedBy: string; canEdit: boolean;
+  /**
+   * What the card is headed. The system's own is "Today's update"; on a
+   * system page each module gets a card of its own, headed by the module,
+   * since each unit's line is written on the unit and filed under the system.
+   */
+  title?: string;
+  hint?: string;
   /**
    * Colleagues' lines on the same day. Each person writes their own - see
    * db/schema.eodUpdates - so what the editor holds is the viewer's, and
@@ -109,7 +119,7 @@ export default function DailyUpdatePanel({ target, systemUpdate, actionItem, upd
     if (!systemUpdate && !actionItem && !others.length) return null;
     return (
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 6 }}>Today&apos;s update</div>
+        <div className="card-title" style={{ marginBottom: 6 }}>{title}</div>
         {(systemUpdate || actionItem) && line({ by: updatedBy, systemUpdate, actionItem }, -1)}
         {others.map(line)}
       </div>
@@ -119,9 +129,9 @@ export default function DailyUpdatePanel({ target, systemUpdate, actionItem, upd
   return (
     <div className="card">
       <div className="row-2" style={{ alignItems: "baseline", marginBottom: 4 }}>
-        <div className="card-title">Today&apos;s update</div>
+        <div className="card-title">{title}</div>
         <span className="mut t-meta">
-          {state === "saving" ? "Saving..." : state === "saved" ? "Saved ✓" : state === "dirty" ? "Unsaved" : "goes on today's client report"}
+          {state === "saving" ? "Saving..." : state === "saved" ? "Saved ✓" : state === "dirty" ? "Unsaved" : hint}
         </span>
       </div>
       {/* Never disabled - see the autosave rules above. */}

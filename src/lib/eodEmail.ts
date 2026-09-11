@@ -14,7 +14,8 @@ import { getSystemLabels } from "@/lib/systemLabel";
 import { brandForTenant, getBrand } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
 import { EMAIL, emailShell, esc } from "@/lib/emailTheme";
-import { eodAuthorName, groupEodEntries, isOwnEodRow, type EodViewer } from "@/lib/eodLines";
+import { eodAuthorName, groupEodEntries, isOwnEodRow, nestEodGroups, type EodViewer } from "@/lib/eodLines";
+import { membershipResolver } from "@/lib/moduleMembershipData";
 
 const SEP = "-".repeat(50);
 
@@ -53,6 +54,15 @@ export type EodEntry = {
   author: string;
   by: string;
   mine: boolean;
+  /**
+   * For a unit: the system it was in on this date, when that system is on
+   * this report. Its lines then sit under the system's entry rather than as
+   * an entry of their own - a detector's refurbishment reads under the mass
+   * spec it was being refurbished in. Today reads current membership; a past
+   * day reads the move log (lib/moduleMembership), so a unit since moved on
+   * still reports under the system it was in THEN.
+   */
+  parent?: { id: number; externalId: string; label: string } | null;
 };
 
 /**
@@ -208,35 +218,85 @@ export async function collectEodEntries(
     return out;
   };
 
-  const entries: EodEntry[] = mine.flatMap((i) => {
+  const systemLabel = (i: { externalId: string; id: number }) => {
     const named = labels.get(i.id) ?? "";
-    return linesFor(saved.filter((s) => s.instrumentId === i.id), {
-      kind: "system", id: i.id, externalId: i.externalId,
-      label: named ? `${i.externalId} - ${named}` : i.externalId,
-    });
-  });
+    return named ? `${i.externalId} - ${named}` : i.externalId;
+  };
+  const systemEntries = new Map(mine.map((i) => [i.id, linesFor(saved.filter((s) => s.instrumentId === i.id), {
+    kind: "system", id: i.id, externalId: i.externalId, label: systemLabel(i),
+  })]));
 
-  // Asset-level updates: a unit this org owns, written on its own page. Live,
-  // only shelf units get their own line (one on a system is covered by that
-  // system's); in history every recorded line stands, wherever the unit sits
-  // now.
-  const assetUpdates = saved.filter((s) => s.assetId !== null
-    && (mode === "history" ? (s.ownerOrgId ?? null) === orgId && recordsSomething(s) : true));
-  if (assetUpdates.length) {
-    const ids = assetUpdates.map((s) => s.assetId!) as number[];
-    const owned = (await db.select().from(assets).where(inArray(assets.id, ids)))
-      /* History trusts the stamp already applied above; today reads live
-         ownership. Backfill takes either, for the same reason systems do. */
-      .filter((a) => (mode !== "live" || ((a.ownerOrgId ?? null) === orgId && a.instrumentId === null)));
-    for (const a of owned) {
-      // Written lines only: a unit is written on its own page, so no blank
-      // is offered here - the viewer's own line, if any, still leads.
-      entries.push(...linesFor(assetUpdates.filter((s) => s.assetId === a.id), {
-        kind: "asset", id: a.id,
-        externalId: a.serial ? `SN ${a.serial}` : a.kind,
-        label: `${a.kind}${a.model ? ` - ${a.model}` : ""}${a.serial ? ` (SN ${a.serial})` : ""}`,
-      }).filter((e) => e.eodId !== null));
+  /*
+   * UNITS. A unit's lines are written on the unit and stay with it, and the
+   * report files them under the system the unit was in on the day: a
+   * detector's refurbishment reads under the mass spec it was in, and a
+   * detector since moved on still reads under the system it was in THEN.
+   * Today that is current membership; a past day is read back from the move
+   * log. A unit on the shelf, or in a system that is not this client's, keeps
+   * an entry of its own, as it always did.
+   *
+   * WHICH ROWS ARE THIS CLIENT'S. History trusts the stamp on the row. Today
+   * reads the unit's live owner. Backfill takes either - a row stamped to
+   * this client, or any row on a unit they own now - which is the union the
+   * systems use, and which the old asset filter did not implement: a past
+   * day's page took every unit row in the workspace and put it on every
+   * client's panel.
+   *
+   * WHAT IS OFFERED TO WRITE. On today's page each unit in a client's system
+   * gets a blank line of the viewer's own, so a module can be written up from
+   * the EOD page without opening the unit. A shelf unit is still written on
+   * its own page.
+   */
+  const stamped = (s: typeof eodUpdates.$inferSelect) => (s.ownerOrgId ?? null) === orgId && recordsSomething(s);
+  const unitRows = saved.filter((s) => s.assetId !== null && (mode === "history" ? stamped(s) : true));
+  const systemIds = [...systemEntries.keys()];
+  const [written, installed] = await Promise.all([
+    unitRows.length
+      ? db.select().from(assets).where(inArray(assets.id, [...new Set(unitRows.map((s) => s.assetId as number))]))
+      : Promise.resolve([] as (typeof assets.$inferSelect)[]),
+    mode === "live" && viewer && systemIds.length
+      ? db.select().from(assets).where(and(inArray(assets.instrumentId, systemIds), ne(assets.status, "Decommissioned")))
+      : Promise.resolve([] as (typeof assets.$inferSelect)[]),
+  ]);
+  const units = new Map<number, typeof assets.$inferSelect>();
+  for (const a of [...written, ...installed]) units.set(a.id, a);
+  const ownedLive = (a: typeof assets.$inferSelect) => (a.ownerOrgId ?? null) === orgId;
+  const rowsOf = (a: typeof assets.$inferSelect) => unitRows.filter((s) => s.assetId === a.id
+    && (mode === "live" || stamped(s) || ownedLive(a)));
+  // Where each unit was on the date: now, for today; from the log otherwise.
+  const membership = mode === "live" ? null : await membershipResolver([...units.keys()]);
+  const homeOf = (a: typeof assets.$inferSelect): number | null =>
+    membership ? membership.positionOn(a.id, date) : a.instrumentId;
+  const unitEntry = (a: typeof assets.$inferSelect, home: { id: number; externalId: string } | null) => ({
+    kind: "asset" as const, id: a.id,
+    externalId: a.serial ? `SN ${a.serial}` : a.kind,
+    label: `${a.kind}${a.model ? ` - ${a.model}` : ""}${a.serial ? ` (SN ${a.serial})` : ""}`,
+    parent: home ? { id: home.id, externalId: home.externalId, label: systemLabel(home) } : null,
+  });
+  const unitOrder = (a: typeof assets.$inferSelect, b: typeof assets.$inferSelect) =>
+    (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.id - b.id;
+
+  const entries: EodEntry[] = [];
+  const placed = new Set<number>();
+  for (const i of mine) {
+    entries.push(...systemEntries.get(i.id)!);
+    const modules = [...units.values()].filter((a) => homeOf(a) === i.id).sort(unitOrder);
+    for (const a of modules) {
+      const rows = rowsOf(a);
+      // Nothing of this client's on it and not theirs to write: not a line.
+      if (!rows.length && !(mode === "live" && ownedLive(a))) continue;
+      const lines = linesFor(rows, unitEntry(a, i));
+      entries.push(...(mode === "live" && viewer ? lines : lines.filter((e) => e.eodId !== null)));
+      placed.add(a.id);
     }
+  }
+  // Units with no system on this report: the shelf, or somebody else's
+  // system. Written lines only - a shelf unit is written on its own page.
+  for (const a of [...units.values()].filter((x) => !placed.has(x.id)).sort(unitOrder)) {
+    const rows = rowsOf(a);
+    if (!rows.length) continue;
+    if (mode === "live" && !ownedLive(a)) continue;
+    entries.push(...linesFor(rows, unitEntry(a, null)).filter((e) => e.eodId !== null));
   }
 
   // Work with nothing to hang it on, newest last so the day reads in order.
@@ -348,9 +408,10 @@ export async function composeEodEmail(
    * their name on it. One person's line keeps the shape the report has always
    * had, so a day nobody shared reads exactly as before.
    */
-  const blocks = groupEodEntries(included).map((group, idx) => {
+  const blocks = nestEodGroups(groupEodEntries(included)).map((nested, idx) => {
+    const group = nested.head;
     const e = group[0];
-    for (const g of group) if (g.written) filled++;
+    for (const g of [...group, ...nested.modules.flat()]) if (g.written) filled++;
     const label = esc(e.label);
     // Off-system work has no page to link to - that is what makes it
     // off-system - so its heading is plain text and carries who did it
@@ -365,9 +426,18 @@ export async function composeEodEmail(
     const heading = url
       ? `<a href="${href}" style="color:${EMAIL.link};">${noun} ${idx + 1}: ${label}</a>`
       : `${noun} ${idx + 1}: ${label}`;
-    const body = (g: EodEntry) => `System Update: ${esc(g.systemUpdate)}\nAction Item: ${esc(g.actionItem)}`;
-    if (group.length === 1) return `${heading}\n\n${body(e)}\n\n${SEP}`;
-    return `${heading}\n\n${group.map((g) => `${esc(g.by || "Unsigned")}:\n${body(g)}`).join("\n\n")}\n\n${SEP}`;
+    const body = (g: EodEntry, word: string) => `${word}: ${esc(g.systemUpdate)}\nAction Item: ${esc(g.actionItem)}`;
+    const bodyOf = (grp: EodEntry[], word: string) => grp.length === 1
+      ? body(grp[0], word)
+      : grp.map((g) => `${esc(g.by || "Unsigned")}:\n${body(g, word)}`).join("\n\n");
+    /*
+     * A system's modules, under it: each unit's label, then its update. The
+     * word is "Update" rather than "System Update" because it is not the
+     * system's. A system nobody wrote on whose detector was written up still
+     * reads as the system, with the detector's lines under it.
+     */
+    const modules = nested.modules.map((m) => `${esc(m[0].label)}:\n${bodyOf(m, "Update")}`);
+    return `${heading}\n\n${bodyOf(group, "System Update")}${modules.length ? `\n\n${modules.join("\n\n")}` : ""}\n\n${SEP}`;
   });
 
   const body = [`${dateMDY} - Daily Updates`, "", SEP, ...blocks].join("\n");

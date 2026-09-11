@@ -22,6 +22,21 @@ export default function DailyUpdateHistory({ days, total, showingAll, allHref, t
   today: string;
 }) {
   if (!total) return null;
+  const line = (l: HistoryDay["lines"][number], i: number) => (
+    <div key={i} className="t-body" style={{ marginTop: 4 }}>
+      {l.systemUpdate && <div style={{ whiteSpace: "pre-wrap" }}>{l.systemUpdate}</div>}
+      {l.actionItem && (
+        <div style={{ marginTop: 4 }}>
+          <span className="eyebrow" style={{ marginRight: 8 }}>Action</span>{l.actionItem}
+        </div>
+      )}
+      <div className="mut t-meta" style={{ marginTop: 2, display: "flex", gap: 8, alignItems: "center" }}>
+        {l.by && <span>{l.by}</span>}
+        {l.internal && <span className="pill warn">internal only</span>}
+        {l.skipped && <span className="pill neutral">left off the report</span>}
+      </div>
+    </div>
+  );
   return (
     <div className="card">
       <div className="row-2" style={{ alignItems: "baseline", marginBottom: 4 }}>
@@ -31,19 +46,18 @@ export default function DailyUpdateHistory({ days, total, showingAll, allHref, t
       {days.map((day) => (
         <div key={day.date} style={{ paddingTop: 8, marginTop: 8, borderTop: "1px solid var(--line)" }}>
           <div className="t-small" style={{ fontWeight: 700 }}>{historyDayLabel(day.date, today)}</div>
-          {day.lines.map((l, i) => (
-            <div key={i} className="t-body" style={{ marginTop: 4 }}>
-              {l.systemUpdate && <div style={{ whiteSpace: "pre-wrap" }}>{l.systemUpdate}</div>}
-              {l.actionItem && (
-                <div style={{ marginTop: 4 }}>
-                  <span className="eyebrow" style={{ marginRight: 8 }}>Action</span>{l.actionItem}
-                </div>
-              )}
-              <div className="mut t-meta" style={{ marginTop: 2, display: "flex", gap: 8, alignItems: "center" }}>
-                {l.by && <span>{l.by}</span>}
-                {l.internal && <span className="pill warn">internal only</span>}
-                {l.skipped && <span className="pill neutral">left off the report</span>}
+          {day.lines.map(line)}
+          {/* The units that were in the system that day, each under its own
+              name. One since moved on says so: its lines are still this
+              system's for the days it was here, and the reader should know
+              they are looking at a detector that is now somewhere else. */}
+          {day.modules.map((m) => (
+            <div key={m.assetId} style={{ marginTop: 8, paddingLeft: 12, borderLeft: "2px solid var(--line)" }}>
+              <div className="t-small" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <Link href={`/assets/${m.assetId}`} className="mono" style={{ fontWeight: 700, textDecoration: "none" }}>{m.label}</Link>
+                {m.leftOn && <span className="pill neutral">was in this system until {historyDayLabel(m.leftOn, today)}</span>}
               </div>
+              {m.lines.map(line)}
             </div>
           ))}
         </div>

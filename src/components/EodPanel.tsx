@@ -40,6 +40,8 @@ export type EodLine = {
   author: string;
   by: string;
   mine: boolean;
+  /** For a unit: the system it sits in on this day, when that system is on the report. See EodEntry. */
+  parent?: { id: number; externalId: string; label: string } | null;
 };
 type Draft = { systemUpdate: string; actionItem: string };
 type SaveState = "dirty" | "saving" | "saved";
@@ -48,8 +50,20 @@ const SEP = "-".repeat(50);
 const AUTOSAVE_MS = 900;
 // One system can carry several people's lines, so the author is part of the key.
 const keyOf = (e: EodLine) => `${e.kind}:${e.id}:${e.author}`;
-/** What a line is about, for numbering: two people's lines on one system share a number. */
-const aboutOf = (e: EodLine) => (e.kind === "offsystem" ? `off:${e.id}` : `${e.kind}:${e.id}`);
+/**
+ * What a line is about, for numbering: two people's lines on one system share
+ * a number, and so do the lines on the units inside it - a system and its
+ * modules are one numbered thing on the report.
+ */
+const aboutOf = (e: EodLine) =>
+  e.kind === "offsystem" ? `off:${e.id}`
+    : e.kind === "asset" && e.parent ? `system:${e.parent.id}`
+      : `${e.kind}:${e.id}`;
+/** A unit's line filed under its system. */
+const isModule = (e: EodLine) => e.kind === "asset" && !!e.parent;
+/** The word before the text box: a phone call, a module, or the system itself. */
+const updateWord = (e: EodLine) =>
+  e.kind === "offsystem" ? "What happened" : isModule(e) ? "Update" : "System Update";
 /**
  * How to address this line when writing to it. A saved row - anybody's - by
  * its own id; a line not yet written by what it is about, which the server
@@ -214,11 +228,17 @@ export default function EodPanel({
 
   const emailText = [
     `${dateMDY} - Daily Updates`, "", SEP,
-    ...filled.flatMap((e) => [
-      `${nounOf(e)} ${numbers.get(aboutOf(e))}: ${e.label}${(e.kind === "offsystem" ? bylineOf(e) : e.by) ? ` (${e.kind === "offsystem" ? bylineOf(e) : e.by})` : ""}`, "",
-      `${e.kind === "offsystem" ? "What happened" : "System Update"}: ${draftOf(e).systemUpdate}`,
-      `Action Item: ${draftOf(e).actionItem}`, "", SEP,
-    ]),
+    ...filled.flatMap((e) => {
+      const who = e.kind === "offsystem" ? bylineOf(e) : e.by;
+      const head = isModule(e)
+        ? `System ${numbers.get(aboutOf(e))} › ${e.label}`
+        : `${nounOf(e)} ${numbers.get(aboutOf(e))}: ${e.label}`;
+      return [
+        `${head}${who ? ` (${who})` : ""}`, "",
+        `${updateWord(e)}: ${draftOf(e).systemUpdate}`,
+        `Action Item: ${draftOf(e).actionItem}`, "", SEP,
+      ];
+    }),
   ].join("\n");
 
   const copy = async () => {
@@ -250,9 +270,17 @@ export default function EodPanel({
     <div key={keyOf(e)} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 8, background: "#FAFBFD" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <span className="t-body" style={{ fontWeight: 700 }}>
-          {num > 0 ? `${nounOf(e)} ${num}: ` : ""}<span className="mono">{e.label}</span>
+          {/* A module reads under its system's number: "System 2 › SQ Detector". */}
+          {isModule(e)
+            ? (num > 0 ? `System ${num} › ` : `${e.parent!.externalId} › `)
+            : (num > 0 ? `${nounOf(e)} ${num}: ` : "")}
+          <span className="mono">{e.label}</span>
         </span>
-        {e.kind === "asset" && <span className="pill neutral">unit</span>}
+        {e.kind === "asset" && (
+          <span className="pill neutral" title={e.parent ? `In ${e.parent.externalId}` : undefined}>
+            {e.parent ? "module" : "unit"}
+          </span>
+        )}
         {e.kind === "offsystem" && <span className="pill info">off-system</span>}
         {e.kind === "offsystem" && bylineOf(e) && <span className="mut t-meta">{bylineOf(e)}</span>}
         {/* Whose line. Yours says so; a colleague's is read here, not edited. */}
@@ -303,7 +331,7 @@ export default function EodPanel({
       </div>
       {e.mine ? (
         <>
-          <Field label={e.kind === "offsystem" ? "What happened" : "System Update"}>
+          <Field label={updateWord(e)}>
             <textarea rows={2} value={draftOf(e).systemUpdate}
               onChange={(ev) => setDraft(e, { systemUpdate: ev.target.value })}
               onBlur={() => { if (status[keyOf(e)] === "dirty") flush(e); }}

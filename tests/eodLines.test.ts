@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { eodAuthorName, groupEodEntries, isOwnEodRow } from "@/lib/eodLines";
+import { eodAuthorName, groupEodEntries, isOwnEodRow, nestEodGroups } from "@/lib/eodLines";
 
 /**
  * Each person writes their own EOD line. The rules that decide whose line is
@@ -68,5 +68,32 @@ describe("groupEodEntries", () => {
       { kind: "offsystem", id: 7 }, { kind: "offsystem", id: 8 },
     ]);
     expect(groups).toHaveLength(2);
+  });
+});
+
+describe("nestEodGroups", () => {
+  const sys = (id: number) => ({ kind: "system", id, parent: null });
+  const unit = (id: number, parent: number | null) => ({ kind: "asset", id, parent: parent === null ? null : { id: parent } });
+  const off = (id: number) => ({ kind: "offsystem", id, parent: null });
+
+  it("puts a unit's group under its system's, in the systems' order", () => {
+    const nested = nestEodGroups(groupEodEntries([sys(1), sys(2), unit(5, 2), unit(6, 1), unit(7, 2)]));
+    expect(nested.map((n) => [n.head[0].kind + n.head[0].id, n.modules.map((m) => m[0].id)]))
+      .toEqual([["system1", [6]], ["system2", [5, 7]]]);
+  });
+
+  it("leaves a shelf unit, a stranger's unit and off-system work as groups of their own", () => {
+    const nested = nestEodGroups(groupEodEntries([sys(1), unit(5, null), unit(6, 99), off(3)]));
+    expect(nested.map((n) => n.head[0].kind + n.head[0].id)).toEqual(["system1", "asset5", "asset6", "offsystem3"]);
+    expect(nested.every((n) => n.modules.length === 0)).toBe(true);
+  });
+
+  it("keeps two people's lines together, on the system and on the module", () => {
+    const nested = nestEodGroups(groupEodEntries([
+      { ...sys(1), by: "Joe" }, { ...sys(1), by: "Bill" }, { ...unit(5, 1), by: "Joe" }, { ...unit(5, 1), by: "Bill" },
+    ]));
+    expect(nested).toHaveLength(1);
+    expect(nested[0].head).toHaveLength(2);
+    expect(nested[0].modules[0]).toHaveLength(2);
   });
 });

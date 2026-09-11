@@ -35,6 +35,7 @@ import {
   appSettings, assets, auditLog, eodUpdates, instrumentGases, instruments, orgs, parts, procedures, taskResults, tasks, workOrders,
 } from "@/db/schema";
 import { eodAuthorName } from "@/lib/eodLines";
+import { membershipResolver } from "@/lib/moduleMembershipData";
 import { blockSide } from "@/lib/blocks";
 import { isMadeState, BLOCKED_STAGE, GAS_TONE, STAGE_COLOR, gasAttention, partOpen } from "@/lib/stages";
 import { TONE_HEX } from "@/lib/tones";
@@ -321,7 +322,15 @@ type FailedTest = {
  * box all over again. The record's own lines (a task done, an order closed)
  * carry no byline.
  */
-export type WorkLine = { text: string; internal: boolean; by?: string };
+export type WorkLine = {
+  text: string; internal: boolean; by?: string;
+  /**
+   * The unit this line is about, when it is a module's line filed under its
+   * system: "SQ Detector · source cleaned". A unit's update is written on
+   * the unit and read under the system it was in that day.
+   */
+  on?: string;
+};
 export type WorkBlock = { externalId: string; label: string; lines: WorkLine[] };
 type BoardRow = {
   externalId: string; label: string; stages: string[];
@@ -452,6 +461,13 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
   const assetIds = [...new Set(updateRows.map((u) => u.assetId).filter((x): x is number => x !== null))];
   const assetRows = assetIds.length
     ? await db.select().from(assets).where(inArray(assets.id, assetIds)) : [];
+  // Which system each unit was in on the day of each line, from the move
+  // log - so a unit's line files under the system it was in THEN, and a unit
+  // moved on since does not drag last week's line to its new home.
+  const membership = assetIds.length ? await membershipResolver(assetIds) : null;
+  const unitName = (a: { kind: string; model: string }) => `${a.kind}${a.model ? ` - ${a.model}` : ""}`;
+  /** Unit rows already filed under a system, so the shelf loop leaves them. */
+  const nested = new Set<number>();
 
   // One section per owning organization, house-stewarded work first.
   const owners: (number | null)[] = [];
@@ -546,6 +562,21 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
         if (u.systemUpdate?.trim()) lines.push({ text: `${tagOfDay(u.date)}${u.systemUpdate.trim()}`, internal: u.internal, by });
         if (u.actionItem?.trim()) lines.push({ text: `${tagOfDay(u.date)}Next: ${u.actionItem.trim()}`, internal: u.internal, by });
       }
+      // Its units' lines, for the days each unit was in it. Membership on the
+      // day decides, not the row's owner stamp: the line is about the unit,
+      // and the unit was in this system.
+      for (const a of assetRows) {
+        const theirs = updateRows
+          .filter((x) => x.assetId === a.id && !x.skipped && membership!.wasInOn(a.id, i.id, x.date))
+          .sort((p, q) => p.date.localeCompare(q.date));
+        for (const u of theirs) {
+          nested.add(u.id);
+          const by = eodAuthorName(u);
+          const on = unitName(a);
+          if (u.systemUpdate?.trim()) lines.push({ text: `${tagOfDay(u.date)}${u.systemUpdate.trim()}`, internal: u.internal, by, on });
+          if (u.actionItem?.trim()) lines.push({ text: `${tagOfDay(u.date)}Next: ${u.actionItem.trim()}`, internal: u.internal, by, on });
+        }
+      }
       for (const t of taskRows.filter((t) => t.instrumentId === i.id && t.state === "Done" && t.completedAt && t.completedAt >= cutoff)) {
         // A completed test carries its verdict: "Completed: Flow Check" says
         // a box was ticked; the number and the word Pass say what happened.
@@ -564,11 +595,11 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
       if (lines.length) section.work.push({ externalId: i.externalId, label, lines });
     }
 
-    // Units written on directly, under their own heading each, in the order
-    // they were written. A unit that sits in a system is still its own line
-    // here: the row was written on the unit's page, about the unit.
+    // Units with no system on the day - the shelf - under their own heading
+    // each. A unit that was in a system that day was filed under it above.
     for (const a of assetRows) {
-      const ups = updateRows.filter((x) => x.assetId === a.id && !x.skipped && (x.ownerOrgId ?? null) === ownerId)
+      const ups = updateRows.filter((x) => x.assetId === a.id && !x.skipped && !nested.has(x.id)
+        && (x.ownerOrgId ?? null) === ownerId)
         .sort((p, q) => p.date.localeCompare(q.date));
       const lines: WorkLine[] = [];
       for (const u of ups) {
@@ -577,11 +608,7 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
         if (u.actionItem?.trim()) lines.push({ text: `${tagOfDay(u.date)}Next: ${u.actionItem.trim()}`, internal: u.internal, by });
       }
       if (lines.length) {
-        section.work.push({
-          externalId: a.serial ? `SN ${a.serial}` : a.kind,
-          label: `${a.kind}${a.model ? ` - ${a.model}` : ""}`,
-          lines,
-        });
+        section.work.push({ externalId: a.serial ? `SN ${a.serial}` : a.kind, label: unitName(a), lines });
       }
     }
 
@@ -759,10 +786,14 @@ function renderWork(section: DigestSection, internal: boolean, window: string): 
   // is the second thing a reader wants, and the first is what was said.
   const byline = (l: WorkLine) =>
     l.by ? ` <span style="color:${EMAIL.muted};font-size:12px;">· ${esc(l.by)}</span>` : "";
+  // A module's line names the module first, muted, so the system's own lines
+  // and its units' read apart under one heading.
+  const onUnit = (l: WorkLine) =>
+    l.on ? `<span style="color:${EMAIL.muted};font-size:12px;">${esc(l.on)} · </span>` : "";
   const blocks = work.map((w) => `
     <div style="margin:6px 0;">
       <div>${sysId(w.externalId)} <span style="color:${EMAIL.muted};font-size:12px;">${esc(w.label)}</span></div>
-      ${w.lines.map((l) => `<div style="margin:1px 0 1px 10px;white-space:pre-wrap;">${esc(l.text)}${byline(l)}</div>`).join("")}
+      ${w.lines.map((l) => `<div style="margin:1px 0 1px 10px;white-space:pre-wrap;">${onUnit(l)}${esc(l.text)}${byline(l)}</div>`).join("")}
     </div>`).join("");
   const offBlock = off.length ? `
     <div style="margin:6px 0;">
