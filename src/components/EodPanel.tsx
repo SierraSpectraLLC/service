@@ -10,6 +10,7 @@ import { toast } from "@/components/ui/Toast";
 import EmailPreview from "@/components/ui/EmailPreview";
 import Dialog from "@/components/ui/Dialog";
 import { Field, Panel } from "@/components/ui";
+import { groupEodEntries, nestEodGroups } from "@/lib/eodLines";
 
 /**
  * One line on a client's report: a system, a standalone asset, or work that
@@ -40,6 +41,8 @@ export type EodLine = {
   author: string;
   by: string;
   mine: boolean;
+  /** For a unit: the system it sits in on this day, when that system is on the report. See EodEntry. */
+  parent?: { id: number; externalId: string; label: string } | null;
 };
 type Draft = { systemUpdate: string; actionItem: string };
 type SaveState = "dirty" | "saving" | "saved";
@@ -48,8 +51,13 @@ const SEP = "-".repeat(50);
 const AUTOSAVE_MS = 900;
 // One system can carry several people's lines, so the author is part of the key.
 const keyOf = (e: EodLine) => `${e.kind}:${e.id}:${e.author}`;
-/** What a line is about, for numbering: two people's lines on one system share a number. */
+/** What a line is about: two people's lines on one system are one thing. */
 const aboutOf = (e: EodLine) => (e.kind === "offsystem" ? `off:${e.id}` : `${e.kind}:${e.id}`);
+/** A unit's line filed under its system. */
+const isModule = (e: EodLine) => e.kind === "asset" && !!e.parent;
+/** The word before the text box: a phone call, a module, or the system itself. */
+const updateWord = (e: EodLine) =>
+  e.kind === "offsystem" ? "What happened" : isModule(e) ? "Update" : "System Update";
 /**
  * How to address this line when writing to it. A saved row - anybody's - by
  * its own id; a line not yet written by what it is about, which the server
@@ -195,9 +203,24 @@ export default function EodPanel({
   // is not a line waiting for anybody here.
   const blanks = included.filter((e) => !hasText(e) && e.mine);
   const skipped = entries.filter((e) => e.skipped);
-  // Numbered by what a line is about, as the report numbers them.
+  /*
+   * Numbered exactly as the report numbers them: the same nesting the email
+   * is composed from (lib/eodLines), over the lines that are not skipped. A
+   * system and its modules are one number; a module whose system is off the
+   * report stands as a unit with a number of its own. A group is numbered
+   * when anything in it has text, so a system nobody wrote on whose detector
+   * was written up still counts, and its heading still shows.
+   */
+  const nested = nestEodGroups(groupEodEntries(included))
+    .filter((n) => n.head.some(hasText) || n.modules.some((m) => m.some(hasText)));
   const numbers = new Map<string, number>();
-  for (const e of filled) if (!numbers.has(aboutOf(e))) numbers.set(aboutOf(e), numbers.size + 1);
+  const underSystem = new Set<string>();
+  nested.forEach((n, i) => {
+    numbers.set(aboutOf(n.head[0]), i + 1);
+    for (const m of n.modules) { numbers.set(aboutOf(m[0]), i + 1); underSystem.add(aboutOf(m[0])); }
+  });
+  /** A module reads under its system's number only while the system is on the report. */
+  const nestedModule = (e: EodLine) => isModule(e) && underSystem.has(aboutOf(e));
 
   // Fill only what's empty - a suggestion never overwrites something typed.
   const autofill = (e: EodLine) => {
@@ -212,13 +235,23 @@ export default function EodPanel({
     return (!d.systemUpdate && !!e.suggestedUpdate) || (!d.actionItem && !!e.suggestedAction);
   };
 
+  // The Copy text, composed the way the email is (lib/eodEmail.composeEodEmail):
+  // one heading per numbered thing, each person's line under it, the
+  // system's modules under the system. What is copied is what would be sent.
+  const bodyOf = (grp: EodLine[], word: string) => grp.map((g) => {
+    const who = g.kind === "offsystem" ? bylineOf(g) : g.by;
+    const named = grp.length > 1 && who ? `${who}:\n` : "";
+    return `${named}${word}: ${draftOf(g).systemUpdate}\nAction Item: ${draftOf(g).actionItem}`;
+  }).join("\n\n");
   const emailText = [
     `${dateMDY} - Daily Updates`, "", SEP,
-    ...filled.flatMap((e) => [
-      `${nounOf(e)} ${numbers.get(aboutOf(e))}: ${e.label}${(e.kind === "offsystem" ? bylineOf(e) : e.by) ? ` (${e.kind === "offsystem" ? bylineOf(e) : e.by})` : ""}`, "",
-      `${e.kind === "offsystem" ? "What happened" : "System Update"}: ${draftOf(e).systemUpdate}`,
-      `Action Item: ${draftOf(e).actionItem}`, "", SEP,
-    ]),
+    ...nested.flatMap((n, i) => {
+      const e = n.head[0];
+      const who = n.head.length === 1 ? (e.kind === "offsystem" ? bylineOf(e) : e.by) : "";
+      const head = `${nounOf(e)} ${i + 1}: ${e.label}${who ? ` (${who})` : ""}`;
+      const modules = n.modules.map((m) => `${m[0].label}:\n${bodyOf(m, "Update")}`);
+      return [head, "", bodyOf(n.head, updateWord(e)), ...(modules.length ? ["", modules.join("\n\n")] : []), "", SEP];
+    }),
   ].join("\n");
 
   const copy = async () => {
@@ -250,9 +283,20 @@ export default function EodPanel({
     <div key={keyOf(e)} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 8, background: "#FAFBFD" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <span className="t-body" style={{ fontWeight: 700 }}>
-          {num > 0 ? `${nounOf(e)} ${num}: ` : ""}<span className="mono">{e.label}</span>
+          {/* A module reads under its system's number: "System 2 › SQ Detector".
+              With its system off the report it stands as a unit, as the email
+              prints it; unnumbered (a blank) it names its system instead. */}
+          {nestedModule(e)
+            ? `System ${num} › `
+            : num > 0 ? `${nounOf(e)} ${num}: `
+              : isModule(e) ? `${e.parent!.externalId} › ` : ""}
+          <span className="mono">{e.label}</span>
         </span>
-        {e.kind === "asset" && <span className="pill neutral">unit</span>}
+        {e.kind === "asset" && (
+          <span className="pill neutral" title={e.parent ? `In ${e.parent.externalId}` : undefined}>
+            {e.parent ? "module" : "unit"}
+          </span>
+        )}
         {e.kind === "offsystem" && <span className="pill info">off-system</span>}
         {e.kind === "offsystem" && bylineOf(e) && <span className="mut t-meta">{bylineOf(e)}</span>}
         {/* Whose line. Yours says so; a colleague's is read here, not edited. */}
@@ -303,7 +347,7 @@ export default function EodPanel({
       </div>
       {e.mine ? (
         <>
-          <Field label={e.kind === "offsystem" ? "What happened" : "System Update"}>
+          <Field label={updateWord(e)}>
             <textarea rows={2} value={draftOf(e).systemUpdate}
               onChange={(ev) => setDraft(e, { systemUpdate: ev.target.value })}
               onBlur={() => { if (status[keyOf(e)] === "dirty") flush(e); }}

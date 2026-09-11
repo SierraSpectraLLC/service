@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderDigestBody, type DigestSection } from "@/lib/digest";
+import { partnerView } from "@/lib/digestPartner";
+import { TONE_HEX } from "@/lib/tones";
 
 /**
  * Each person writes their own EOD line, and the digest says whose each is.
@@ -40,5 +42,35 @@ describe("the digest says whose line is whose", () => {
   it("keeps the bylines on the client's copy too - they are the names on their report", () => {
     const html = renderDigestBody([section], false, "Sierra Spectra");
     expect(html).toContain("· Bill Harner");
+  });
+});
+
+describe("a module's line under its system", () => {
+  const withModule: DigestSection = {
+    ...section,
+    board: [{ externalId: "O-004", label: "Waters Quattro micro", stages: ["Refurbishment"], gases: [], openParts: 0, lead: "joe", notes: "" }],
+    work: [{
+      externalId: "O-004", label: "Waters Quattro micro",
+      lines: [
+        { text: "Caffeine checkout passed", internal: false, by: "Joe Harris" },
+        { text: "Source cleaned, cone replaced", internal: false, by: "Bill Harner", on: "Mass Spec - SQ Detector" },
+      ],
+    }],
+    offSystem: [],
+  };
+
+  it("names the module before the words, and keeps the byline after them", () => {
+    const html = renderDigestBody([withModule], true, "Sierra Spectra");
+    expect(html).toMatch(/Mass Spec - SQ Detector · <\/span>Source cleaned, cone replaced\s*<span[^>]*>· Bill Harner<\/span>/);
+    expect(html).not.toMatch(/Caffeine checkout passed\s*<span[^>]*>Mass Spec/);
+  });
+
+  it("reaches the client under the system, with the module's name in the note", () => {
+    const v = partnerView({
+      section: withModule, operatorName: "Sierra Spectra", dateLabel: "Mon Sep 8",
+      portalUrl: "https://service.example.com", blockedStage: "Waiting / blocked", gapDays: 1,
+      stageHex: () => TONE_HEX.neutral, gasBlocking: () => false,
+    });
+    expect(v.inWork[0].notes).toEqual(["Caffeine checkout passed", "Mass Spec - SQ Detector: Source cleaned, cone replaced"]);
   });
 });

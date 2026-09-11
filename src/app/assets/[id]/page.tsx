@@ -203,8 +203,9 @@ export default async function AssetPage({ params, searchParams }: {
   const todayRows = updateRows.filter((r) => r.date === shopToday());
   const historyDays = groupEodHistory(updateRows, { today: shopToday(), staff: isStaff });
   const todayUpdate = todayRows.find((r) => isOwnEodRow(r, user));
+  // Staff read everything; a client owner reads what their report carries.
   const todayOthers = todayRows
-    .filter((r) => r !== todayUpdate && (r.systemUpdate || r.actionItem))
+    .filter((r) => r !== todayUpdate && (r.systemUpdate || r.actionItem) && (isStaff || (!r.internal && !r.skipped)))
     .map((r) => ({ by: eodAuthorName(r), systemUpdate: r.systemUpdate, actionItem: r.actionItem }));
   const label = new Map(insts.map((i) => [i.id, i.externalId]));
   const home = asset.instrumentId !== null ? insts.find((i) => i.id === asset.instrumentId) : undefined;

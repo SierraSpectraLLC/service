@@ -26,7 +26,8 @@ import { linkedDevice } from "@/lib/remote";
 import { getModules } from "@/lib/flags";
 import { shopDay, shopMonthDay, shopTime, shopToday } from "@/lib/shopday";
 import { eodAuthorName, isOwnEodRow } from "@/lib/eodLines";
-import { RECENT_DAYS, groupEodHistory } from "@/lib/eodHistory";
+import { RECENT_DAYS, groupEodHistoryWithModules, type ModuleRow } from "@/lib/eodHistory";
+import { everModulesOf, membershipResolver } from "@/lib/moduleMembershipData";
 import DailyUpdateHistory from "@/components/DailyUpdateHistory";
 import { getStageDefs } from "@/lib/stageDefs";
 import { BLOCKED_STAGE, partOpen, GASES } from "@/lib/stages";
@@ -362,15 +363,55 @@ export default async function InstrumentPage({ params, searchParams }: {
   // Every line ever written on this record, so the page can carry the whole
   // diary: today's in the editor (the viewer's own line, colleagues' read
   // under it - see db/schema.eodUpdates), past days under that.
-  const updateRows = modules.eod && (isStaff || ownerIsViewer)
+  const seesUpdates = modules.eod && (isStaff || ownerIsViewer);
+  const updateRows = seesUpdates
     ? await db.select().from(eodUpdates).where(eq(eodUpdates.instrumentId, instId))
     : [];
   const todayRows = updateRows.filter((r) => r.date === shopToday());
-  const historyDays = groupEodHistory(updateRows, { today: shopToday(), staff: isStaff });
   const todayUpdate = todayRows.find((r) => isOwnEodRow(r, user));
+  // A colleague's line, as the reader may see it: staff read everything, a
+  // client owner reads what their report carries - never a bench line, never
+  // one left off the report.
+  const readable = (r: { internal: boolean; skipped: boolean }) => isStaff || (!r.internal && !r.skipped);
   const todayOthers = todayRows
-    .filter((r) => r !== todayUpdate && (r.systemUpdate || r.actionItem))
+    .filter((r) => r !== todayUpdate && (r.systemUpdate || r.actionItem) && readable(r))
     .map((r) => ({ by: eodAuthorName(r), systemUpdate: r.systemUpdate, actionItem: r.actionItem }));
+  /*
+   * THE SYSTEM'S UNITS' LINES. A unit's daily update is written on the unit
+   * and travels with it, so the refurbishment of this system's detector is on
+   * the detector - and this page reads it back under the system, for the days
+   * the detector was here. "Here" is read from the move log, not from where
+   * the unit is now (lib/moduleMembership): a detector since moved to another
+   * system still reports here for the days it was in this one, marked with the
+   * day it left. Every unit that was ever in the system is a candidate.
+   */
+  const everUnits = seesUpdates ? await everModulesOf(inst.id, inst.tenantOrgId) : [];
+  const unitRows = everUnits.length
+    ? await db.select().from(eodUpdates).where(inArray(eodUpdates.assetId, everUnits.map((a) => a.id)))
+    : [];
+  const membership = await membershipResolver(everUnits.map((a) => a.id));
+  const unitLabel = (a: { kind: string; model: string; serial: string }) =>
+    `${a.kind}${a.model ? ` - ${a.model}` : ""}${a.serial ? ` (SN ${a.serial})` : ""}`;
+  const moduleHistory: ModuleRow[] = unitRows
+    .filter((r) => r.date !== shopToday() && membership.homeOn(r.assetId as number, r.date) === inst.id)
+    .map((r) => {
+      const a = everUnits.find((x) => x.id === r.assetId)!;
+      // "until" is the departure after THIS line's day: a unit that was here
+      // twice says the first stint's end on the first stint's lines.
+      return { row: r, assetId: a.id, label: unitLabel(a), leftOn: membership.leftAfter(a.id, inst.id, r.date) };
+    });
+  const historyDays = groupEodHistoryWithModules(updateRows, moduleHistory, { today: shopToday(), staff: isStaff });
+  // Today: each unit in the system now gets a card of its own under the
+  // system's, so a module is written up from here without opening it.
+  const moduleToday = assetRows.filter((a) => a.status !== "Decommissioned").map((a) => {
+    const rows = unitRows.filter((r) => r.assetId === a.id && r.date === shopToday());
+    const own = rows.find((r) => isOwnEodRow(r, user));
+    return {
+      asset: a, label: unitLabel(a), own,
+      others: rows.filter((r) => r !== own && (r.systemUpdate || r.actionItem) && readable(r))
+        .map((r) => ({ by: eodAuthorName(r), systemUpdate: r.systemUpdate, actionItem: r.actionItem })),
+    };
+  });
 
   // Discussion. The thread is scoped by the system (checked above), but each
   // post carries its own audience: an internal note belongs to the party that
@@ -1052,10 +1093,21 @@ export default async function InstrumentPage({ params, searchParams }: {
                 <DailyUpdatePanel target={{ instrumentId: inst.id, assetId: null }}
                   systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
                   updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} others={todayOthers} />
+                {moduleToday.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <div className="eyebrow" style={{ marginBottom: 8 }}>Modules</div>
+                    {moduleToday.map((m) => (
+                      <DailyUpdatePanel key={m.asset.id} target={{ instrumentId: null, assetId: m.asset.id }}
+                        title={m.label} hint="on the unit, and on today's report under this system"
+                        systemUpdate={m.own?.systemUpdate ?? ""} actionItem={m.own?.actionItem ?? ""}
+                        updatedBy={m.own?.updatedBy ?? ""} canEdit={isStaff} others={m.others} />
+                    ))}
+                  </div>
+                )}
                 <DailyUpdateHistory
                   days={allUpdates ? historyDays : historyDays.slice(0, RECENT_DAYS)}
                   total={historyDays.length} showingAll={allUpdates}
-                  allHref={`/instruments/${inst.id}?updates=all`} today={shopToday()} />
+                  allHref={`/instruments/${inst.id}?updates=all`} today={shopToday()} linkModules={isStaff} />
               </>
             )
           ) },

@@ -51,3 +51,34 @@ export function groupEodEntries<T extends { kind: string; id: number }>(entries:
   }
   return [...groups.values()];
 }
+
+/**
+ * A group and the unit groups that sit inside it: the system's own lines,
+ * then each of its modules' lines. A unit whose system is not on this report
+ * - one on the shelf, or in a system that is not the client's - stands as a
+ * group of its own, as it always did. Numbering follows: a system and its
+ * modules are one number.
+ */
+export type NestedEodGroup<T> = { head: T[]; modules: T[][] };
+
+export function nestEodGroups<T extends { kind: string; id: number; parent?: { id: number } | null }>(
+  groups: T[][],
+): NestedEodGroup<T>[] {
+  const out: NestedEodGroup<T>[] = [];
+  const systems = new Map<number, NestedEodGroup<T>>();
+  for (const g of groups) {
+    const e = g[0];
+    if (e.kind === "system") {
+      const n = { head: g, modules: [] as T[][] };
+      systems.set(e.id, n); out.push(n);
+    }
+  }
+  for (const g of groups) {
+    const e = g[0];
+    if (e.kind === "system") continue;
+    const home = e.kind === "asset" && e.parent ? systems.get(e.parent.id) : undefined;
+    if (home) home.modules.push(g);
+    else out.push({ head: g, modules: [] });
+  }
+  return out;
+}

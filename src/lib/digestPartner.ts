@@ -580,8 +580,10 @@ export function partnerView(opts: {
   // than clipping silently.
   const clip = (lines: string[], max: number): string[] =>
     lines.length <= max ? lines : [...lines.slice(0, max), `...and ${lines.length - max} more in the portal.`];
+  // A module's line carries the module's name: the note is a plain string
+  // by the time it reaches the client, so the name has to be in it.
   const sayLines = (lines: WorkLine[]): string[] =>
-    lines.filter((l) => !l.internal && !internalRemark(l.text)).map((l) => l.text);
+    lines.filter((l) => !l.internal && !internalRemark(l.text)).map((l) => (l.on ? `${l.on}: ${l.text}` : l.text));
   const notesFor = new Map<string, string[]>();
   for (const w of opts.section.work ?? []) {
     const say = sayLines(w.lines);
