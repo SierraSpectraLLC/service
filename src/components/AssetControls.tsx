@@ -153,7 +153,12 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
                 const v = e.target.value;
                 run(() => setAssetServes(asset.id, v ? parseInt(v) : null, role));
               }}
-              className="t-small" style={{ width: "auto" }}>
+              /* Sized to its longest option, which is a module's full label -
+                 and a select is not clipped by its flex parent unless told
+                 to be, so on a phone it ran past the card's edge. Capped at
+                 the row: it wraps to a line of its own when the labels are
+                 long, which is the honest width. */
+              className="t-small" style={{ width: "auto", maxWidth: "100%", minWidth: 0 }}>
               <option value="">nothing in particular</option>
               {serving && <option value={serving.id}>{serving.label}</option>}
               {candidates.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
