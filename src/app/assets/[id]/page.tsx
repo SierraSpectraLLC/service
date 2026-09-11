@@ -19,6 +19,8 @@ import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import { getModules } from "@/lib/flags";
 import { shopDay, shopTime, shopToday } from "@/lib/shopday";
 import { eodAuthorName, isOwnEodRow } from "@/lib/eodLines";
+import { RECENT_DAYS, groupEodHistory } from "@/lib/eodHistory";
+import DailyUpdateHistory from "@/components/DailyUpdateHistory";
 import { formatHours } from "@/lib/hours";
 import { ASSET_TONE, GASES } from "@/lib/stages";
 import { schedulePartsOf } from "@/lib/procedures";
@@ -59,10 +61,15 @@ export const dynamic = "force-dynamic";
 
 const KIND_LABEL: Record<string, string> = { event: "", task: "Task", part: "Part", time: "Time" };
 
-export default async function AssetPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function AssetPage({ params, searchParams }: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ updates?: string }>;
+}) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   const { id } = await params;
+  // ?updates=all: every day of the record's updates, not just the recent ones.
+  const allUpdates = (await searchParams).updates === "all";
   const assetId = parseInt(id);
   if (isNaN(assetId)) notFound();
   const access = await assetAccess(user, assetId);
@@ -187,12 +194,14 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   // Today's client-facing update for this unit, picked up by the EOD page.
   const modules = await getModules();
   const ownerIsViewer = asset.ownerOrgId !== null && asset.ownerOrgId === user.orgId;
-  // Every person's line for today: the viewer's own is the one the editor
-  // holds, and colleagues' are read under it. See db/schema.eodUpdates.
-  const todayRows = modules.eod && (isStaff || ownerIsViewer)
-    ? await db.select().from(eodUpdates)
-        .where(and(eq(eodUpdates.assetId, assetId), eq(eodUpdates.date, shopToday())))
+  // Every line ever written on this record, so the page can carry the whole
+  // diary: today's in the editor (the viewer's own line, colleagues' read
+  // under it - see db/schema.eodUpdates), past days under that.
+  const updateRows = modules.eod && (isStaff || ownerIsViewer)
+    ? await db.select().from(eodUpdates).where(eq(eodUpdates.assetId, assetId))
     : [];
+  const todayRows = updateRows.filter((r) => r.date === shopToday());
+  const historyDays = groupEodHistory(updateRows, { today: shopToday(), staff: isStaff });
   const todayUpdate = todayRows.find((r) => isOwnEodRow(r, user));
   const todayOthers = todayRows
     .filter((r) => r !== todayUpdate && (r.systemUpdate || r.actionItem))
@@ -529,11 +538,17 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               people={directoryNames(peopleRows)} defaultPerson={user.name}
               today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
           ) },
-          { key: "update", label: "Today's update", node: (
+          { key: "update", label: "Daily updates", node: (
              modules.eod && (isStaff || ownerIsViewer) && (
-              <DailyUpdatePanel target={target}
-                systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
-                updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} others={todayOthers} />
+              <>
+                <DailyUpdatePanel target={target}
+                  systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
+                  updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} others={todayOthers} />
+                <DailyUpdateHistory
+                  days={allUpdates ? historyDays : historyDays.slice(0, RECENT_DAYS)}
+                  total={historyDays.length} showingAll={allUpdates}
+                  allHref={`/assets/${asset.id}?updates=all`} today={shopToday()} />
+              </>
             )
           ) },
           { key: "history", label: "Service history", node: (
