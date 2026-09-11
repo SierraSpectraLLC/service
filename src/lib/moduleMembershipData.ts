@@ -1,27 +1,27 @@
 // The database half of lib/moduleMembership: fetch a set of units' move logs
 // once and answer, for any of them, where it stood on any day.
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { assetEvents, assets, instruments } from "@/db/schema";
+import { assetEvents, assets } from "@/db/schema";
 import { shopDay } from "@/lib/shopday";
-import {
-  leftSystemOn, positionAtEndOf, wasInSystemOn, type FromIdOf, type MoveEvent,
-} from "@/lib/moduleMembership";
+import { forTenant } from "@/lib/tenancy";
+import { homeOn, leftAfter, positionAtEndOf, timelineOf, type Step } from "@/lib/moduleMembership";
 
 export type MembershipResolver = {
   /** Where the unit stands now. */
   current(assetId: number): number | null;
   /** Where the unit stood at the end of `day`. */
   positionOn(assetId: number, day: string): number | null;
-  /** Was the unit in `systemId` at any point during `day`? */
-  wasInOn(assetId: number, systemId: number, day: string): boolean;
-  /** The last day the unit left `systemId`, or null if it never has or is there now. */
-  leftOn(assetId: number, systemId: number): string | null;
+  /** The system a unit's line for `day` belongs to - see lib/moduleMembership.homeOn. */
+  homeOn(assetId: number, day: string): number | null;
+  /** The day the unit left `systemId` on or after `day`, or null. */
+  leftAfter(assetId: number, systemId: number, day: string): string | null;
 };
 
 /**
- * One read of the move log for these units, and the systems the moved-from
- * texts name, so every question after is answered in memory.
+ * One read of the move log for these units, so every question after is
+ * answered in memory. Nothing here looks a system up by name: the system a
+ * move left comes from the unit's own earlier events (lib/moduleMembership).
  */
 export async function membershipResolver(assetIds: number[]): Promise<MembershipResolver> {
   const ids = [...new Set(assetIds)];
@@ -31,49 +31,40 @@ export async function membershipResolver(assetIds: number[]): Promise<Membership
       db.select().from(assetEvents).where(inArray(assetEvents.assetId, ids)),
     ])
     : [[], []];
-  const events = new Map<number, MoveEvent[]>();
-  for (const e of eventRows) {
-    events.set(e.assetId, [...(events.get(e.assetId) ?? []), {
+  const byAsset = new Map<number, typeof eventRows>();
+  for (const e of eventRows) byAsset.set(e.assetId, [...(byAsset.get(e.assetId) ?? []), e]);
+  const steps = new Map<number, Step[]>();
+  for (const [id, evs] of byAsset) {
+    steps.set(id, timelineOf(evs.map((e) => ({
       assetId: e.assetId, kind: e.kind, instrumentId: e.instrumentId, detail: e.detail,
       day: shopDay(e.at), at: e.at.getTime(),
-    }]);
+    }))));
   }
-  // The systems named on the left of a moved event's "X -> Y", by name.
-  const names = [...new Set(eventRows
-    .filter((e) => e.kind === "moved" && e.detail.includes(" -> "))
-    .map((e) => e.detail.slice(0, e.detail.indexOf(" -> ")).trim())
-    .filter((n) => n && n !== "spare"))];
-  const named = names.length
-    ? await db.select({ id: instruments.id, externalId: instruments.externalId })
-        .from(instruments).where(inArray(instruments.externalId, names))
-    : [];
-  const byName = new Map(named.map((i) => [i.externalId, i.id]));
-  const fromIdOf: FromIdOf = (externalId) => byName.get(externalId) ?? null;
   const current = new Map(rows.map((r) => [r.id, r.instrumentId]));
-  const of = (id: number) => events.get(id) ?? [];
+  const now = (id: number) => current.get(id) ?? null;
+  const of = (id: number) => steps.get(id) ?? [];
   return {
-    current: (id) => current.get(id) ?? null,
-    positionOn: (id, day) => positionAtEndOf(day, current.get(id) ?? null, of(id), fromIdOf),
-    wasInOn: (id, systemId, day) => wasInSystemOn(day, systemId, current.get(id) ?? null, of(id), fromIdOf),
-    leftOn: (id, systemId) => leftSystemOn(systemId, current.get(id) ?? null, of(id), fromIdOf),
+    current: now,
+    positionOn: (id, day) => positionAtEndOf(day, now(id), of(id)),
+    homeOn: (id, day) => homeOn(day, now(id), of(id)),
+    leftAfter: (id, systemId, day) => leftAfter(day, systemId, of(id)),
   };
 }
 
 /**
- * Every unit that is in this system now or ever was, by the log: the ones
- * installed into, removed from, moved into or status-stamped on it, and the
- * ones whose moved-from text names it. The system page reads these units'
- * daily updates and lets the resolver say which days each belongs to.
+ * Every unit of this workspace that is in the system now or ever was, by the
+ * log: the ones installed into, moved into, removed from or status-stamped
+ * on it. A unit that only ever left it by a move is found too, because the
+ * event that put it there carries the system. Scoped to the system's own
+ * workspace - the log has no tenant column of its own.
  */
-export async function everModulesOf(systemId: number, externalId: string) {
-  const [current, touched, fromText] = await Promise.all([
+export async function everModulesOf(systemId: number, tenantOrgId: number | null) {
+  const [current, touched] = await Promise.all([
     db.select({ id: assets.id }).from(assets).where(eq(assets.instrumentId, systemId)),
     db.select({ assetId: assetEvents.assetId }).from(assetEvents).where(eq(assetEvents.instrumentId, systemId)),
-    db.select({ assetId: assetEvents.assetId }).from(assetEvents)
-      .where(and(eq(assetEvents.kind, "moved"), like(assetEvents.detail, `${externalId} -> %`))),
   ]);
-  const ids = [...new Set([
-    ...current.map((a) => a.id), ...touched.map((e) => e.assetId), ...fromText.map((e) => e.assetId),
-  ])];
-  return ids.length ? db.select().from(assets).where(inArray(assets.id, ids)) : [];
+  const ids = [...new Set([...current.map((a) => a.id), ...touched.map((e) => e.assetId)])];
+  return ids.length
+    ? db.select().from(assets).where(and(inArray(assets.id, ids), forTenant(assets.tenantOrgId, tenantOrgId)))
+    : [];
 }

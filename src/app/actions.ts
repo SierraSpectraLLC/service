@@ -4501,7 +4501,14 @@ async function upsertEodLine(
     const [a] = await db.select().from(assets).where(eq(assets.id, target.assetId));
     if (!a || (t !== null && a.tenantOrgId !== t)) throw new Error("Not found");
     tenantOrgId = a.tenantOrgId;
-    base = { instrumentId: null, assetId: a.id, ownerOrgId: a.ownerOrgId };
+    // Whose report: the owner of the system the unit is in, when it is in
+    // one - the line files under that system (lib/eodEmail) - else the
+    // unit's own. A client's loaner detector in another client's system is
+    // that system's news for the day.
+    const [home] = a.instrumentId !== null
+      ? await db.select({ ownerOrgId: instruments.ownerOrgId }).from(instruments).where(eq(instruments.id, a.instrumentId))
+      : [];
+    base = { instrumentId: null, assetId: a.id, ownerOrgId: home ? home.ownerOrgId : a.ownerOrgId };
     key = { col: eodUpdates.assetId, id: a.id };
     conflict = [eodUpdates.assetId, eodUpdates.date, eodUpdates.author];
   } else {

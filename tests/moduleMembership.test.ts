@@ -1,104 +1,117 @@
 import { describe, expect, it } from "vitest";
 import {
-  leftSystemIn, leftSystemOn, movedFrom, positionAtEndOf, wasInSystemOn, type MoveEvent,
+  homeOn, leftAfter, positionAtEndOf, positionAtStartOf, timelineOf, type MoveEvent,
 } from "@/lib/moduleMembership";
 
 /**
  * Where a unit stood on a day, read back from its move log. The log records
  * one system per event and names the system LEFT on a move only in text, so
- * these pin the undo rules one event at a time and then a whole life.
+ * the timeline takes it from the unit's own earlier event instead. These pin
+ * the reading one event at a time, then a whole life.
  */
 const MSP4 = 4, MSP7 = 7;
-const fromIdOf = (name: string) => ({ "MSP-004": MSP4, "MSP-007": MSP7 }[name] ?? null);
 let seq = 0;
 const ev = (kind: string, day: string, instrumentId: number | null, detail = ""): MoveEvent =>
   ({ assetId: 1, kind, instrumentId, detail, day, at: ++seq });
 
-describe("movedFrom", () => {
-  it("reads the system left off the text, and the shelf as null", () => {
-    expect(movedFrom("MSP-004 -> MSP-007", fromIdOf)).toBe(MSP4);
-    expect(movedFrom("spare -> MSP-007", fromIdOf)).toBeNull();
-    // A name nobody can resolve - a system since renamed - reads as the shelf,
-    // which files the lines under no system rather than the wrong one.
-    expect(movedFrom("GONE-1 -> MSP-007", fromIdOf)).toBeNull();
-    expect(movedFrom("not a move", fromIdOf)).toBeNull();
+describe("timelineOf", () => {
+  it("reads what each event says the unit was before and after it", () => {
+    const steps = timelineOf([
+      ev("installed", "2026-09-01", MSP4, "into MSP-004"),
+      ev("note", "2026-09-02", null, "says nothing"),
+      ev("status", "2026-09-05", MSP4, "In service -> Needs attention"),
+      ev("moved", "2026-09-08", MSP7, "MSP-004 -> MSP-007"),
+      ev("removed", "2026-09-10", MSP7, "from MSP-007"),
+      ev("status", "2026-09-12", null, "Spare -> Decommissioned"),
+    ]);
+    expect(steps.map((s) => [s.day, s.before, s.after])).toEqual([
+      ["2026-09-01", null, MSP4],
+      ["2026-09-05", MSP4, MSP4],
+      ["2026-09-08", MSP4, MSP7],   // the system left comes from the log, not the text
+      ["2026-09-10", MSP7, null],
+      ["2026-09-12", null, null],
+    ]);
+  });
+
+  it("takes the system a move left from the log even when the text names a system since renamed", () => {
+    const steps = timelineOf([
+      ev("installed", "2026-09-01", MSP4, "into MSP-004"),
+      ev("moved", "2026-09-08", MSP7, "GONE-1 -> MSP-007"),
+    ]);
+    expect(steps[1].before).toBe(MSP4);
+  });
+
+  it("reads a move with nothing before it as from the shelf, never by name", () => {
+    const steps = timelineOf([ev("moved", "2026-09-08", MSP7, "MSP-004 -> MSP-007")]);
+    expect(steps[0].before).toBeNull();
+  });
+
+  it("orders by time, not by the order the rows arrived", () => {
+    const later = ev("moved", "2026-09-08", MSP7, "MSP-004 -> MSP-007");
+    const earlier = ev("installed", "2026-09-01", MSP4);
+    earlier.at = 1; later.at = 2;
+    expect(timelineOf([later, earlier]).map((s) => s.after)).toEqual([MSP4, MSP7]);
   });
 });
 
-describe("leftSystemIn", () => {
-  it("names the system for a removal, a move away, or a decommission - and nothing else", () => {
-    expect(leftSystemIn(ev("removed", "2026-09-08", MSP4, "from MSP-004"), fromIdOf)).toBe(MSP4);
-    expect(leftSystemIn(ev("moved", "2026-09-08", MSP7, "MSP-004 -> MSP-007"), fromIdOf)).toBe(MSP4);
-    expect(leftSystemIn(ev("status", "2026-09-08", MSP4, "In service -> Decommissioned"), fromIdOf)).toBe(MSP4);
-    expect(leftSystemIn(ev("status", "2026-09-08", MSP4, "Spare -> In service"), fromIdOf)).toBeNull();
-    expect(leftSystemIn(ev("installed", "2026-09-08", MSP4, "into MSP-004"), fromIdOf)).toBeNull();
-    expect(leftSystemIn(ev("note", "2026-09-08", null, "hello"), fromIdOf)).toBeNull();
-  });
-});
-
-describe("positionAtEndOf", () => {
-  // A detector's life: installed into MSP-004 on the 1st, moved to MSP-007
-  // on the 8th, pulled to the shelf on the 10th, decommissioned on the 12th.
-  const life = [
-    ev("installed", "2026-09-01", MSP4, "into MSP-004"),
-    ev("status", "2026-09-05", MSP4, "In service -> Needs attention"),
+describe("positionAtEndOf / positionAtStartOf", () => {
+  const steps = timelineOf([
+    ev("installed", "2026-09-01", MSP4),
     ev("moved", "2026-09-08", MSP7, "MSP-004 -> MSP-007"),
-    ev("removed", "2026-09-10", MSP7, "from MSP-007"),
-    ev("status", "2026-09-12", null, "Spare -> Decommissioned"),
-  ];
+    ev("removed", "2026-09-10", MSP7),
+  ]);
   const current = null;
 
-  it("walks back from now through each kind of event", () => {
-    expect(positionAtEndOf("2026-09-12", current, life, fromIdOf)).toBeNull();
-    expect(positionAtEndOf("2026-09-11", current, life, fromIdOf)).toBeNull();   // on the shelf
-    expect(positionAtEndOf("2026-09-09", current, life, fromIdOf)).toBe(MSP7);
-    expect(positionAtEndOf("2026-09-08", current, life, fromIdOf)).toBe(MSP7);   // moved that day: there by its end
-    expect(positionAtEndOf("2026-09-07", current, life, fromIdOf)).toBe(MSP4);
-    expect(positionAtEndOf("2026-09-05", current, life, fromIdOf)).toBe(MSP4);   // a status stamp says where it was
-    expect(positionAtEndOf("2026-09-01", current, life, fromIdOf)).toBe(MSP4);
-    expect(positionAtEndOf("2026-08-31", current, life, fromIdOf)).toBeNull();   // before it existed here
+  it("answers for any day in the life", () => {
+    expect(positionAtEndOf("2026-08-31", current, steps)).toBeNull();
+    expect(positionAtEndOf("2026-09-01", current, steps)).toBe(MSP4);
+    expect(positionAtEndOf("2026-09-07", current, steps)).toBe(MSP4);
+    expect(positionAtEndOf("2026-09-08", current, steps)).toBe(MSP7);
+    expect(positionAtEndOf("2026-09-09", current, steps)).toBe(MSP7);
+    expect(positionAtEndOf("2026-09-10", current, steps)).toBeNull();
+    expect(positionAtStartOf("2026-09-08", current, steps)).toBe(MSP4);
+    expect(positionAtStartOf("2026-09-09", current, steps)).toBe(MSP7);
+    expect(positionAtStartOf("2026-09-01", current, steps)).toBeNull();
   });
 
-  it("starts from where the unit is NOW when nothing has happened since", () => {
-    expect(positionAtEndOf("2026-09-20", MSP7, [ev("installed", "2026-09-01", MSP7)], fromIdOf)).toBe(MSP7);
-  });
-
-  it("undoes a decommission back onto the system it left", () => {
-    const events = [ev("installed", "2026-09-01", MSP4), ev("status", "2026-09-12", MSP4, "In service -> Decommissioned")];
-    expect(positionAtEndOf("2026-09-11", null, events, fromIdOf)).toBe(MSP4);
-    expect(positionAtEndOf("2026-09-12", null, events, fromIdOf)).toBeNull();
-  });
-
-  it("orders two events on one day by time, not by kind", () => {
-    const events = [ev("installed", "2026-09-08", MSP4), ev("moved", "2026-09-08", MSP7, "MSP-004 -> MSP-007")];
-    expect(positionAtEndOf("2026-09-07", MSP7, events, fromIdOf)).toBeNull();
-    expect(positionAtEndOf("2026-09-08", MSP7, events, fromIdOf)).toBe(MSP7);
+  it("lets the record answer for now, and for a unit with no log at all", () => {
+    expect(positionAtEndOf("2026-09-20", MSP4, steps)).toBe(MSP4);   // moved back by something the log never saw
+    expect(positionAtEndOf("2026-09-20", null, [])).toBeNull();
+    expect(positionAtEndOf("2026-01-01", MSP7, [])).toBe(MSP7);
   });
 });
 
-describe("wasInSystemOn", () => {
-  const life = [
-    ev("installed", "2026-09-01", MSP4, "into MSP-004"),
+describe("homeOn - the one rule", () => {
+  const steps = timelineOf([
+    ev("installed", "2026-09-01", MSP4),
     ev("moved", "2026-09-08", MSP7, "MSP-004 -> MSP-007"),
-  ];
-  it("counts the day a unit left: Tuesday's detector is still Tuesday's", () => {
-    expect(wasInSystemOn("2026-09-08", MSP4, MSP7, life, fromIdOf)).toBe(true);
-    expect(wasInSystemOn("2026-09-08", MSP7, MSP7, life, fromIdOf)).toBe(true);
-    expect(wasInSystemOn("2026-09-09", MSP4, MSP7, life, fromIdOf)).toBe(false);
-    expect(wasInSystemOn("2026-09-03", MSP4, MSP7, life, fromIdOf)).toBe(true);
-    expect(wasInSystemOn("2026-09-03", MSP7, MSP7, life, fromIdOf)).toBe(false);
+    ev("removed", "2026-09-10", MSP7),
+  ]);
+
+  it("gives a move day's line to the system the unit began the day in - once", () => {
+    expect(homeOn("2026-09-08", null, steps)).toBe(MSP4);
+    expect(homeOn("2026-09-09", null, steps)).toBe(MSP7);
+    expect(homeOn("2026-09-10", null, steps)).toBe(MSP7);   // pulled that day: still that day's
+    expect(homeOn("2026-09-11", null, steps)).toBeNull();
+  });
+
+  it("gives an install day's line to the system joined, when the day began on the shelf", () => {
+    expect(homeOn("2026-09-01", null, steps)).toBe(MSP4);
+    expect(homeOn("2026-08-30", null, steps)).toBeNull();
   });
 });
 
-describe("leftSystemOn", () => {
-  it("is the last day the unit left the system, and nothing while it is still there", () => {
-    const life = [
-      ev("installed", "2026-09-01", MSP4), ev("removed", "2026-09-03", MSP4, "from MSP-004"),
+describe("leftAfter", () => {
+  it("is the day the unit left the system on or after the line's day, and nothing while it is still there", () => {
+    const steps = timelineOf([
+      ev("installed", "2026-09-01", MSP4), ev("removed", "2026-09-03", MSP4),
       ev("installed", "2026-09-05", MSP4), ev("moved", "2026-09-08", MSP7, "MSP-004 -> MSP-007"),
-    ];
-    expect(leftSystemOn(MSP4, MSP7, life, fromIdOf)).toBe("2026-09-08");
-    expect(leftSystemOn(MSP7, MSP7, life, fromIdOf)).toBeNull();
-    expect(leftSystemOn(MSP4, MSP4, life, fromIdOf)).toBeNull();
-    expect(leftSystemOn(99, MSP7, life, fromIdOf)).toBeNull();
+    ]);
+    // Two stints: a line from the first says the first departure, not the last.
+    expect(leftAfter("2026-09-02", MSP4, steps)).toBe("2026-09-03");
+    expect(leftAfter("2026-09-06", MSP4, steps)).toBe("2026-09-08");
+    expect(leftAfter("2026-09-08", MSP4, steps)).toBe("2026-09-08");
+    expect(leftAfter("2026-09-09", MSP7, steps)).toBeNull();
+    expect(leftAfter("2026-09-06", 99, steps)).toBeNull();
   });
 });

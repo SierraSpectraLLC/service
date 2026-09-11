@@ -466,8 +466,19 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
   // moved on since does not drag last week's line to its new home.
   const membership = assetIds.length ? await membershipResolver(assetIds) : null;
   const unitName = (a: { kind: string; model: string }) => `${a.kind}${a.model ? ` - ${a.model}` : ""}`;
-  /** Unit rows already filed under a system, so the shelf loop leaves them. */
-  const nested = new Set<number>();
+  /**
+   * Each unit row's home for its day, decided once and before the sections:
+   * the system it files under, or null for the shelf. One home per row, so a
+   * line is printed once whatever order the sections come in - and a home
+   * that is not on the board (an archived system) reads as the shelf.
+   */
+  const onBoard = new Set(rows.map((r) => r.id));
+  const homeOfRow = new Map<number, number | null>();
+  for (const u of updateRows) {
+    if (u.assetId === null) continue;
+    const home = membership ? membership.homeOn(u.assetId, u.date) : null;
+    homeOfRow.set(u.id, home !== null && onBoard.has(home) ? home : null);
+  }
 
   // One section per owning organization, house-stewarded work first.
   const owners: (number | null)[] = [];
@@ -562,15 +573,14 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
         if (u.systemUpdate?.trim()) lines.push({ text: `${tagOfDay(u.date)}${u.systemUpdate.trim()}`, internal: u.internal, by });
         if (u.actionItem?.trim()) lines.push({ text: `${tagOfDay(u.date)}Next: ${u.actionItem.trim()}`, internal: u.internal, by });
       }
-      // Its units' lines, for the days each unit was in it. Membership on the
+      // Its units' lines, for the days each unit was in it. The home on the
       // day decides, not the row's owner stamp: the line is about the unit,
       // and the unit was in this system.
       for (const a of assetRows) {
         const theirs = updateRows
-          .filter((x) => x.assetId === a.id && !x.skipped && membership!.wasInOn(a.id, i.id, x.date))
+          .filter((x) => x.assetId === a.id && !x.skipped && homeOfRow.get(x.id) === i.id)
           .sort((p, q) => p.date.localeCompare(q.date));
         for (const u of theirs) {
-          nested.add(u.id);
           const by = eodAuthorName(u);
           const on = unitName(a);
           if (u.systemUpdate?.trim()) lines.push({ text: `${tagOfDay(u.date)}${u.systemUpdate.trim()}`, internal: u.internal, by, on });
@@ -598,7 +608,7 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
     // Units with no system on the day - the shelf - under their own heading
     // each. A unit that was in a system that day was filed under it above.
     for (const a of assetRows) {
-      const ups = updateRows.filter((x) => x.assetId === a.id && !x.skipped && !nested.has(x.id)
+      const ups = updateRows.filter((x) => x.assetId === a.id && !x.skipped && homeOfRow.get(x.id) === null
         && (x.ownerOrgId ?? null) === ownerId)
         .sort((p, q) => p.date.localeCompare(q.date));
       const lines: WorkLine[] = [];

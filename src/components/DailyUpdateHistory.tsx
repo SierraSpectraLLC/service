@@ -12,7 +12,7 @@ import { RECENT_DAYS, historyDayLabel, type HistoryDay } from "@/lib/eodHistory"
  * Thirty days at a time. A record with a year of updates is a page nobody
  * scrolls; the rest is one click, and the click says how many.
  */
-export default function DailyUpdateHistory({ days, total, showingAll, allHref, today }: {
+export default function DailyUpdateHistory({ days, total, showingAll, allHref, today, linkModules = false }: {
   /** The days to render - already cut to RECENT_DAYS unless showingAll. */
   days: HistoryDay[];
   /** How many days there are in all, for the "show the rest" line. */
@@ -20,6 +20,12 @@ export default function DailyUpdateHistory({ days, total, showingAll, allHref, t
   showingAll: boolean;
   allHref: string;
   today: string;
+  /**
+   * Whether a module's name opens the unit. Staff can open any unit of the
+   * workspace; a client may not be able to open one that has since left
+   * their system, so for them the name is text.
+   */
+  linkModules?: boolean;
 }) {
   if (!total) return null;
   const line = (l: HistoryDay["lines"][number], i: number) => (
@@ -54,7 +60,9 @@ export default function DailyUpdateHistory({ days, total, showingAll, allHref, t
           {day.modules.map((m) => (
             <div key={m.assetId} style={{ marginTop: 8, paddingLeft: 12, borderLeft: "2px solid var(--line)" }}>
               <div className="t-small" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <Link href={`/assets/${m.assetId}`} className="mono" style={{ fontWeight: 700, textDecoration: "none" }}>{m.label}</Link>
+                {linkModules
+                  ? <Link href={`/assets/${m.assetId}`} className="mono" style={{ fontWeight: 700, textDecoration: "none" }}>{m.label}</Link>
+                  : <span className="mono" style={{ fontWeight: 700 }}>{m.label}</span>}
                 {m.leftOn && <span className="pill neutral">was in this system until {historyDayLabel(m.leftOn, today)}</span>}
               </div>
               {m.lines.map(line)}

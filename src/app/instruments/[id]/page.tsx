@@ -369,8 +369,12 @@ export default async function InstrumentPage({ params, searchParams }: {
     : [];
   const todayRows = updateRows.filter((r) => r.date === shopToday());
   const todayUpdate = todayRows.find((r) => isOwnEodRow(r, user));
+  // A colleague's line, as the reader may see it: staff read everything, a
+  // client owner reads what their report carries - never a bench line, never
+  // one left off the report.
+  const readable = (r: { internal: boolean; skipped: boolean }) => isStaff || (!r.internal && !r.skipped);
   const todayOthers = todayRows
-    .filter((r) => r !== todayUpdate && (r.systemUpdate || r.actionItem))
+    .filter((r) => r !== todayUpdate && (r.systemUpdate || r.actionItem) && readable(r))
     .map((r) => ({ by: eodAuthorName(r), systemUpdate: r.systemUpdate, actionItem: r.actionItem }));
   /*
    * THE SYSTEM'S UNITS' LINES. A unit's daily update is written on the unit
@@ -381,7 +385,7 @@ export default async function InstrumentPage({ params, searchParams }: {
    * system still reports here for the days it was in this one, marked with the
    * day it left. Every unit that was ever in the system is a candidate.
    */
-  const everUnits = seesUpdates ? await everModulesOf(inst.id, inst.externalId) : [];
+  const everUnits = seesUpdates ? await everModulesOf(inst.id, inst.tenantOrgId) : [];
   const unitRows = everUnits.length
     ? await db.select().from(eodUpdates).where(inArray(eodUpdates.assetId, everUnits.map((a) => a.id)))
     : [];
@@ -389,10 +393,12 @@ export default async function InstrumentPage({ params, searchParams }: {
   const unitLabel = (a: { kind: string; model: string; serial: string }) =>
     `${a.kind}${a.model ? ` - ${a.model}` : ""}${a.serial ? ` (SN ${a.serial})` : ""}`;
   const moduleHistory: ModuleRow[] = unitRows
-    .filter((r) => r.date !== shopToday() && membership.wasInOn(r.assetId as number, inst.id, r.date))
+    .filter((r) => r.date !== shopToday() && membership.homeOn(r.assetId as number, r.date) === inst.id)
     .map((r) => {
       const a = everUnits.find((x) => x.id === r.assetId)!;
-      return { row: r, assetId: a.id, label: unitLabel(a), leftOn: membership.leftOn(a.id, inst.id) };
+      // "until" is the departure after THIS line's day: a unit that was here
+      // twice says the first stint's end on the first stint's lines.
+      return { row: r, assetId: a.id, label: unitLabel(a), leftOn: membership.leftAfter(a.id, inst.id, r.date) };
     });
   const historyDays = groupEodHistoryWithModules(updateRows, moduleHistory, { today: shopToday(), staff: isStaff });
   // Today: each unit in the system now gets a card of its own under the
@@ -402,7 +408,7 @@ export default async function InstrumentPage({ params, searchParams }: {
     const own = rows.find((r) => isOwnEodRow(r, user));
     return {
       asset: a, label: unitLabel(a), own,
-      others: rows.filter((r) => r !== own && (r.systemUpdate || r.actionItem))
+      others: rows.filter((r) => r !== own && (r.systemUpdate || r.actionItem) && readable(r))
         .map((r) => ({ by: eodAuthorName(r), systemUpdate: r.systemUpdate, actionItem: r.actionItem })),
     };
   });
@@ -1101,7 +1107,7 @@ export default async function InstrumentPage({ params, searchParams }: {
                 <DailyUpdateHistory
                   days={allUpdates ? historyDays : historyDays.slice(0, RECENT_DAYS)}
                   total={historyDays.length} showingAll={allUpdates}
-                  allHref={`/instruments/${inst.id}?updates=all`} today={shopToday()} />
+                  allHref={`/instruments/${inst.id}?updates=all`} today={shopToday()} linkModules={isStaff} />
               </>
             )
           ) },

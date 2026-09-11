@@ -176,9 +176,27 @@ export async function collectEodEntries(
   // the operator's - a live-report rule only, never applied to history.
   const clientLed = new Set(directory.filter((p) => orgRow?.name && p.org === orgRow.name).map((p) => p.name));
   // What this org recorded that day, per the stamp on the row.
-  const recorded = new Set(saved
-    .filter((s) => s.instrumentId !== null && (s.ownerOrgId ?? null) === orgId && recordsSomething(s))
-    .map((s) => s.instrumentId as number));
+  /*
+   * UNITS, first, because they can put a system on the report. A unit's line
+   * is written on the unit and filed under the system the unit was in on the
+   * day (lib/moduleMembership.homeOn: today, where it sits; a past day, from
+   * the move log). So a past day where only a system's detector was written
+   * up still reads as that system - the unit row's stamp names the client,
+   * and its home that day names the system.
+   */
+  const stamped = (s: typeof eodUpdates.$inferSelect) => (s.ownerOrgId ?? null) === orgId && recordsSomething(s);
+  const unitRows = saved.filter((s) => s.assetId !== null);
+  const written = unitRows.length
+    ? await db.select().from(assets).where(inArray(assets.id, [...new Set(unitRows.map((s) => s.assetId as number))]))
+    : [];
+  const membership = mode === "live" ? null : await membershipResolver(written.map((a) => a.id));
+  const homeOf = (a: typeof assets.$inferSelect): number | null =>
+    membership ? membership.homeOn(a.id, date) : a.instrumentId;
+  const recorded = new Set([
+    ...saved.filter((s) => s.instrumentId !== null && stamped(s)).map((s) => s.instrumentId as number),
+    ...written.filter((a) => unitRows.some((s) => s.assetId === a.id && stamped(s)))
+      .map((a) => homeOf(a)).filter((x): x is number => x !== null),
+  ]);
   const mine = rows.filter((i) => includesSystem(i, orgId, mode, recorded, clientLed));
 
   const labels = await getSystemLabels(mine);
@@ -227,46 +245,33 @@ export async function collectEodEntries(
   })]));
 
   /*
-   * UNITS. A unit's lines are written on the unit and stay with it, and the
-   * report files them under the system the unit was in on the day: a
-   * detector's refurbishment reads under the mass spec it was in, and a
-   * detector since moved on still reads under the system it was in THEN.
-   * Today that is current membership; a past day is read back from the move
-   * log. A unit on the shelf, or in a system that is not this client's, keeps
-   * an entry of its own, as it always did.
+   * WHICH UNIT LINES ARE THIS CLIENT'S: the home decides. A unit's line for
+   * a day belongs to the report of the system it was in that day, whoever
+   * owns the unit - the work was done in that system, and that is what the
+   * client is being told about. (upsertEodLine stamps the row that way at
+   * write time too.) A unit in no system that day is the shelf, and a shelf
+   * unit is the client's when they own it (today) or the row is stamped to
+   * them (a past day, either).
    *
-   * WHICH ROWS ARE THIS CLIENT'S. History trusts the stamp on the row. Today
-   * reads the unit's live owner. Backfill takes either - a row stamped to
-   * this client, or any row on a unit they own now - which is the union the
-   * systems use, and which the old asset filter did not implement: a past
-   * day's page took every unit row in the workspace and put it on every
+   * That is one rule for all three modes. It used to be three: today took
+   * every row on a unit in the client's system, a past day wanted the unit's
+   * own owner, and the two disagreed about which lines a client had been
+   * sent - and a past day took every unit row in the workspace onto every
    * client's panel.
    *
    * WHAT IS OFFERED TO WRITE. On today's page each unit in a client's system
    * gets a blank line of the viewer's own, so a module can be written up from
-   * the EOD page without opening the unit. A shelf unit is still written on
-   * its own page.
+   * the EOD page without opening the unit. A shelf unit is written on its own.
    */
-  const stamped = (s: typeof eodUpdates.$inferSelect) => (s.ownerOrgId ?? null) === orgId && recordsSomething(s);
-  const unitRows = saved.filter((s) => s.assetId !== null && (mode === "history" ? stamped(s) : true));
   const systemIds = [...systemEntries.keys()];
-  const [written, installed] = await Promise.all([
-    unitRows.length
-      ? db.select().from(assets).where(inArray(assets.id, [...new Set(unitRows.map((s) => s.assetId as number))]))
-      : Promise.resolve([] as (typeof assets.$inferSelect)[]),
-    mode === "live" && viewer && systemIds.length
-      ? db.select().from(assets).where(and(inArray(assets.instrumentId, systemIds), ne(assets.status, "Decommissioned")))
-      : Promise.resolve([] as (typeof assets.$inferSelect)[]),
-  ]);
+  const installed = mode === "live" && viewer && systemIds.length
+    ? await db.select().from(assets).where(and(inArray(assets.instrumentId, systemIds), ne(assets.status, "Decommissioned")))
+    : [];
   const units = new Map<number, typeof assets.$inferSelect>();
   for (const a of [...written, ...installed]) units.set(a.id, a);
   const ownedLive = (a: typeof assets.$inferSelect) => (a.ownerOrgId ?? null) === orgId;
-  const rowsOf = (a: typeof assets.$inferSelect) => unitRows.filter((s) => s.assetId === a.id
-    && (mode === "live" || stamped(s) || ownedLive(a)));
-  // Where each unit was on the date: now, for today; from the log otherwise.
-  const membership = mode === "live" ? null : await membershipResolver([...units.keys()]);
-  const homeOf = (a: typeof assets.$inferSelect): number | null =>
-    membership ? membership.positionOn(a.id, date) : a.instrumentId;
+  const rowsOf = (a: typeof assets.$inferSelect) =>
+    unitRows.filter((s) => s.assetId === a.id && (mode === "live" || recordsSomething(s)));
   const unitEntry = (a: typeof assets.$inferSelect, home: { id: number; externalId: string } | null) => ({
     kind: "asset" as const, id: a.id,
     externalId: a.serial ? `SN ${a.serial}` : a.kind,
@@ -277,25 +282,20 @@ export async function collectEodEntries(
     (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.id - b.id;
 
   const entries: EodEntry[] = [];
-  const placed = new Set<number>();
   for (const i of mine) {
     entries.push(...systemEntries.get(i.id)!);
-    const modules = [...units.values()].filter((a) => homeOf(a) === i.id).sort(unitOrder);
-    for (const a of modules) {
+    for (const a of [...units.values()].filter((x) => homeOf(x) === i.id).sort(unitOrder)) {
       const rows = rowsOf(a);
-      // Nothing of this client's on it and not theirs to write: not a line.
-      if (!rows.length && !(mode === "live" && ownedLive(a))) continue;
+      if (!rows.length && !(mode === "live" && viewer)) continue;
       const lines = linesFor(rows, unitEntry(a, i));
       entries.push(...(mode === "live" && viewer ? lines : lines.filter((e) => e.eodId !== null)));
-      placed.add(a.id);
     }
   }
-  // Units with no system on this report: the shelf, or somebody else's
-  // system. Written lines only - a shelf unit is written on its own page.
-  for (const a of [...units.values()].filter((x) => !placed.has(x.id)).sort(unitOrder)) {
+  // The shelf: units in no system that day. Written lines only.
+  for (const a of [...units.values()].filter((x) => homeOf(x) === null).sort(unitOrder)) {
     const rows = rowsOf(a);
-    if (!rows.length) continue;
-    if (mode === "live" && !ownedLive(a)) continue;
+    const theirs = mode === "live" ? ownedLive(a) : rows.some(stamped) || (mode === "backfill" && ownedLive(a));
+    if (!rows.length || !theirs) continue;
     entries.push(...linesFor(rows, unitEntry(a, null)).filter((e) => e.eodId !== null));
   }
 
@@ -437,7 +437,10 @@ export async function composeEodEmail(
      * reads as the system, with the detector's lines under it.
      */
     const modules = nested.modules.map((m) => `${esc(m[0].label)}:\n${bodyOf(m, "Update")}`);
-    return `${heading}\n\n${bodyOf(group, "System Update")}${modules.length ? `\n\n${modules.join("\n\n")}` : ""}\n\n${SEP}`;
+    // A module whose system is off the report (skipped, say) stands as a
+    // unit - and keeps a module's word, as the page does.
+    const word = e.kind === "asset" && e.parent ? "Update" : "System Update";
+    return `${heading}\n\n${bodyOf(group, word)}${modules.length ? `\n\n${modules.join("\n\n")}` : ""}\n\n${SEP}`;
   });
 
   const body = [`${dateMDY} - Daily Updates`, "", SEP, ...blocks].join("\n");
