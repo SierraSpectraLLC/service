@@ -377,7 +377,8 @@ export default async function AssetPage({ params, searchParams }: {
                 {home ? (
                   <>Currently in{" "}
                     <Link href={`/instruments/${home.id}`} style={{ fontWeight: 700, textDecoration: "none" }}>
-                      {home.externalId} - {home.model}
+                      {/* A system with no model yet used to read "MSP-004 -", the dash hanging. */}
+                      {home.model ? `${home.externalId} - ${home.model}` : home.externalId}
                     </Link>
                   </>
                 ) : (
