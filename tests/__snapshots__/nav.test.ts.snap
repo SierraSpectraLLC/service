@@ -5,6 +5,7 @@ exports[`buildNav, per persona > builds one tree for a HR with payroll 1`] = `
   "primary": [
     "Today → /",
     "Work orders → /work",
+    "Systems → /instruments",
     "Assets → /assets",
     "Inventory → /stock",
   ],
@@ -142,6 +143,7 @@ exports[`buildNav, per persona > builds one tree for a staff engineer 1`] = `
   "primary": [
     "Today → /",
     "Work orders → /work",
+    "Systems → /instruments",
     "Assets → /assets",
     "Inventory → /stock",
   ],
@@ -197,6 +199,7 @@ exports[`buildNav, per persona > builds one tree for a staff owner 1`] = `
   "primary": [
     "Today → /",
     "Work orders → /work",
+    "Systems → /instruments",
     "Assets → /assets",
     "Inventory → /stock",
   ],

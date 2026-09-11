@@ -26,6 +26,8 @@ import { linkedDevice } from "@/lib/remote";
 import { getModules } from "@/lib/flags";
 import { shopDay, shopMonthDay, shopTime, shopToday } from "@/lib/shopday";
 import { eodAuthorName, isOwnEodRow } from "@/lib/eodLines";
+import { RECENT_DAYS, groupEodHistory } from "@/lib/eodHistory";
+import DailyUpdateHistory from "@/components/DailyUpdateHistory";
 import { getStageDefs } from "@/lib/stageDefs";
 import { BLOCKED_STAGE, partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
@@ -83,10 +85,15 @@ import { mentionableOn } from "@/lib/mentionAudience";
 
 export const dynamic = "force-dynamic";
 
-export default async function InstrumentPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function InstrumentPage({ params, searchParams }: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ updates?: string }>;
+}) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   const { id } = await params;
+  // ?updates=all: every day of the record's updates, not just the recent ones.
+  const allUpdates = (await searchParams).updates === "all";
   const instId = parseInt(id);
   if (isNaN(instId)) notFound();
   // A system nobody shared with you doesn't exist as far as you're concerned.
@@ -352,12 +359,14 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   };
   // Today's client-facing update, written here and picked up by the EOD page.
   const ownerIsViewer = inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId;
-  // Every person's line for today: the viewer's own is the one the editor
-  // holds, and colleagues' are read under it. See db/schema.eodUpdates.
-  const todayRows = modules.eod && (isStaff || ownerIsViewer)
-    ? await db.select().from(eodUpdates)
-        .where(and(eq(eodUpdates.instrumentId, instId), eq(eodUpdates.date, shopToday())))
+  // Every line ever written on this record, so the page can carry the whole
+  // diary: today's in the editor (the viewer's own line, colleagues' read
+  // under it - see db/schema.eodUpdates), past days under that.
+  const updateRows = modules.eod && (isStaff || ownerIsViewer)
+    ? await db.select().from(eodUpdates).where(eq(eodUpdates.instrumentId, instId))
     : [];
+  const todayRows = updateRows.filter((r) => r.date === shopToday());
+  const historyDays = groupEodHistory(updateRows, { today: shopToday(), staff: isStaff });
   const todayUpdate = todayRows.find((r) => isOwnEodRow(r, user));
   const todayOthers = todayRows
     .filter((r) => r !== todayUpdate && (r.systemUpdate || r.actionItem))
@@ -1037,11 +1046,17 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
           ) },
           // Today's client-facing note sits with the conversation it feeds, not up in the system's identity block.
-          { key: "update", label: "Today's update", node: (
+          { key: "update", label: "Daily updates", node: (
              modules.eod && (isStaff || ownerIsViewer) && (
-              <DailyUpdatePanel target={{ instrumentId: inst.id, assetId: null }}
-                systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
-                updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} others={todayOthers} />
+              <>
+                <DailyUpdatePanel target={{ instrumentId: inst.id, assetId: null }}
+                  systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
+                  updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} others={todayOthers} />
+                <DailyUpdateHistory
+                  days={allUpdates ? historyDays : historyDays.slice(0, RECENT_DAYS)}
+                  total={historyDays.length} showingAll={allUpdates}
+                  allHref={`/instruments/${inst.id}?updates=all`} today={shopToday()} />
+              </>
             )
           ) },
           { key: "discussion", label: "Discussion", node: (

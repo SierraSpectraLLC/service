@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/db";
 import { providerNameOf, providerNames } from "@/lib/providers";
-import { agreements, appSettings, attachments, clientAllowlist, instruments, orgs, orgSites, remoteDevices, systemShares, users } from "@/db/schema";
+import { agreements, appSettings, assets, attachments, clientAllowlist, instruments, orgs, orgSites, remoteDevices, systemShares, users } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { brandForTenant } from "@/lib/brand";
 import { shopDay } from "@/lib/shopday";
@@ -26,7 +26,9 @@ import { isHouse, maySeeAgreements, readTenant, tenantOfOrg } from "@/lib/tenanc
 import { stageOf } from "@/lib/orgStage";
 import { siteLabel } from "@/lib/sites";
 import { tempState } from "@/lib/tempPassword";
-import { DataTable, Pill, RecordHero, Tabs, type HeroStat, type TabItem } from "@/components/ui";
+import { DataTable, Id, Pill, RecordHero, Tabs, type HeroStat, type TabItem } from "@/components/ui";
+import { getSystemLabels } from "@/lib/systemLabel";
+import { ASSET_TONE } from "@/lib/stages";
 
 export const dynamic = "force-dynamic";
 
@@ -132,12 +134,23 @@ export default async function OrgSettingsPage({ params, searchParams }: {
         size: a.size, uploadedBy: a.uploadedBy, when: shopDay(a.createdAt),
       }))
     : [];
-  // Their systems, so a contract can be assigned to specific ones.
-  const ownedSystems = (await db.select({
-    id: instruments.id, ownerOrgId: instruments.ownerOrgId,
-    externalId: instruments.externalId, model: instruments.model,
-  }).from(instruments).where(eq(instruments.ownerOrgId, orgId)).orderBy(asc(instruments.externalId)))
+  // Their systems, so a contract can be assigned to specific ones - and so
+  // the Fleet tab can list them. Archived ones too: this is the client's
+  // record, and a retired machine is still part of what they had with us.
+  const ownedRows = await db.select().from(instruments)
+    .where(eq(instruments.ownerOrgId, orgId)).orderBy(asc(instruments.externalId));
+  const ownedSystems = ownedRows
     .map((r) => ({ id: r.id, ownerOrgId: r.ownerOrgId, externalId: r.externalId, label: r.model }));
+  /* Their units - the ones inside their systems and the ones on a shelf -
+     read off the ownership stamp on the unit itself, which is how /assets
+     reads it. The Fleet tab was the one room about a client's equipment that
+     named none of it: a count, a brief to send a competitor, and a button to
+     hand the client on. */
+  const [ownedAssets, systemLabels] = await Promise.all([
+    db.select().from(assets).where(eq(assets.ownerOrgId, orgId))
+      .orderBy(asc(assets.kind), asc(assets.model), asc(assets.id)),
+    getSystemLabels(ownedRows),
+  ]);
   const today = shopToday();
   const platformLook = await getAppearance();
 
@@ -175,6 +188,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
   const activeAgreements = agreementRows.filter((r) => r.status === "active").length;
   const heroStats: HeroStat[] = [
     { value: ownedSystems.length, label: ownedSystems.length === 1 ? "system" : "systems" },
+    { value: ownedAssets.length, label: ownedAssets.length === 1 ? "unit" : "units" },
     { value: allowRows.length, label: allowRows.length === 1 ? "person" : "people" },
     { value: siteRows.length, label: siteRows.length === 1 ? "site" : "sites" },
     ...(seesAgreements
@@ -319,6 +333,80 @@ export default async function OrgSettingsPage({ params, searchParams }: {
 
       {tab === "fleet" && !org.isOperator && (
         <>
+          {/* What they have, first - each row opens the record. The brief and
+              the hand-off below are things to DO with the fleet, and they read
+              better under the list of what would be sent. */}
+          <div className="card" style={{ marginBottom: 12 }}>
+            <div className="card-title" style={{ marginBottom: 8 }}>Systems</div>
+            <DataTable
+              cols={[
+                { key: "id", label: "ID", width: "90px" },
+                { key: "system", label: "System", width: "minmax(180px, 2fr)" },
+                { key: "stage", label: "Stage", width: "minmax(120px, 0.9fr)", hideMobile: true },
+                { key: "lead", label: "Lead", width: "minmax(100px, 0.7fr)", hideMobile: true },
+              ]}
+              rows={ownedRows.map((i) => ({
+                key: i.id,
+                href: `/instruments/${i.id}`,
+                cells: {
+                  id: <Id>{i.externalId}</Id>,
+                  system: (
+                    <span style={{ minWidth: 0, display: "block" }}>
+                      <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {systemLabels.get(i.id) || i.model || <span className="mut">No assets listed</span>}
+                        {i.archived && <> <Pill tone="neutral">archived</Pill></>}
+                      </span>
+                      {i.location && <span className="mut t-meta">{i.location}</span>}
+                    </span>
+                  ),
+                  stage: i.stages.length ? (
+                    <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                      <Pill tone="neutral">{i.stages[0]}</Pill>
+                      {i.stages.length > 1 && <span className="mut t-meta">+{i.stages.length - 1}</span>}
+                    </span>
+                  ) : null,
+                  lead: i.lead ? <span className="t-small">{i.lead}</span> : <span className="mut t-small">unassigned</span>,
+                },
+              }))}
+              empty="No systems of theirs on record"
+            />
+          </div>
+          <div className="card" style={{ marginBottom: 12 }}>
+            <div className="card-title" style={{ marginBottom: 8 }}>Units</div>
+            <DataTable
+              cols={[
+                { key: "unit", label: "Unit", width: "minmax(180px, 2fr)" },
+                { key: "serial", label: "Serial", width: "minmax(120px, 1fr)", hideMobile: true },
+                { key: "status", label: "Status", width: "minmax(110px, 0.8fr)" },
+                { key: "where", label: "Where", width: "minmax(120px, 1fr)", hideMobile: true },
+              ]}
+              rows={ownedAssets.map((a) => {
+                const home = a.instrumentId !== null ? ownedRows.find((i) => i.id === a.instrumentId) : undefined;
+                return {
+                  key: a.id,
+                  href: `/assets/${a.id}`,
+                  cells: {
+                    unit: (
+                      <span style={{ minWidth: 0, display: "block" }}>
+                        <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {a.kind}{a.model ? ` - ${a.model}` : ""}
+                        </span>
+                        {a.manufacturer && <span className="mut t-meta">{a.manufacturer}</span>}
+                      </span>
+                    ),
+                    serial: a.serial ? <span className="mono t-small">{a.serial}</span> : <span className="mut t-small">no serial</span>,
+                    status: <Pill tone={ASSET_TONE[a.status] ?? "neutral"}>{a.status}</Pill>,
+                    where: home
+                      ? <span className="t-small">in <Id>{home.externalId}</Id></span>
+                      : a.instrumentId !== null
+                        ? <span className="mut t-small">in a system</span>
+                        : <span className="mut t-small">{a.location || "on the shelf"}</span>,
+                  },
+                };
+              })}
+              empty="No units of theirs on record"
+            />
+          </div>
           <FleetBriefCard orgId={org.id} orgName={org.name}
             systems={ownedSystems.length} today={shopToday()} />
           {/* Two doors, deliberately together and deliberately distinct: show
