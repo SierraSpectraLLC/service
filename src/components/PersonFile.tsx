@@ -3,8 +3,9 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
-  addPayrollEntry, addPerk, deletePerk, endPerk, saveMemberProfile,
+  addPayrollEntry, addPerk, deletePerk, endPerk, revokeHouseMember, saveMemberProfile, setHouseMember,
 } from "@/app/actions";
+import type { SiteOption } from "@/components/AddPersonDialog";
 import { PAY_KINDS, type PayRow } from "@/lib/payroll";
 import { CADENCE_LABEL, PERK_CADENCES, perkActiveOn, perkMonthlyCents, type PerkRow } from "@/lib/perks";
 import { formatCents } from "@/lib/money";
@@ -15,6 +16,10 @@ import { Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 
 export type PersonProfile = {
+  /** The roster name - what reports and the directory call them. */
+  name: string;
+  /** Their job title, on the account row: their own profile page shows it back to them. */
+  title: string;
   homeAddress: string; phone: string; emergencyName: string; emergencyPhone: string;
   startedOn: string;
 };
@@ -35,7 +40,10 @@ export type PersonProfile = {
 /** One of their kits, and what is counted in it. */
 export type KitRow = { id: number; name: string; lines: number; units: number; short: number };
 
-export default function PersonFile({ email, name, role, profile, pay, perks, kits, seesPay, orgId, today, onClose }: {
+export default function PersonFile({
+  email, name, role, profile, pay, perks, kits, seesPay, orgId, today, onClose,
+  sites = [], canManage = false, isMe = false,
+}: {
   email: string;
   name: string;
   role: string;
@@ -50,6 +58,12 @@ export default function PersonFile({ email, name, role, profile, pay, perks, kit
   orgId: number | null;
   today: string;
   onClose: () => void;
+  /** Client labs, offered as a home base for somebody stationed on-site. */
+  sites?: SiteOption[];
+  /** Owner: may change their privileges or revoke them from here. */
+  canManage?: boolean;
+  /** Their own file - nobody edits their own access. */
+  isMe?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -92,6 +106,18 @@ export default function PersonFile({ email, name, role, profile, pay, perks, kit
       </>}>
 
       <div className="dialog-section">The person</div>
+      <div className="pf2" style={{ marginBottom: 8 }}>
+        <div>
+          <label>Name</label>
+          <input value={p.name} aria-label="Name" disabled={pending} placeholder="Bill Harner"
+            onChange={(e) => setP({ ...p, name: e.target.value })} />
+        </div>
+        <div>
+          <label>Title</label>
+          <input value={p.title} aria-label="Title" disabled={pending} placeholder="Field service engineer"
+            onChange={(e) => setP({ ...p, title: e.target.value })} />
+        </div>
+      </div>
       <div className="pf2">
         <div>
           <label>Started on</label>
@@ -104,12 +130,25 @@ export default function PersonFile({ email, name, role, profile, pay, perks, kit
             onChange={(e) => setP({ ...p, phone: e.target.value })} />
         </div>
       </div>
-      <label style={{ marginTop: 8 }}>Home address</label>
-      <AddressField value={p.homeAddress} ariaLabel="Home address"
+      <label style={{ marginTop: 8 }}>Home base</label>
+      <AddressField value={p.homeAddress} ariaLabel="Home base"
         onChange={(homeAddress) => setP({ ...p, homeAddress })} />
+      {sites.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <select value="" aria-label="Use a client site" disabled={pending}
+            onChange={(e) => { if (e.target.value) setP({ ...p, homeAddress: e.target.value }); }}
+            className="t-small" style={{ width: "auto" }}>
+            <option value="">...or use a client lab&apos;s address</option>
+            {sites.filter((x) => x.address.trim()).map((x) => (
+              <option key={x.label} value={x.address}>{x.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="field-hint">
-        Their point zero for the travel rulebook - the stipend radius and routed miles
-        measure from here. They can also set it themselves.
+        Where they work from - their own address, or a client lab for somebody stationed
+        on-site. The stipend radius and routed miles measure from here. They can also
+        set it themselves.
       </div>
       <div className="pf2" style={{ marginTop: 8 }}>
         <div>
@@ -123,6 +162,44 @@ export default function PersonFile({ email, name, role, profile, pay, perks, kit
             onChange={(e) => setP({ ...p, emergencyPhone: e.target.value })} />
         </div>
       </div>
+
+      {/* Who they are TO THE SHOP. The same two actions Settings › People &
+          ownership runs, offered here so an owner has one place to go about
+          a person. memberGuard still refuses the root owner, the last owner,
+          and anybody editing their own access. */}
+      {canManage && (
+        <>
+          <div className="dialog-section" style={{ marginTop: 16 }}>Access</div>
+          {isMe ? (
+            <div className="mut t-small">You can&apos;t change your own access - ask another owner.</div>
+          ) : (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <label style={{ margin: 0 }}>Privileges</label>
+              <select value={role} disabled={pending} aria-label="Privileges" style={{ width: "auto" }}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  run(() => setHouseMember(email, next, name), `Made ${name || email} ${next}`);
+                }}>
+                <option value="staff">Staff - every system, every job</option>
+                <option value="owner">Owner - staff plus settings, money and deletions</option>
+              </select>
+              <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)" }} disabled={pending}
+                onClick={async () => {
+                  const why = await confirmReason({
+                    title: `Revoke ${email}'s access to the whole shop?`,
+                    body: "They lose their login and this file today. Their work in the record stays.",
+                    action: "Revoke access", tone: "bad",
+                  });
+                  if (!why) return;
+                  run(() => revokeHouseMember(email, why), `Revoked ${email}`, onClose);
+                }}>Revoke access</button>
+            </div>
+          )}
+          <div className="field-hint">
+            Temporary passwords and the root owner are handled under Settings › People &amp; ownership.
+          </div>
+        </>
+      )}
 
       {/*
         What they are carrying.

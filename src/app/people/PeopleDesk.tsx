@@ -8,6 +8,7 @@ import { setHouseHr } from "@/app/actions";
 import { formatCents } from "@/lib/money";
 import { DataTable, Panel, Pill } from "@/components/ui";
 import PersonFile, { type KitRow, type PersonProfile } from "@/components/PersonFile";
+import AddPersonDialog, { type SiteOption } from "@/components/AddPersonDialog";
 import type { PayRow } from "@/lib/payroll";
 import type { PerkRow } from "@/lib/perks";
 import { toast } from "@/components/ui/Toast";
@@ -41,7 +42,7 @@ export type RosterRow = {
  * open a claim in their name and start filling it, because the reason this
  * page exists is that people hand over receipts instead of filing anything.
  */
-export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, perksMonthCents }: {
+export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, perksMonthCents, sites = [], myEmail }: {
   roster: RosterRow[];
   /**
    * Only the owner may hand out HR. Everything else here is available to HR
@@ -54,10 +55,15 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
   orgId: number | null;
   today: string;
   perksMonthCents: number;
+  /** Client labs, offered as a home base when adding or editing somebody. */
+  sites?: SiteOption[];
+  /** The reader - whose own file gets no access controls. */
+  myEmail: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const openRow = roster.find((r) => r.email === open) ?? null;
 
   const toggleHr = (row: RosterRow) =>
@@ -76,14 +82,21 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
     <Panel
       title="The roster"
       count={roster.length || undefined}
-      hint="Everybody on staff here. Open a claim in somebody's name to file the receipts they handed you."
-      empty="Nobody on the roster yet. Settings › Our people is where somebody gets a login."
+      hint="Everybody on staff here. Open somebody to set their title, pay and home base, or to file the receipts they handed you."
+      empty={isOwner ? "Nobody on the roster yet - add someone to put them on staff." : "Nobody on the roster yet."}
+      actions={isOwner ? (
+        <button className="btn sm primary" onClick={() => setAdding(true)}>+ Add someone</button>
+      ) : undefined}
     >
+      {adding && (
+        <AddPersonDialog sites={sites} onClose={() => setAdding(false)} onAdded={() => router.refresh()} />
+      )}
       {openRow && (
         <PersonFile
           email={openRow.email} name={openRow.name} role={openRow.role}
           profile={openRow.profile} pay={openRow.pay} perks={openRow.perks} kits={openRow.kits}
-          seesPay={seesPay} orgId={orgId} today={today}
+          seesPay={seesPay} orgId={orgId} today={today} sites={sites}
+          canManage={isOwner} isMe={openRow.email.toLowerCase() === myEmail.toLowerCase()}
           onClose={() => setOpen(null)} />
       )}
       {perksMonthCents > 0 && (
@@ -111,7 +124,7 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
                   </span>
                   <div className="mut t-meta">
                     {r.email}
-                    {seesPay && r.pay ? ` · ${r.pay.title || "on payroll"}` : ""}
+                    {r.profile.title ? ` · ${r.profile.title}` : seesPay && r.pay ? " · on payroll" : ""}
                   </div>
                 </button>
               ),
@@ -152,7 +165,7 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
                       Open a claim
                     </Link>
                   ) : (
-                    <span className="mut t-meta" title="Set their name in Settings › Our people first">
+                    <span className="mut t-meta" title="Open their file and give them a name first">
                       needs a name
                     </span>
                   )}
@@ -172,8 +185,8 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
         <div className="mut t-small" style={{ marginTop: 10 }}>
           HR may file a reimbursement claim for anybody on this roster and read the
           payroll register. It is not the books: what the shop has invoiced, is owed
-          and has collected stays yours. Logins, roles and passwords are still
-          <Link href="/settings/admin"> Settings › Our people</Link>.
+          and has collected stays yours. Temporary passwords and the root owner are still
+          <Link href="/settings/admin"> Settings › People &amp; ownership</Link>.
         </div>
       )}
     </Panel>

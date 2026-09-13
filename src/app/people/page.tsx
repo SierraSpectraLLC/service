@@ -3,8 +3,8 @@ import { redirect } from "next/navigation";
 import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  expenseCategories, expenseReports, expenses, houseMembers, payroll, perks, stipends,
-  stockItems, stockrooms,
+  expenseCategories, expenseReports, expenses, houseMembers, orgSites, orgs, payroll, perks, stipends,
+  stockItems, stockrooms, users,
 } from "@/db/schema";
 import { myTenantOrgId, requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
@@ -79,6 +79,23 @@ export default async function PeoplePage() {
       .where(and(forTenant(stockrooms.tenantOrgId, t), eq(stockrooms.archived, false)))
       .orderBy(asc(stockrooms.name)),
   ]);
+  /* The half of the person that is not on the roster row: their title lives on
+     the account row, where their own profile page reads it back to them. */
+  const titleRows = members.length
+    ? await db.select({ email: users.email, title: users.title }).from(users)
+      .where(inArray(users.email, members.map((m) => m.email)))
+    : [];
+  const titleOf = new Map(titleRows.map((r) => [r.email.toLowerCase(), r.title ?? ""]));
+  /* Client labs, as a home base for somebody stationed on-site - the same
+     list Settings offers when adding a person. */
+  const siteRows = await db.select({ name: orgSites.name, address: orgSites.address, orgName: orgs.name })
+    .from(orgSites).innerJoin(orgs, eq(orgs.id, orgSites.orgId))
+    .where(and(eq(orgSites.archived, false), forTenant(orgSites.tenantOrgId, t)))
+    .orderBy(asc(orgs.name), asc(orgSites.name));
+  const sites = siteRows.map((x) => {
+    const site = x.name || x.address.split("\n")[0] || "site";
+    return { label: site.startsWith(x.orgName) ? site : `${x.orgName} - ${site}`, address: x.address };
+  });
   const kitIds = kitRooms.filter((r) => r.keeperEmail).map((r) => r.id);
   const kitLines = kitIds.length
     ? await db.select({ stockroomId: stockItems.stockroomId, qty: stockItems.qty, minQty: stockItems.minQty })
@@ -132,6 +149,7 @@ export default async function PeoplePage() {
       role: m.role,
       isHr: m.canAdminPeople,
       profile: {
+        name: m.name, title: titleOf.get(m.email.toLowerCase()) ?? "",
         homeAddress: m.homeAddress, phone: m.phone,
         emergencyName: m.emergencyName, emergencyPhone: m.emergencyPhone,
         startedOn: m.startedOn,
@@ -181,8 +199,8 @@ export default async function PeoplePage() {
   return (
     <div className="container wide">
       <PageHead
-        title="People"
-        sub="Your roster, what each person is out of pocket for, and who is allowed to sort it out."
+        title="Our people"
+        sub="Who works here, what each of them is paid and owed, and who is allowed to sort it out."
       />
 
       <Panel
@@ -218,7 +236,7 @@ export default async function PeoplePage() {
       </Panel>
 
       <PeopleDesk roster={roster} isOwner={isOwner} seesPay={seesPay} orgId={payOrg} today={today}
-        perksMonthCents={perksMonth} />
+        perksMonthCents={perksMonth} sites={sites} myEmail={user.email} />
 
       {/* Under the roster, because it is a fact ABOUT the roster: what each
           person is owed every month whether or not they file anything. */}

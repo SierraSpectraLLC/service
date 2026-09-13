@@ -180,7 +180,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         )}
         <div className="app-header" style={{ background: headerBg, color: headerFg }}>
           <div className="spectrum" />
-          <div className="container wide header-row">
+          {/* Fluid, not wide: the row is one line by design (see .header-row),
+              and a desktop header - brand, eight links, five icons - does not
+              fit in 1080px. Boxed at "wide" the nav wrapped onto a second line
+              and, being margin-left auto, landed bottom-right while the brand
+              stayed top-left: two rows that lined up with nothing. */}
+          <div className="container fluid header-row">
             {/* The burger renders here (mobile only); the drawer and tab bar
                 it controls are fixed overlays, so their DOM home is moot. */}
             {user && (

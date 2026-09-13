@@ -227,7 +227,7 @@ exports[`buildNav, per persona > builds one tree for a staff owner 1`] = `
         "Restoration queue → /restorations",
         "Clients → /clients",
         "Service companies → /network",
-        "People → /people",
+        "Our people → /people",
         "Remote support → /remote",
         "Metrics → /metrics",
         "Sheet parity [3] → /parity",

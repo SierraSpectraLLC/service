@@ -11930,6 +11930,7 @@ export async function setHouseHr(email: string, on: boolean): Promise<{ error?: 
  * another company's person alike, so the shape of the error confirms nothing.
  */
 export async function saveMemberProfile(email: string, data: {
+  name: string; title: string;
   homeAddress: string; phone: string; emergencyName: string; emergencyPhone: string;
   startedOn: string;
 }): Promise<{ error?: string; geocoded?: boolean }> {
@@ -11950,7 +11951,11 @@ export async function saveMemberProfile(email: string, data: {
   // and an unchanged address must not burn a lookup or lose its pin to a
   // provider hiccup while somebody was only fixing the phone number.
   const hit = moved && clean ? await geocode(clean) : null;
+  // A blank name is not an edit: reports and the directory are keyed on it,
+  // so an accidental clear would orphan their claims rather than rename them.
+  const label = data.name.trim().slice(0, 80);
   await db.update(houseMembers).set({
+    ...(label ? { name: label } : {}),
     homeAddress: clean,
     ...(moved ? { homeLat: hit?.lat ?? null, homeLng: hit?.lng ?? null } : {}),
     phone: data.phone.trim().slice(0, 60),
@@ -11962,11 +11967,19 @@ export async function saveMemberProfile(email: string, data: {
     // Their routed answers start from a place that no longer stands.
     await db.delete(driveCache).where(eq(driveCache.memberEmail, member.email));
   }
+  // The title lives on the ACCOUNT row, where their own profile page reads it
+  // back to them ("set by whoever administers your organization") and the
+  // directory shows it. Made if they have never signed in, exactly as
+  // updatePersonProfile does for a client contact.
+  const title = data.title.trim().slice(0, 80);
+  const [account] = await db.select({ id: users.id }).from(users).where(eq(users.email, member.email));
+  if (account) await db.update(users).set({ title }).where(eq(users.id, account.id));
+  else if (title) await db.insert(users).values({ email: member.email, title, ...(label ? { name: label } : {}) });
   await audit({
     actor: u.email, entityType: "house", entityId: e, tenantOrgId: member.orgId,
     // The fact of the edit, never the address - the audit log is read by more
     // people than the person file is.
-    action: `updated ${member.name || e}'s person file`,
+    action: `updated ${label || member.name || e}'s person file`,
   });
   revalidatePath("/people");
   return { geocoded: moved && clean !== "" ? hit !== null : undefined };

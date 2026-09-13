@@ -520,8 +520,14 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
    The active route carries the pill instead, so the answer to "where am I" is
    the one filled shape in the row. */
 .app-header { position: relative; }
+/* ONE ROW, at every width. This used to be flex-wrap: wrap, which was never a
+   layout anybody chose: the moment the links did not fit, the nav dropped to a
+   second line and, being margin-left auto, sat bottom-right under a top-left
+   brand. Now the brand is the only thing allowed to give - its name and
+   workspace already ellipsize - and the nav keeps its shape. The band below
+   tightens the links before the brand has to yield at all. */
 .header-row {
-  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 14px; flex-wrap: nowrap;
   padding-top: 10px; padding-bottom: 10px;
 }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; min-width: 0; }
@@ -534,7 +540,14 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 .brand-org {
   font-size: var(--fs-small); opacity: 0.72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.header-nav { margin-left: auto; display: flex; gap: 2px; flex-wrap: wrap; align-items: center; }
+.header-nav { margin-left: auto; display: flex; gap: 2px; flex-wrap: nowrap; align-items: center; flex-shrink: 0; }
+/* Desktop, narrower than the row wants: tighter links, same words. Measured
+   at 1240 the full-size row is about 1210px of content; this buys the ~100px
+   between there and where the brand would otherwise start to ellipsize. */
+@media (min-width: 980px) and (max-width: 1239px) {
+  .header-nav .nav-link { padding: 6px 7px; }
+  .nav-utility { padding-left: 7px; }
+}
 .nav-link {
   display: inline-block; padding: 6px 11px; border-radius: 999px;
   color: inherit; text-decoration: none; font-size: var(--fs-body); font-weight: 600;
