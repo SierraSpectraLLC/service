@@ -227,6 +227,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     name={user.name} email={user.email}
                     orgName={user.orgName} roleLabel={ROLE_LABEL[user.role] ?? user.role}
                     orgSettingsHref={facts.settingsHref}
+                    org={nav.sections.find((s) => s.key === "org") ?? null}
                     viewAs={mayViewAs && !view.persona
                       ? <ViewAsBar orgs={orgOptions} people={peopleOptions} active={null} />
                       : undefined}

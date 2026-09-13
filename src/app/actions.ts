@@ -4279,6 +4279,8 @@ export async function listLibraryFiles(): Promise<{
   }).from(attachments)
     .where(and(
       isNull(attachments.instrumentId), isNull(attachments.assetId),
+      // An employee's contract is in their person file, not on the shelf.
+      isNull(attachments.houseMemberId),
       u.orgId === null ? isNull(attachments.orgId) : eq(attachments.orgId, u.orgId),
       // Staff carry orgId null, and so does every house shelf on the instance,
       // so the line above alone listed every operator's private library.
@@ -4324,6 +4326,9 @@ export async function deleteAttachment(attachmentId: number, reason: string): Pr
   if (typeof why !== "string") return why;
   const [a] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
   if (!a) return {};
+  // An employee's paperwork is not on any shelf - removeMemberPaper is its
+  // door, and it checks who administers the people rather than whose shelf.
+  if (a.houseMemberId !== null) return { error: "Not found" };
   if (a.instrumentId === null && a.assetId === null) {
     if ((a.orgId ?? null) !== u.orgId) return { error: "Not found" };
   } else {
@@ -11952,6 +11957,13 @@ export async function saveMemberProfile(email: string, data: {
   name: string; title: string;
   homeAddress: string; phone: string; emergencyName: string; emergencyPhone: string;
   startedOn: string;
+  /**
+   * Where they are STATIONED - one of the company's own site locations, as
+   * distinct from where they live. Null clears it; omitted leaves it alone,
+   * so a caller that knows nothing about sites cannot un-station somebody
+   * by saving a phone number.
+   */
+  siteId?: number | null;
 }): Promise<{ error?: string; geocoded?: boolean }> {
   const u = await requireStaff();
   if (!(await mayAdminPeople(u))) return { error: "Not found" };
@@ -11963,6 +11975,19 @@ export async function saveMemberProfile(email: string, data: {
 
   const startedOn = data.startedOn.trim();
   if (startedOn && !isIsoDay(startedOn)) return { error: "The start date needs to be a calendar day" };
+
+  // The staffed location has to be one of THEIR company's sites. Checked
+  // rather than trusted: the id comes from a select, and a hand-edited one
+  // would station an engineer at another company's lab - which is a data
+  // leak wearing a dropdown, the same one setSystemSite refuses.
+  let siteId: number | null | undefined = data.siteId;
+  if (siteId != null) {
+    const [site] = await db.select().from(orgSites).where(eq(orgSites.id, siteId));
+    if (!site || member.orgId === null || site.orgId !== member.orgId) {
+      return { error: "That is not one of your company's site locations" };
+    }
+    siteId = site.id;
+  }
 
   const clean = data.homeAddress.trim().slice(0, 300);
   const moved = clean !== member.homeAddress;
@@ -11990,10 +12015,16 @@ export async function saveMemberProfile(email: string, data: {
   // back to them ("set by whoever administers your organization") and the
   // directory shows it. Made if they have never signed in, exactly as
   // updatePersonProfile does for a client contact.
+  // The staffed location rides on the same row, for the same reason: it is
+  // "which of their organization's sites this person sits at", which is what
+  // users.site_id has always meant for a client contact.
   const title = data.title.trim().slice(0, 80);
+  const station = siteId === undefined ? {} : { siteId };
   const [account] = await db.select({ id: users.id }).from(users).where(eq(users.email, member.email));
-  if (account) await db.update(users).set({ title }).where(eq(users.id, account.id));
-  else if (title) await db.insert(users).values({ email: member.email, title, ...(label ? { name: label } : {}) });
+  if (account) await db.update(users).set({ title, ...station }).where(eq(users.id, account.id));
+  else if (title || siteId != null) {
+    await db.insert(users).values({ email: member.email, title, ...station, ...(label ? { name: label } : {}) });
+  }
   await audit({
     actor: u.email, entityType: "house", entityId: e, tenantOrgId: member.orgId,
     // The fact of the edit, never the address - the audit log is read by more
@@ -12001,7 +12032,99 @@ export async function saveMemberProfile(email: string, data: {
     action: `updated ${label || member.name || e}'s person file`,
   });
   revalidatePath("/people");
+  revalidatePath("/organization");
   return { geocoded: moved && clean !== "" ? hit !== null : undefined };
+}
+
+/**
+ * The one person on the roster this caller may administer, or null.
+ *
+ * The lookup and the two refusals saveMemberProfile, setHouseHr and addPerk
+ * each spell out: whoever administers the people (lib/hr), and only over
+ * their own workspace's roster, with "Not found" for a missing person and
+ * another company's person alike - the shape of a refusal confirms nothing.
+ */
+async function administeredMember(
+  u: SessionUser, email: string,
+): Promise<typeof houseMembers.$inferSelect | null> {
+  if (!(await mayAdminPeople(u))) return null;
+  const e = email.trim().toLowerCase();
+  const [member] = await db.select().from(houseMembers).where(eq(houseMembers.email, e));
+  const mine = isPlatformStaff(tenantViewer(u)) ? null : u.operatorOrgId;
+  if (!member || member.role === "none") return null;
+  if (mine !== null && (member.orgId ?? null) !== mine) return null;
+  return member;
+}
+
+/**
+ * File paperwork on an employee: the contract they signed, the offer letter,
+ * a certification.
+ *
+ * PART OF THE PERSON FILE, NOT THE LIBRARY. An agreement's paper lands on
+ * the organization's shelf, where every member of that organization can
+ * read it, and that is right for a contract with a customer. A contract with
+ * an employee is the opposite case: it names their pay, and the people who
+ * may read it are the people who may read the register. So the row is
+ * stamped with the employee (attachments.house_member_id), carries no shelf
+ * (org_id null), and lib/fileAccess admits only whoever administers the
+ * people and the person themselves. Every shelf listing skips it.
+ *
+ * The bytes are already in Blob when this runs - the browser uploaded them
+ * against the token /api/upload minted - so this is the record, checked
+ * against the store's ceiling like every other upload.
+ */
+export async function uploadMemberPapers(
+  email: string,
+  files: { fileName: string; url: string; size: number }[],
+  kind = "Contract",
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  if (!files.length) return {};
+  const member = await administeredMember(u, email);
+  if (!member) return { error: "Not found" };
+  const guard = await guardStorage(u.orgId, await storeTenantFor(u.orgId, u), files.reduce((n, f) => n + (f.size || 0), 0));
+  if (guard) return guard;
+  const stamp = member.orgId ?? myTenantOrgId(u);
+  const rows = await db.insert(attachments).values(files.map((f) => ({
+    fileName: f.fileName.trim().slice(0, 200) || "document", url: f.url, size: f.size || 0,
+    description: "", kind: kind.trim().slice(0, 40) || "Contract",
+    tenantOrgId: stamp, instrumentId: null, assetId: null, orgId: null,
+    houseMemberId: member.id, uploadedBy: u.name,
+  }))).returning();
+  for (const row of rows) {
+    await audit({
+      actor: u.email, entityType: "house", entityId: member.email, tenantOrgId: stamp,
+      // The file's name and nothing of what is in it.
+      action: `filed '${row.fileName}' on ${member.name || member.email}'s person file`,
+    });
+  }
+  revalidatePath("/people");
+  return {};
+}
+
+/**
+ * Take a paper off a person's file. The bytes go too: a contract typed
+ * against the wrong person is not something to leave in storage under a
+ * URL, and unlike a record's evidence there is no history it is proving.
+ */
+export async function removeMemberPaper(attachmentId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [a] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
+  if (!a || a.houseMemberId === null) return { error: "Not found" };
+  const [subject] = await db.select().from(houseMembers).where(eq(houseMembers.id, a.houseMemberId));
+  const member = subject ? await administeredMember(u, subject.email) : null;
+  if (!member) return { error: "Not found" };
+  await db.delete(attachments).where(eq(attachments.id, attachmentId));
+  await deleteBlobs([a.url]);
+  await audit({
+    actor: u.email, entityType: "house", entityId: member.email, tenantOrgId: a.tenantOrgId,
+    action: `removed '${a.fileName}' from ${member.name || member.email}'s person file - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revalidatePath("/people");
+  return {};
 }
 
 /**
@@ -13991,6 +14114,8 @@ export async function addOrgSite(orgId: number, data: SiteInput): Promise<{ erro
     action: `added site "${siteLabel(row)}" for ${org.name}`,
   });
   revalidatePath(`/settings/organizations/${orgId}`);
+  // The workspace's own sites are also read from the organization section.
+  revalidatePath("/organization/sites");
   rev();
   return { id: row.id };
 }
@@ -14011,6 +14136,8 @@ export async function updateOrgSite(siteId: number, data: SiteInput): Promise<{ 
     action: `edited site "${siteLabel({ ...site, ...clean })}"`,
   });
   revalidatePath(`/settings/organizations/${site.orgId}`);
+  // The workspace's own sites are also read from the organization section.
+  revalidatePath("/organization/sites");
   rev();
   return {};
 }
@@ -14033,6 +14160,8 @@ export async function archiveOrgSite(siteId: number, archived: boolean): Promise
     action: `${archived ? "closed" : "reopened"} site "${siteLabel(site)}"`,
   });
   revalidatePath(`/settings/organizations/${site.orgId}`);
+  // The workspace's own sites are also read from the organization section.
+  revalidatePath("/organization/sites");
   rev();
   return {};
 }

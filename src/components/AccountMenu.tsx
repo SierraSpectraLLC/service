@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { signOutAction } from "@/app/actions";
 import Dropdown from "@/components/Dropdown";
+import { isActive, type NavSection } from "@/lib/nav";
 
 /**
  * The account corner: who you're signed in as, where your own settings are, and
@@ -14,7 +16,7 @@ import Dropdown from "@/components/Dropdown";
  * The initials disc is the affordance. It also answers a question the old header
  * couldn't: WHICH account, which matters on a shared bench machine.
  */
-export default function AccountMenu({ name, email, orgName, roleLabel, orgSettingsHref, viewAs, viewSwitch }: {
+export default function AccountMenu({ name, email, orgName, roleLabel, orgSettingsHref, org, viewAs, viewSwitch }: {
   name: string;
   email: string;
   /** The organization whose workspace this is, if any. */
@@ -31,11 +33,21 @@ export default function AccountMenu({ name, email, orgName, roleLabel, orgSettin
    * named link for whoever lives there.
    */
   orgSettingsHref: string | null;
+  /**
+   * The organization section of the nav tree, for whoever has one - the
+   * owner and HR. Rendered here under the COMPANY'S NAME rather than as a
+   * sixth word in the header row: "my company" is something people look for
+   * behind their own name, and the header's width is spent on the work. The
+   * phone reaches the same section from the Account hub. See lib/nav.
+   */
+  org?: NavSection | null;
   /** The owner's persona switcher, rendered inside the menu. */
   viewAs?: React.ReactNode;
   /** Which half of the app I work in, where my company does both. */
   viewSwitch?: React.ReactNode;
 }) {
+  const path = usePathname();
+  const current = (href: string) => (isActive(path, href) ? "page" : undefined);
   const initials = (name || email)
     .split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
 
@@ -56,6 +68,18 @@ export default function AccountMenu({ name, email, orgName, roleLabel, orgSettin
       <Link href="/inbox">Inbox</Link>
       <Link href="/documents">Documents</Link>
       {orgSettingsHref && <Link href={orgSettingsHref}>Organization settings</Link>}
+      {/* The company, by name, then its rooms: sites, employees, and for the
+          owner the two configuration rooms. The hub leads, as it does in every
+          other menu. */}
+      {org && (
+        <>
+          <div className="menu-label">{orgName || org.label}</div>
+          <Link href={org.href} className="menu-home" aria-current={current(org.href)}>{org.label}</Link>
+          {org.items.map((i) => (
+            <Link key={i.href} href={i.href} aria-current={current(i.href)}>{i.label}</Link>
+          ))}
+        </>
+      )}
       {/* The persona switcher opens a second step inside the menu, so its clicks
           must not reach the panel's close-on-choose handler. */}
       {viewAs && <div className="menu-sub" onClick={(e) => e.stopPropagation()}>{viewAs}</div>}

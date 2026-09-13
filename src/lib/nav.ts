@@ -31,7 +31,7 @@ export type NavLeaf = { href: string; label: string; badge?: number; tone?: "war
  * the section's own label, because "Financial home" reads and "Your equipment
  * home" does not.
  */
-export type SectionKey = "money" | "ops" | "library" | "roster" | "account";
+export type SectionKey = "money" | "ops" | "library" | "roster" | "org" | "account";
 export type NavSection = {
   key: SectionKey;
   label: string;
@@ -93,6 +93,12 @@ export type NavContext = {
   openDiffs: number;
   /** Where organization settings live for this reader, or null if nowhere. */
   settingsHref: string | null;
+  /**
+   * The workspace's own organization page - its name, logo, billing address -
+   * for the owner who may configure it. Null for everybody else, HR included:
+   * administering the people is not the same privilege as renaming the company.
+   */
+  orgHref: string | null;
 };
 
 /** The empty tree, for a signed-out request. */
@@ -127,6 +133,7 @@ export const LABEL = {
   calendar: "Calendar",
   money: "Financial",
   ops: "Operations",
+  org: "My organization",
   account: "Account",
 } as const;
 
@@ -135,7 +142,7 @@ export function buildNav(ctx: NavContext): NavTree {
   return {
     primary: primaryOf(ctx),
     tabs: tabsOf(ctx),
-    sections: [...workSections(ctx), accountSection(ctx)],
+    sections: [...workSections(ctx), ...orgSection(ctx), accountSection(ctx)],
   };
 }
 
@@ -303,7 +310,9 @@ function staffSections(ctx: NavContext): NavSection[] {
          to read. The page refuses them too; this keeps the door off the
          wall. */
       ...(ctx.isOwner ? [{ href: "/network", label: "Service companies" }] : []),
-      ...(ctx.adminsPeople ? [{ href: "/people", label: "Our people" }] : []),
+      /* The roster is NOT here any more. It is a room of the organization
+         section below - the one place about the company itself, its sites and
+         its people - and one destination goes by one word in one place. */
       /* Purchasing and Reimbursements, for the readers who have no Financial
          menu to find them in.
          They are things an engineer DOES rather than facts about how the
@@ -396,6 +405,51 @@ function clientSections(ctx: NavContext): NavSection[] {
          client's nav and read as the shop's register rather than their own
          company's. Their own pay is a personal matter and lives in the account
          section, which has a room for it - see accountSection. */
+    ],
+  }];
+}
+
+/**
+ * The company itself: where it is, who works there, and what each of them is
+ * owed - for the people who run it.
+ *
+ * Every fact this section holds already had a room somewhere: the roster
+ * under Operations, the sites on the organization's Settings page, access
+ * under Settings › People & ownership. What nobody had was a door that meant
+ * "my organization". An owner looking for where an engineer is stationed had
+ * to know it was on the same page as the client's billing address.
+ *
+ * NOT IN THE HEADER ROW. On a desktop it lives inside the account menu, under
+ * the company's own name, which is where somebody looks for "my company" -
+ * the header's width is spent on the work. On a phone it is a card at the top
+ * of the Account hub rather than a row of the drawer, for the same reason the
+ * drawer folds its sections: the drawer fits eleven rows at rest and every
+ * one of them is spoken for. The rail inside the section, the search index
+ * and the hub page all read this same tree.
+ *
+ * The owner, and whoever they have made HR - lib/hr.mayAdminPeople, the same
+ * gate the roster page enforces. An engineer has no such section: their own
+ * facts are in the account section, where they always were.
+ */
+function orgSection(ctx: NavContext): NavSection[] {
+  if (!ctx.isStaff || !ctx.adminsPeople) return [];
+  return [{
+    key: "org", label: LABEL.org, href: "/organization", homeLabel: "Organization home",
+    items: [
+      /* Where the company is: its shop, its offices, the places an employee
+         can be stationed. The same rows a client's sites are, on the
+         workspace's own organization. */
+      { href: "/organization/sites", label: "Site locations" },
+      /* Everybody on staff, and everything the office holds about each of
+         them: pay, title and privileges, home and staffed location, the
+         contract they signed, their standing reimbursements, how to reach
+         them. Called what they are. */
+      { href: "/people", label: "Employees" },
+      /* The owner's two rooms about the company's shape: who may sign in and
+         how (temporary passwords, the root owner), and the company's own
+         name, logo and billing address. */
+      ...(ctx.isOwner ? [{ href: "/settings/admin", label: "People & ownership" }] : []),
+      ...(ctx.orgHref ? [{ href: ctx.orgHref, label: "Company profile" }] : []),
     ],
   }];
 }

@@ -30,12 +30,18 @@ const emptySite = { name: "", address: "", accessNotes: "", contactName: "", con
  * BUILDING, so it is here rather than on the company - where it would be noise
  * on an invoice screen and wrong the day they open a second lab.
  */
-export default function SitesCard({ orgId, orgName, billingAddress, sites, canEdit }: {
+export default function SitesCard({ orgId, orgName, billingAddress, sites, canEdit, showBilling = true }: {
   orgId: number;
   orgName: string;
   billingAddress: string;
   sites: SiteRow[];
   canEdit: boolean;
+  /**
+   * Whether to show the billing-address card above the sites. Off for the
+   * workspace's OWN organization: its sites are where its people are
+   * stationed, and "where the invoices go" is a fact about a customer.
+   */
+  showBilling?: boolean;
 }) {
   const [billing, setBilling] = useState(billingAddress);
   const [billingMsg, setBillingMsg] = useState("");
@@ -111,7 +117,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
 
   return (
     <>
-      <div className="card">
+      {showBilling && <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Billing address</div>
         <div className="mut t-small" style={{ marginBottom: 8 }}>
           Where {orgName}&apos;s invoices go. One per company - the labs are below.
@@ -134,7 +140,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
             {billingMsg}
           </span>
         )}
-      </div>
+      </div>}
 
       <div className="card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>

@@ -2,10 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { upload } from "@vercel/blob/client";
 import {
-  addPayrollEntry, addPerk, deletePerk, endPerk, revokeHouseMember, saveMemberProfile, setHouseMember,
+  addPayrollEntry, addPerk, deletePerk, endPerk, removeMemberPaper, revokeHouseMember, saveMemberProfile,
+  setHouseMember, uploadMemberPapers,
 } from "@/app/actions";
-import type { SiteOption } from "@/components/AddPersonDialog";
+import { fmtBytes } from "@/lib/storage";
+import { siteLabel } from "@/lib/sites";
 import { PAY_KINDS, type PayRow } from "@/lib/payroll";
 import { CADENCE_LABEL, PERK_CADENCES, perkActiveOn, perkMonthlyCents, type PerkRow } from "@/lib/perks";
 import { formatCents } from "@/lib/money";
@@ -23,7 +26,23 @@ export type PersonProfile = {
   title: string;
   homeAddress: string; phone: string; emergencyName: string; emergencyPhone: string;
   startedOn: string;
+  /** Where they are stationed - one of the company's own site locations, or null. */
+  siteId: number | null;
 };
+
+/** One of the company's own sites, for the staffed-location picker. */
+export type OwnSite = { id: number; name: string; address: string; archived: boolean };
+
+/** A paper on the person file: the contract, an offer letter, a certification. */
+export type PaperRow = { id: number; fileName: string; kind: string; size: number; when: string };
+
+/** One standing reimbursement of theirs, as the roster's card describes it. */
+export type StipendLine = {
+  id: number; label: string; amountCents: number; cadence: string; active: boolean; nextOn: string;
+};
+
+/** What a paper on the file can be called. Free text on the row; these are the offers. */
+const PAPER_KINDS = ["Contract", "Offer letter", "Certification", "Other"] as const;
 
 /**
  * One employee, the whole file: who they are, what they are paid, what else
@@ -43,7 +62,7 @@ export type KitRow = { id: number; name: string; lines: number; units: number; s
 
 export default function PersonFile({
   email, name, role, profile, pay, perks, kits, seesPay, orgId, today, onClose,
-  sites = [], canManage = false, isMe = false,
+  sites = [], ownSites = [], papers = [], stipends = [], canManage = false, isMe = false,
 }: {
   email: string;
   name: string;
@@ -56,13 +75,17 @@ export default function PersonFile({
   kits: KitRow[];
   /** Client labs, for an engineer whose day starts at a client rather than at home. */
   sites?: WorksiteChoice[];
+  /** The company's own site locations - where somebody can be STATIONED. */
+  ownSites?: OwnSite[];
+  /** The paperwork on their file. */
+  papers?: PaperRow[];
+  /** Their standing reimbursements, read here and changed on the roster's card. */
+  stipends?: StipendLine[];
   seesPay: boolean;
   /** The employing workspace - where a pay change is filed. Null hides the editors. */
   orgId: number | null;
   today: string;
   onClose: () => void;
-  /** Client labs, offered as a home base for somebody stationed on-site. */
-  sites?: SiteOption[];
   /** Owner: may change their privileges or revoke them from here. */
   canManage?: boolean;
   /** Their own file - nobody edits their own access. */
@@ -81,6 +104,34 @@ export default function PersonFile({
   const [perkDraft, setPerkDraft] = useState({
     title: "", amount: "", cadence: "monthly", startsOn: today, note: "",
   });
+  const [paperKind, setPaperKind] = useState<string>(PAPER_KINDS[0]);
+  const [busy, setBusy] = useState("");
+
+  /**
+   * Paperwork goes straight from the browser to Blob against the token
+   * /api/upload mints, then the record is made - the same two steps an
+   * agreement's paper takes, with the employee already chosen.
+   */
+  const filePapers = async (files: File[]) => {
+    if (!files.length) return;
+    setError("");
+    try {
+      const done: { fileName: string; url: string; size: number }[] = [];
+      for (const f of files) {
+        setBusy(`Uploading ${f.name}...`);
+        const blob = await upload(f.name, f, { access: "public", handleUploadUrl: "/api/upload" });
+        done.push({ fileName: f.name, url: blob.url, size: f.size });
+      }
+      const res = await uploadMemberPapers(email, done, paperKind);
+      if (res?.error) { setError(res.error); return; }
+      toast({ message: done.length === 1 ? `Filed ${done[0].fileName}` : `Filed ${done.length} papers` });
+      router.refresh();
+    } catch (e) {
+      setError((e as Error).message || "The upload failed");
+    } finally {
+      setBusy("");
+    }
+  };
 
   const run = (fn: () => Promise<{ error?: string } | void>, ok: string, after?: () => void) =>
     startTransition(async () => {
@@ -123,40 +174,49 @@ export default function PersonFile({
       </div>
       <div className="pf2">
         <div>
+          <label>Phone</label>
+          <input value={p.phone} aria-label="Phone" disabled={pending}
+            onChange={(e) => setP({ ...p, phone: e.target.value })} />
+        </div>
+        <div>
+          <label>Email</label>
+          {/* Their sign-in identity, so it is shown rather than typed here:
+              the roster, the register and their account all key on it, and
+              moving it is Settings › People & ownership's job. */}
+          <input value={email} aria-label="Email" readOnly className="mono t-small" />
+        </div>
+      </div>
+      <div className="pf2" style={{ marginTop: 8 }}>
+        <div>
           <label>Started on</label>
           <input type="date" value={p.startedOn} aria-label="Started on" disabled={pending}
             onChange={(e) => setP({ ...p, startedOn: e.target.value })} />
         </div>
         <div>
-          <label>Phone</label>
-          <input value={p.phone} aria-label="Phone" disabled={pending}
-            onChange={(e) => setP({ ...p, phone: e.target.value })} />
-        </div>
-      </div>
-      <label style={{ marginTop: 8 }}>Home address</label>
-      <HomeBasePicker value={p.homeAddress} ariaLabel="Home address" sites={sites} disabled={pending}
-      <label style={{ marginTop: 8 }}>Home base</label>
-      <AddressField value={p.homeAddress} ariaLabel="Home base"
-        onChange={(homeAddress) => setP({ ...p, homeAddress })} />
-      {sites.length > 0 && (
-        <div style={{ marginTop: 8 }}>
-          <select value="" aria-label="Use a client site" disabled={pending}
-            onChange={(e) => { if (e.target.value) setP({ ...p, homeAddress: e.target.value }); }}
-            className="t-small" style={{ width: "auto" }}>
-            <option value="">...or use a client lab&apos;s address</option>
-            {sites.filter((x) => x.address.trim()).map((x) => (
-              <option key={x.label} value={x.address}>{x.label}</option>
+          <label>Staffed location</label>
+          {/* WHERE THEY ARE STATIONED, as distinct from where they live: the
+              shop, an office, the yard - one of the company's own sites. */}
+          <select value={p.siteId ?? ""} aria-label="Staffed location" disabled={pending}
+            onChange={(e) => setP({ ...p, siteId: e.target.value ? parseInt(e.target.value, 10) : null })}>
+            <option value="">Not stationed anywhere in particular</option>
+            {ownSites.filter((x) => !x.archived || x.id === p.siteId).map((x) => (
+              <option key={x.id} value={x.id}>{siteLabel(x)}{x.archived ? " (closed)" : ""}</option>
             ))}
           </select>
         </div>
+      </div>
+      {ownSites.length === 0 && (
+        <div className="field-hint">
+          No site locations on file yet - add the shop and the offices under My organization › Site locations.
+        </div>
       )}
+      <label style={{ marginTop: 8 }}>Home address</label>
+      <HomeBasePicker value={p.homeAddress} ariaLabel="Home address" sites={sites} disabled={pending}
+        onChange={(homeAddress) => setP({ ...p, homeAddress })} />
       <div className="field-hint">
         Their point zero for the travel rulebook - the stipend radius and routed miles
         measure from here. A dedicated engineer stationed at a client starts from that
         client&apos;s lab: pick it above. They can also set it themselves.
-        Where they work from - their own address, or a client lab for somebody stationed
-        on-site. The stipend radius and routed miles measure from here. They can also
-        set it themselves.
       </div>
       <div className="pf2" style={{ marginTop: 8 }}>
         <div>
@@ -208,6 +268,73 @@ export default function PersonFile({
           </div>
         </>
       )}
+
+      {/* The paper: the contract they signed, the offer letter, a
+          certification. Kept on the person file rather than the shelf - see
+          uploadMemberPapers - so only whoever administers the people, and
+          the person themselves, can open it. */}
+      <div className="dialog-section" style={{ marginTop: 16 }}>Contract &amp; paperwork</div>
+      {papers.length === 0 && (
+        <div className="mut t-small" style={{ marginBottom: 8 }}>Nothing filed yet.</div>
+      )}
+      {papers.map((f) => (
+        <div key={f.id} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
+          <a href={`/api/files/${f.id}`} target="_blank" rel="noopener" className="t-body" style={{ flex: 1, minWidth: 0, fontWeight: 600 }}>
+            {f.fileName}
+          </a>
+          <Pill tone="neutral">{f.kind}</Pill>
+          <span className="mut t-meta">{fmtBytes(f.size)} · {f.when}</span>
+          <button className="btn link danger" disabled={pending || !!busy}
+            onClick={async () => {
+              const why = await confirmReason({
+                title: `Remove ${f.fileName} from their file?`,
+                body: "The file is deleted from storage, not just unfiled. For a paper filed on the wrong person or superseded by a signed copy.",
+                action: "Remove it", tone: "bad",
+              });
+              if (why) run(() => removeMemberPaper(f.id, why), "Removed");
+            }}>×</button>
+        </div>
+      ))}
+      <div className="row-2" style={{ marginTop: 8, alignItems: "center" }}>
+        <select value={paperKind} aria-label="Paper kind" style={{ width: "auto" }} disabled={!!busy}
+          onChange={(e) => setPaperKind(e.target.value)}>
+          {PAPER_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+        </select>
+        <label className="btn sm" style={{ margin: 0, cursor: busy ? "default" : "pointer" }}>
+          {busy || "+ File a document"}
+          <input type="file" multiple hidden aria-label="File a document" disabled={!!busy}
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              e.target.value = "";
+              void filePapers(files);
+            }} />
+        </label>
+      </div>
+      <div className="field-hint">
+        Readable by you, the owner, and them - never by their colleagues. Their signed agreement
+        goes here; the terms it states go in Pay below.
+      </div>
+
+      {/* What the company pays them back every month whether or not they file
+          anything - internet, phone, tools. Read here; set up and changed on
+          the Standing reimbursements card, which is the owner's. */}
+      <div className="dialog-section" style={{ marginTop: 16 }}>Monthly reimbursements</div>
+      {stipends.length === 0 && (
+        <div className="mut t-small" style={{ marginBottom: 8 }}>
+          No standing reimbursements. The owner sets one up under Standing reimbursements on the Employees page.
+        </div>
+      )}
+      {stipends.map((x) => (
+        <div key={x.id} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
+          <span className="t-body" style={{ flex: 1, minWidth: 0 }}>
+            {x.label}
+            <span className="mut t-meta">{` · ${formatCents(x.amountCents)} ${x.cadence}`}</span>
+          </span>
+          {x.active
+            ? <span className="mut t-meta">{x.nextOn ? `next ${x.nextOn}` : "no further cycles"}</span>
+            : <Pill tone="faint">paused</Pill>}
+        </div>
+      ))}
 
       {/*
         What they are carrying.

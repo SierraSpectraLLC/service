@@ -62,6 +62,7 @@ export default async function PdfStudioPage() {
             // The org's own shelf: homeless files stamped to it.
             user.orgId === null ? sql`false` : and(
               isNull(attachments.instrumentId), isNull(attachments.assetId), eq(attachments.orgId, user.orgId),
+              isNull(attachments.houseMemberId),
             ),
           ),
     ))

@@ -3,8 +3,9 @@
 // Extracted verbatim from /api/files/[id]; the rules are documented there.
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { attachments, instruments, assets, engagementRecords } from "@/db/schema";
+import { attachments, instruments, assets, engagementRecords, houseMembers } from "@/db/schema";
 import { currentUser } from "@/lib/authz";
+import { mayAdminPeople } from "@/lib/hr";
 import { canSeeSystem, assetAccess } from "@/lib/tenancy";
 import { houseOfRecord } from "@/lib/tenants";
 import type { SystemDossier } from "@/lib/dossier";
@@ -23,6 +24,17 @@ export async function mayReadAttachment(file: typeof attachments.$inferSelect): 
 
   const user = await currentUser();
   if (!user) return false;
+  // An employee's own paperwork - their contract, which names their pay.
+  // Whoever administers the people (lib/hr), and the person themselves; not
+  // their colleagues, whatever workspace they are staff of. Decided BEFORE the
+  // staff rule below, which would otherwise hand it to the whole shop.
+  if (file.houseMemberId !== null) {
+    if (!houseOfRecord(user, file.tenantOrgId)) return false;
+    if (await mayAdminPeople(user)) return true;
+    const [subject] = await db.select({ email: houseMembers.email }).from(houseMembers)
+      .where(eq(houseMembers.id, file.houseMemberId));
+    return subject?.email.toLowerCase() === user.email.toLowerCase();
+  }
   // Staff of the workspace the file belongs to. Being staff somewhere else is
   // not a key to this file: on a shared instance an id would otherwise be
   // enough to read another service company's documents.

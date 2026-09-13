@@ -19,12 +19,12 @@ const BASE: NavContext = {
   signedIn: true, isStaff: false, isOwner: false, resells: false, isClientOrg: false, hasOrg: false,
   modules: { eod: false, remote: false, sheetSync: false },
   hasStock: false, orgRemoteOn: false, seesBooks: false, seesPayroll: false,
-  seesOwnMoney: true, adminsPeople: false, openDiffs: 0, settingsHref: null,
+  seesOwnMoney: true, adminsPeople: false, openDiffs: 0, settingsHref: null, orgHref: null,
 };
 
 const OWNER: NavContext = {
   ...BASE, isStaff: true, isOwner: true, hasStock: true, seesBooks: true, seesPayroll: true,
-  adminsPeople: true, openDiffs: 3, settingsHref: "/settings",
+  adminsPeople: true, openDiffs: 3, settingsHref: "/settings", orgHref: "/settings/organizations/3",
   modules: { eod: true, remote: true, sheetSync: true },
 };
 
@@ -45,6 +45,10 @@ const ENGINEER: NavContext = {
    somebody first had a Financial menu without being able to read a balance. */
 const HR: NavContext = { ...ENGINEER, seesPayroll: true };
 
+/* The office manager: made HR by the owner, so they administer the people -
+   the organization section, the roster - without owning the company. */
+const HR_ADMIN: NavContext = { ...HR, adminsPeople: true };
+
 const CLIENT_LAB: NavContext = {
   ...BASE, isClientOrg: true, hasOrg: true, hasStock: true, orgRemoteOn: true,
   modules: { eod: false, remote: true, sheetSync: false },
@@ -55,6 +59,7 @@ const CLIENT_RESELLER: NavContext = { ...CLIENT_LAB, resells: true, hasStock: fa
 
 const PERSONAS: [string, NavContext][] = [
   ["staff owner", OWNER], ["staff engineer", ENGINEER], ["HR with payroll", HR],
+  ["HR who administers the people", HR_ADMIN],
   ["client lab", CLIENT_LAB], ["client reseller", CLIENT_RESELLER],
 ];
 
@@ -122,7 +127,9 @@ describe("the rules every tree obeys", () => {
          per folding section, the account row and sign out. The sections FOLD -
          that is the whole change - so nothing inside them counts here. Eleven
          is the measured limit at 667px with nothing scrolling. */
-      const folding = t.sections.filter((s) => s.key !== "account");
+      /* The organization section is not a drawer row either: on a phone it
+         is the first card of the Account hub, for exactly this reason. */
+      const folding = t.sections.filter((s) => s.key !== "account" && s.key !== "org");
       const account = t.sections.filter((s) => s.key === "account");
       const rows = 1 + t.primary.length + folding.length + account.length + 1;
       expect(rows, `${who} drawer rows: ${rows}`).toBeLessThanOrEqual(11);

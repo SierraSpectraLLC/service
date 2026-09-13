@@ -1,5 +1,74 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`buildNav, per persona > builds one tree for a HR who administers the people 1`] = `
+{
+  "primary": [
+    "Today → /",
+    "Work orders → /work",
+    "Systems → /instruments",
+    "Assets → /assets",
+    "Inventory → /stock",
+  ],
+  "sections": [
+    {
+      "Financial → /money": [
+        "Financial home (home)",
+        "Purchasing → /money/purchasing",
+        "Reimbursements → /money/reimbursements",
+        "Payroll → /money/payroll",
+      ],
+    },
+    {
+      "Operations → /ops": [
+        "Operations home (home)",
+        "EOD update → /eod",
+        "Calendar → /calendar",
+        "Maintenance → /maintenance",
+        "Restoration queue → /restorations",
+        "Clients → /clients",
+        "Remote support → /remote",
+        "Metrics → /metrics",
+        "Archived → /archive",
+      ],
+    },
+    {
+      "Library → /library": [
+        "Library home (home)",
+        "Equipment catalog → /settings/catalog",
+        "Parts catalog → /settings/parts",
+        "Documents → /documents",
+        "Gallery → /gallery",
+        "PDF studio → /pdf",
+        "Import spreadsheet → /import",
+      ],
+    },
+    {
+      "My organization → /organization": [
+        "Organization home (home)",
+        "Site locations → /organization/sites",
+        "Employees → /people",
+      ],
+    },
+    {
+      "Account → /account": [
+        "Account home (home)",
+        "Profile → /account/profile",
+        "Sign-in & security → /account/security",
+        "Notifications → /account/notifications",
+        "My pay → /account/pay",
+      ],
+    },
+  ],
+  "tabs": [
+    "Today → /",
+    "Work orders → /work",
+    "Assets → /assets",
+    "Inbox → /inbox",
+    "Library → /library",
+  ],
+}
+`;
+
 exports[`buildNav, per persona > builds one tree for a HR with payroll 1`] = `
 {
   "primary": [
@@ -227,7 +296,6 @@ exports[`buildNav, per persona > builds one tree for a staff owner 1`] = `
         "Restoration queue → /restorations",
         "Clients → /clients",
         "Service companies → /network",
-        "Our people → /people",
         "Remote support → /remote",
         "Metrics → /metrics",
         "Sheet parity [3] → /parity",
@@ -243,6 +311,15 @@ exports[`buildNav, per persona > builds one tree for a staff owner 1`] = `
         "Gallery → /gallery",
         "PDF studio → /pdf",
         "Import spreadsheet → /import",
+      ],
+    },
+    {
+      "My organization → /organization": [
+        "Organization home (home)",
+        "Site locations → /organization/sites",
+        "Employees → /people",
+        "People & ownership → /settings/admin",
+        "Company profile → /settings/organizations/3",
       ],
     },
     {
