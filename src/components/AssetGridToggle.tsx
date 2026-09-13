@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import AssetGrid, { type GridModel } from "./AssetGrid";
+import type { OrgLite } from "@/lib/owner";
 
 /**
  * The grid, behind a toggle. Adding one unit is a form; adding a rack of them is
@@ -12,7 +13,7 @@ export default function AssetGridToggle({ instrumentId, kinds, models, owners }:
   instrumentId: number | null;
   kinds: string[];
   models: Record<string, GridModel[]>;
-  owners: string[];
+  owners: OrgLite[];
 }) {
   const [open, setOpen] = useState(false);
   // A fragment rather than a wrapping div, so the trigger can share a flex row

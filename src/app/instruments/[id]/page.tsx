@@ -34,7 +34,7 @@ import { BLOCKED_STAGE, partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
 import { copyTargetsFor } from "@/lib/copyTargets";
 import { clientOptions } from "@/lib/clientNames";
-import { canOfferResale, resaleFlagFor } from "@/lib/owner";
+import { canOfferResale, ownerChoices, resaleFlagFor } from "@/lib/owner";
 import { pmPosture, postureLine } from "@/lib/pmPosture";
 import { coverageForSystem } from "@/lib/pmPlanData";
 import { COVERAGE_LABEL, COVERAGE_TONE, coverageLine, perYearLabel } from "@/lib/pmPlan";
@@ -863,7 +863,9 @@ export default async function InstrumentPage({ params, searchParams }: {
               kinds={vocabRows.filter((v) => v.kind === "asset_type").map((v) => v.name)}
               canEdit={canEdit}
               catalogModels={catalogModels} gridModels={gridModels}
-              owners={[...new Set([inst.client, ...systemRows.map((r) => r.client)].filter(Boolean))]}
+              // The organizations we work with, not the client names already on
+              // systems - and only for staff, whose book of business it is.
+              owners={isStaff ? ownerChoices(orgRows, user.operatorOrgId) : []}
               // The maker book plus every maker on a catalog model - already
               // loaded here, so no extra queries for a suggestion list.
               staff={isStaff}

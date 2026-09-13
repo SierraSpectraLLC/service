@@ -6,6 +6,7 @@ import { createAsset } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import CatalogSelect from "./CatalogSelect";
 import PickOrAdd from "./PickOrAdd";
+import { orgNamed, type OrgLite } from "@/lib/owner";
 
 const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: "", asFound: "", location: "", note: "" };
 
@@ -15,7 +16,8 @@ const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: ""
  * installed into a system later (from here or from the system's Assets section).
  */
 export default function NewAssetForm({ owners, kinds, models }: {
-  owners: string[]; kinds: string[];
+  /** The organizations a unit may belong to - see lib/owner.ownerChoices. */
+  owners: OrgLite[]; kinds: string[];
   // Catalog models per type - the only source; no free text (see CatalogSelect).
   models: Record<string, string[]>;
 }) {
@@ -32,7 +34,9 @@ export default function NewAssetForm({ owners, kinds, models }: {
   const submit = () => {
     setError("");
     startTransition(async () => {
-      const res = await createAsset(null, draft);
+      // Picked off the organization list, the owner is linked as well as
+      // named; typed freehand it is a name only (a company not on the platform).
+      const res = await createAsset(null, { ...draft, ownerOrgId: orgNamed(draft.owner, owners)?.id ?? null });
       if (res?.error) { setError(res.error); return; }
       setSaved(`Added ${draft.kind} ${draft.model || draft.serial} to stock`);
       setDraft({ ...empty, kind: draft.kind, owner: draft.owner, location: draft.location });
@@ -84,7 +88,7 @@ export default function NewAssetForm({ owners, kinds, models }: {
             <div><label>Manufacturer</label><input value={draft.manufacturer} onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })} placeholder="Shimadzu" /></div>
             <div>
               <label>Owner</label>
-              <PickOrAdd value={draft.owner} options={owners} newLabel="+ New owner..." placeholder="Client name"
+              <PickOrAdd value={draft.owner} options={owners.map((o) => o.name)} newLabel="+ New owner..." placeholder="Client name"
                 onChange={(owner) => setDraft({ ...draft, owner })} />
             </div>
             <div><label>Where it is</label><input value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="Warehouse, shelf B" /></div>

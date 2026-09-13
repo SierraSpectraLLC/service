@@ -3,7 +3,8 @@ import { asc, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { assets, instruments, vocabTerms } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { forTenant, viewTenant, visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, viewTenant, visibleAssetIds, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { ownerChoices } from "@/lib/owner";
 import { ASSET_TONE, ASSET_STATES } from "@/lib/stages";
 import AssetRegistryFilter from "@/components/AssetRegistryFilter";
 import NewAssetForm from "@/components/NewAssetForm";
@@ -20,17 +21,25 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
 
   // Units on systems shared with the viewer, plus any their own org owns.
   const [seeAssets, seeSystems] = await Promise.all([visibleAssetIds(user), visibleSystemIds(user)]);
-  const [rows, insts, vocab] = await Promise.all([
+  const isStaff = user.role === "owner" || user.role === "staff";
+  const [rows, insts, vocab, orgRows] = await Promise.all([
     db.select().from(assets)
       .where(seeAssets === null ? undefined : seeAssets.length ? inArray(assets.id, seeAssets) : sql`false`)
       .orderBy(asc(assets.kind), asc(assets.model), asc(assets.id)),
     db.select({ id: instruments.id, externalId: instruments.externalId, client: instruments.client }).from(instruments)
       .where(seeSystems === null ? undefined : seeSystems.length ? inArray(instruments.id, seeSystems) : sql`false`),
     db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, await viewTenant(user))),
+    // The organization list is the operator's book of business, so only staff
+    // get it - a client's own entries are theirs whatever they type.
+    isStaff ? visibleOrgs(user) : Promise.resolve([]),
   ]);
   const home = new Map(insts.map((i) => [i.id, i]));
-  // Owner picker options: whoever already owns stock, plus the clients we work for.
+  // The FILTER offers every owner that exists on a row, because filtering must
+  // reach everything - including names from before there were organizations.
   const owners = [...new Set([...rows.map((a) => a.owner), ...insts.map((i) => i.client)].filter(Boolean))].sort();
+  // ENTRY offers the organizations we work with, so a new unit's owner is a
+  // real organization and not a re-typing of somebody's old typo.
+  const ownerOptions = ownerChoices(orgRows, user.operatorOrgId);
   // The catalog names the types; the FILTER also offers kinds only found on
   // old units, because filtering must reach everything that exists.
   const catalogKinds = vocab.filter((v) => v.kind === "asset_type").map((v) => v.name);
@@ -57,7 +66,6 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
   });
   const unattached = rows.filter((a) => a.instrumentId === null && a.status !== "Decommissioned").length;
   // Deleting records is staff work, so only staff get the checkboxes.
-  const isStaff = user.role === "owner" || user.role === "staff";
 
   // Status facet hrefs keep every other filter in place - facet state is the URL.
   const statusHref = (s: string) => {
@@ -104,8 +112,8 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
       <div className="card">
         {user.role !== "client_viewer" && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 10 }}>
-            <NewAssetForm owners={owners} kinds={catalogKinds} models={catalogModels} />
-            <AssetGridToggle instrumentId={null} kinds={catalogKinds} models={gridModels} owners={owners} />
+            <NewAssetForm owners={ownerOptions} kinds={catalogKinds} models={catalogModels} />
+            <AssetGridToggle instrumentId={null} kinds={catalogKinds} models={gridModels} owners={ownerOptions} />
           </div>
         )}
 

@@ -10,6 +10,7 @@ import { servesLine } from "@/lib/assetServes";
 import CatalogSelect from "./CatalogSelect";
 import SpecTable from "./SpecTable";
 import AssetGrid, { type GridModel } from "./AssetGrid";
+import type { OrgLite } from "@/lib/owner";
 import PhotoThumb from "./PhotoThumb";
 import { matchesQuery } from "@/lib/search";
 
@@ -42,7 +43,8 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
   catalogModels: Record<string, string[]>;
   /** The same models with their makers, for the grid's Mfr column. */
   gridModels: Record<string, GridModel[]>;
-  owners: string[];
+  /** The organizations a unit may belong to, for the grid's Owner column. */
+  owners: OrgLite[];
   /** The maker/vendor book (Settings → Catalog), suggested on the Manufacturer field. */
   makers?: string[];
   /** Staff get the "full sheet" link into /catalog; clients can't open it. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  clientAfterHandoff, orgNamed, ownerFields, ownerLabel, ownerMismatch,
+  clientAfterHandoff, orgNamed, ownerChoices, ownerFields, ownerLabel, ownerMismatch,
 } from "@/lib/owner";
 
 const ORGS = [
@@ -104,3 +104,19 @@ describe("the client label when a system changes hands", () => {
     expect(clientAfterHandoff("Prospect - Altis", "", "Acme Engineering")).toBe("Prospect - Altis");
   });
 });
+
+describe("who a new unit may belong to", () => {
+  it("offers the organizations we work with, by name, and not ourselves", () => {
+    // Not the names already on old rows: those carry every typo and every
+    // company since renamed, and never the client added yesterday.
+    expect(ownerChoices([...ORGS, { id: 9, name: "  " }], 1)).toEqual([
+      { id: 2, name: "LabZen" },
+      { id: 3, name: "Modesto Irrigation District" },
+    ]);
+  });
+
+  it("offers everybody when the viewer has no organization of their own", () => {
+    expect(ownerChoices(ORGS, null).map((o) => o.id)).toEqual([2, 3, 1]);
+  });
+});
+
