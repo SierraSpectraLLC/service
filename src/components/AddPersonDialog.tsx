@@ -20,7 +20,7 @@ const BLANK = {
  * where their trips start.
  *
  * One dialog for the two rooms that add people - Settings › People & ownership
- * and Our people - so a hire made from either lands the same row with the same
+ * and Employees - so a hire made from either lands the same row with the same
  * fields, and a change to the form is a change to both. The add itself is
  * setHouseMember, owner-only and stamped with the adder's workspace; nothing
  * here decides who may hire.

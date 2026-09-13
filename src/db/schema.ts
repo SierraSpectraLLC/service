@@ -1799,6 +1799,15 @@ export const attachments = pgTable("attachments", {
   // evidence on a receiving finding. Set null - the file outlives both.
   restorationProjectId: integer("restoration_project_id").references((): AnyPgColumn => restorationProjects.id, { onDelete: "set null" }),
   findingId: integer("finding_id").references((): AnyPgColumn => findings.id, { onDelete: "set null" }),
+  /**
+   * The EMPLOYEE this file is about - their signed contract, an offer letter,
+   * a certification. Part of the person file rather than the document
+   * library: it is kept out of every shelf listing and readable only by
+   * whoever administers the people (lib/hr.mayAdminPeople) and the person
+   * themselves, never by their colleagues. Cascade: a person taken off the
+   * roster takes their paperwork with them. See lib/fileAccess.
+   */
+  houseMemberId: integer("house_member_id").references(() => houseMembers.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("attachments_instrument_idx").on(t.instrumentId),

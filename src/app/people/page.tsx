@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  expenseCategories, expenseReports, expenses, houseMembers, orgSites, orgs, payroll, perks, stipends,
+  attachments, expenseCategories, expenseReports, expenses, houseMembers, orgSites, payroll, perks, stipends,
   stockItems, stockrooms, users,
 } from "@/db/schema";
 import { myTenantOrgId, requireUser } from "@/lib/authz";
@@ -14,25 +14,27 @@ import { editableReport, reimbursementPool, reportTotalCents } from "@/lib/expen
 import { inForceOn, payrollForMonth, type PayRow } from "@/lib/payroll";
 import { perksMonthlyTotal, type PerkRow } from "@/lib/perks";
 import { formatCents } from "@/lib/money";
-import { shopToday } from "@/lib/shopday";
+import { shopDay, shopToday } from "@/lib/shopday";
 import { stockTotals } from "@/lib/stock";
-import { PageHead, Panel } from "@/components/ui";
+import { Panel } from "@/components/ui";
+import SectionShell from "@/components/SectionShell";
+import { navSection } from "@/lib/navData";
 import PeopleDesk, { type RosterRow } from "@/app/people/PeopleDesk";
 import StipendsCard, { type StipendRow } from "@/components/StipendsCard";
-import { nextStipendCycle } from "@/lib/stipends";
+import { nextStipendCycle, stipendCadenceLabel } from "@/lib/stipends";
 import { worksiteChoicesFor } from "@/lib/worksiteData";
 
 export const dynamic = "force-dynamic";
 
 /**
- * The HR room.
+ * The employees: the HR room, and a room of the organization section.
  *
  * A distinct route rather than a widened Settings page, for the same reason
- * /owner is one: the questions are different questions. Settings › Our people
- * is administration - who has a login, what it can reach, how to get them back
- * in when mail stops arriving. This is the people themselves: who is on the
- * roster, what each of them is owed and has not been paid, and who is allowed
- * to sort that out.
+ * /owner is one: the questions are different questions. Settings › People &
+ * ownership is administration - who has a login, what it can reach, how to
+ * get them back in when mail stops arriving. This is the people themselves:
+ * who is on the roster, what each of them is paid and owed, where they are
+ * stationed, what they signed, and who is allowed to sort that out.
  *
  * WHO GETS IN. mayAdminPeople - the owner, and whoever the owner has made HR.
  * Not the books: every figure on this page is a payroll or a reimbursement
@@ -83,23 +85,15 @@ export default async function PeoplePage() {
        dedicated engineer's trips start at the client, not at their house. */
     worksiteChoicesFor(user),
   ]);
-  /* The half of the person that is not on the roster row: their title lives on
-     the account row, where their own profile page reads it back to them. */
-  const titleRows = members.length
-    ? await db.select({ email: users.email, title: users.title }).from(users)
+  /* The half of the person that is not on the roster row: their title and
+     their staffed location live on the account row, where their own profile
+     page reads them back to them. */
+  const accountRows = members.length
+    ? await db.select({ email: users.email, title: users.title, siteId: users.siteId }).from(users)
       .where(inArray(users.email, members.map((m) => m.email)))
     : [];
-  const titleOf = new Map(titleRows.map((r) => [r.email.toLowerCase(), r.title ?? ""]));
-  /* Client labs, as a home base for somebody stationed on-site - the same
-     list Settings offers when adding a person. */
-  const siteRows = await db.select({ name: orgSites.name, address: orgSites.address, orgName: orgs.name })
-    .from(orgSites).innerJoin(orgs, eq(orgs.id, orgSites.orgId))
-    .where(and(eq(orgSites.archived, false), forTenant(orgSites.tenantOrgId, t)))
-    .orderBy(asc(orgs.name), asc(orgSites.name));
-  const sites = siteRows.map((x) => {
-    const site = x.name || x.address.split("\n")[0] || "site";
-    return { label: site.startsWith(x.orgName) ? site : `${x.orgName} - ${site}`, address: x.address };
-  });
+  const accountOf = new Map(accountRows.map((r) => [r.email.toLowerCase(), r]));
+  const section = await navSection("org");
   const kitIds = kitRooms.filter((r) => r.keeperEmail).map((r) => r.id);
   const kitLines = kitIds.length
     ? await db.select({ stockroomId: stockItems.stockroomId, qty: stockItems.qty, minQty: stockItems.minQty })
@@ -119,6 +113,22 @@ export default async function PeoplePage() {
      "whose register" with myTenantOrgId, and the two must agree or this page
      shows the roster while the register beside it shows the money. */
   const payOrg = user.orgId ?? myTenantOrgId(user);
+  /* The company's own site locations - where somebody can be STATIONED, as
+     distinct from the client labs above, which are where a trip can start.
+     Closed ones too, so a person still stationed at a closed site reads as
+     such rather than as nowhere. */
+  const ownSites = payOrg === null ? [] : await db.select({
+    id: orgSites.id, name: orgSites.name, address: orgSites.address, archived: orgSites.archived,
+  }).from(orgSites).where(eq(orgSites.orgId, payOrg)).orderBy(asc(orgSites.name), asc(orgSites.id));
+  /* The paperwork on every file, in one read. Readable by everybody in this
+     room - they administer the people, which is what lib/fileAccess asks. */
+  const paperRows = members.length
+    ? await db.select({
+        id: attachments.id, houseMemberId: attachments.houseMemberId, fileName: attachments.fileName,
+        kind: attachments.kind, size: attachments.size, createdAt: attachments.createdAt,
+      }).from(attachments).where(inArray(attachments.houseMemberId, members.map((m) => m.id)))
+        .orderBy(desc(attachments.createdAt))
+    : [];
   const payRows: PayRow[] = seesPay && payOrg !== null
     ? (await db.select().from(payroll).where(eq(payroll.orgId, payOrg))) as PayRow[]
     : [];
@@ -153,11 +163,21 @@ export default async function PeoplePage() {
       role: m.role,
       isHr: m.canAdminPeople,
       profile: {
-        name: m.name, title: titleOf.get(m.email.toLowerCase()) ?? "",
+        name: m.name, title: accountOf.get(m.email.toLowerCase())?.title ?? "",
         homeAddress: m.homeAddress, phone: m.phone,
         emergencyName: m.emergencyName, emergencyPhone: m.emergencyPhone,
         startedOn: m.startedOn,
+        siteId: accountOf.get(m.email.toLowerCase())?.siteId ?? null,
       },
+      papers: paperRows.filter((f) => f.houseMemberId === m.id).map((f) => ({
+        id: f.id, fileName: f.fileName, kind: f.kind, size: f.size, when: shopDay(f.createdAt),
+      })),
+      /* Keyed on the roster NAME, as the stipends table is - see its person
+         column - and worded by the same rule the card and the cron use. */
+      stipends: stipendRows.filter((x) => m.name && x.person === m.name).map((x) => ({
+        id: x.id, label: x.label, amountCents: x.amountCents, cadence: stipendCadenceLabel(x),
+        active: x.active, nextOn: nextStipendCycle(x, today),
+      })),
       /* Their pay row in force today, matched the way addPayrollEntry matches
          its supersede - by address first, name as the fallback for rows from
          before addresses were recorded. Null when the reader may not see pay,
@@ -201,11 +221,9 @@ export default async function PeoplePage() {
   }));
 
   return (
-    <div className="container wide">
-      <PageHead
-        title="Our people"
-        sub="Who works here, what each of them is paid and owed, and who is allowed to sort it out."
-      />
+    <SectionShell section={section} active="/people"
+      title="Employees"
+      sub="Who works here, what each of them is paid and owed, where they are stationed, and who is allowed to sort it out.">
 
       <Panel
         title="What the shop owes its own people"
@@ -240,7 +258,7 @@ export default async function PeoplePage() {
       </Panel>
 
       <PeopleDesk roster={roster} isOwner={isOwner} seesPay={seesPay} orgId={payOrg} today={today}
-        perksMonthCents={perksMonth} sites={sites} myEmail={user.email} />
+        perksMonthCents={perksMonth} sites={siteChoices} ownSites={ownSites} myEmail={user.email} />
 
       {/* Under the roster, because it is a fact ABOUT the roster: what each
           person is owed every month whether or not they file anything. */}
@@ -251,6 +269,6 @@ export default async function PeoplePage() {
         isOwner={isOwner}
         today={today}
       />
-    </div>
+    </SectionShell>
   );
 }

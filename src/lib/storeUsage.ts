@@ -56,6 +56,13 @@ function storeWhere(k1: number | null, k2: number | null, tenant: number | null)
    * staff, and drops the predicate.
    */
   const own = tenant === null ? sql`TRUE` : sql`a.tenant_org_id IS NOT DISTINCT FROM ${tenant}::integer`;
+  /*
+   * An employee's paperwork (house_member_id) is not on any shelf. It is
+   * stored bytes all the same, so it COUNTS toward the store - a ceiling that
+   * personnel files could slip under would not be a ceiling - but it is
+   * listed nowhere but that person's file. The list query adds that predicate
+   * below; the meter deliberately does not.
+   */
   return sql`${own} AND (
        (a.instrument_id IS NULL AND a.asset_id IS NULL
         AND (a.org_id IS NOT DISTINCT FROM ${k1}::integer
@@ -134,7 +141,7 @@ export async function storeFiles(orgId: number | null, tenant: number | null, li
     FROM ${attachments} a
     LEFT JOIN ${instruments} i ON i.id = a.instrument_id
     LEFT JOIN ${assets} s ON s.id = a.asset_id
-    WHERE ${storeWhere(k1, k2, tenant)}
+    WHERE ${storeWhere(k1, k2, tenant)} AND a.house_member_id IS NULL
     ORDER BY a.created_at DESC, a.id DESC
     LIMIT ${limit}
   `);

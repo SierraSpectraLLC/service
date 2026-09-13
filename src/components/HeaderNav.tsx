@@ -37,7 +37,9 @@ export default function HeaderNav({ nav }: { nav: NavTree }) {
           {l.label}
         </Link>
       ))}
-      {nav.sections.filter((s) => s.key !== "account").map((s) => {
+      {/* The organization section is not a header word either: it is rendered
+          inside the account menu, under the company's name - see lib/nav. */}
+      {nav.sections.filter((s) => s.key !== "account" && s.key !== "org").map((s) => {
         const inside = active(s.href) || s.items.some((i) => active(i.href));
         return (
           <Dropdown key={s.key} label={s.label}

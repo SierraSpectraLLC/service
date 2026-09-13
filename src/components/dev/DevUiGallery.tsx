@@ -253,6 +253,7 @@ export default function DevUiGallery() {
               modules: { eod: true, remote: true, sheetSync: true },
               hasStock: true, orgRemoteOn: false, seesBooks: true, seesPayroll: true,
               seesOwnMoney: true, adminsPeople: true, openDiffs: 3, settingsHref: "/settings",
+              orgHref: "/settings/organizations/3",
             })}
             userName="Rita Vasquez" orgName="Sierra Spectral" />
           <b style={{ letterSpacing: "-0.2px" }}>RIDGELINE</b>

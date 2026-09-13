@@ -29,7 +29,7 @@ const BLURB: Record<string, string> = {
 export default async function AccountPage() {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
-  const section = await navSection("account");
+  const [section, org] = await Promise.all([navSection("account"), navSection("org")]);
   if (!section) redirect("/");
 
   const email = user.email.toLowerCase();
@@ -57,6 +57,14 @@ export default async function AccountPage() {
     <SectionShell section={section} active={section.href}
       title="Account" sub={user.email}>
       <HubGrid>
+        {/* The company, first, for whoever runs it - the owner and HR. On a
+            desktop the account menu lists it under the company's name; on a
+            phone this card is how the section is reached at all, since the
+            drawer is full at rest. See lib/nav. */}
+        {org && (
+          <HubCard href={org.href} title={org.label}
+            sub="Site locations, employees, and everything the office holds about each of them" />
+        )}
         {section.items.map((i) => {
           const sig = signal(i.href);
           return (

@@ -4406,3 +4406,8 @@ END $$;
 -- print on top of it - see SPEC_ROWS in lib/quotes.
 ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "specs_left" text NOT NULL DEFAULT '';
 ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "specs_right" text NOT NULL DEFAULT '';
+
+-- The employee a file is about: their signed contract, an offer letter. Part of
+-- the person file, not the document library - see the column in schema.ts and
+-- lib/fileAccess for who may read it.
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "house_member_id" integer REFERENCES "house_members"("id") ON DELETE CASCADE;

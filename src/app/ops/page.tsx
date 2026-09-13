@@ -29,7 +29,6 @@ const BLURB: Record<string, string> = {
   "/maintenance": "What is owed, and when",
   "/clients": "Who the shop works for, and what of theirs it looks after",
   "/network": "The other service companies, and work moving between us",
-  "/people": "The roster: pay, hours, what people are owed",
   "/money/purchasing": "Purchase orders you raised",
   "/money/reimbursements": "Money you spent and want back",
   "/remote": "Sessions on a client's instrument",

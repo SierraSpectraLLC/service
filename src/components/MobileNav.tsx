@@ -102,8 +102,11 @@ export default function MobileNav({ nav, userName, orgName }: {
   const active = (href: string) => isActive(path, href);
   /* The sections that fold. Account is deliberately not one of them: four
      children is not worth a fold, and it is the row people find by muscle
-     memory at the bottom of a drawer. */
-  const folding = nav.sections.filter((s) => s.key !== "account");
+     memory at the bottom of a drawer. Neither is the organization section:
+     the drawer is full at rest, so on a phone it is the first card of the
+     Account hub - the same "account, then my company" order the desktop's
+     account menu has. See lib/nav. */
+  const folding = nav.sections.filter((s) => s.key !== "account" && s.key !== "org");
   const account = nav.sections.find((s) => s.key === "account");
 
   return (

@@ -42,7 +42,7 @@ export const NO_NAV: NavFacts = {
   signedIn: false, isStaff: false, isOwner: false, resells: false, isClientOrg: false, hasOrg: false,
   modules: { eod: false, remote: false, sheetSync: false },
   hasStock: false, orgRemoteOn: false, seesBooks: false, seesPayroll: false,
-  seesOwnMoney: false, adminsPeople: false, openDiffs: 0, settingsHref: null,
+  seesOwnMoney: false, adminsPeople: false, openDiffs: 0, settingsHref: null, orgHref: null,
   orgResells: false, view: "lab",
 };
 
@@ -172,6 +172,7 @@ export async function navFactsFor(
     adminsPeople,
     openDiffs: diffRows.length,
     settingsHref: settingsHrefFor(user),
+    orgHref: orgHrefFor(user),
     orgResells,
     view,
   };
@@ -192,6 +193,20 @@ export async function navFactsFor(
  * different names in one person's nav. One destination, one word - see
  * lib/nav.
  */
+/**
+ * The workspace's own organization page, for its owner - the company's name,
+ * logo, billing address and sites live there, under the same URL every other
+ * organization's do. Null for anybody who does not own a workspace: HR
+ * administers the people, not the company's identity.
+ */
+export function orgHrefFor(
+  user: Pick<SessionUser, "role" | "orgId" | "operatorOrgId" | "rootOperatorOrgId">,
+): string | null {
+  if (user.role !== "owner" || user.orgId !== null) return null;
+  const mine = user.operatorOrgId ?? user.rootOperatorOrgId;
+  return mine === null ? null : `/settings/organizations/${mine}`;
+}
+
 export function settingsHrefFor(
   user: Pick<SessionUser, "role" | "orgId">,
 ): string | null {

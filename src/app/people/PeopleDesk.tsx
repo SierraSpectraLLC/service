@@ -7,11 +7,13 @@ import { useState } from "react";
 import { setHouseHr } from "@/app/actions";
 import { formatCents } from "@/lib/money";
 import { DataTable, Panel, Pill } from "@/components/ui";
-import PersonFile, { type KitRow, type PersonProfile } from "@/components/PersonFile";
-import AddPersonDialog, { type SiteOption } from "@/components/AddPersonDialog";
+import PersonFile, {
+  type KitRow, type OwnSite, type PaperRow, type PersonProfile, type StipendLine,
+} from "@/components/PersonFile";
+import AddPersonDialog from "@/components/AddPersonDialog";
 import type { PayRow } from "@/lib/payroll";
 import type { PerkRow } from "@/lib/perks";
-import type { WorksiteChoice } from "@/lib/sites";
+import { siteLabel, type WorksiteChoice } from "@/lib/sites";
 import { toast } from "@/components/ui/Toast";
 
 export type RosterRow = {
@@ -26,6 +28,10 @@ export type RosterRow = {
   perks: PerkRow[];
   /** The vans and field kits this person keeps, with what is counted in each. */
   kits: KitRow[];
+  /** The paperwork on their file - contract, offer letter, certifications. */
+  papers: PaperRow[];
+  /** Their standing reimbursements, by the roster's own card. */
+  stipends: StipendLine[];
   /** Whether they have a name at all - see the page, and the note on the row. */
   nameable: boolean;
   unclaimedCents: number;
@@ -43,7 +49,7 @@ export type RosterRow = {
  * open a claim in their name and start filling it, because the reason this
  * page exists is that people hand over receipts instead of filing anything.
  */
-export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, perksMonthCents, sites = [], myEmail }: {
+export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, perksMonthCents, sites = [], ownSites = [], myEmail }: {
   roster: RosterRow[];
   /**
    * Only the owner may hand out HR. Everything else here is available to HR
@@ -58,8 +64,8 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
   perksMonthCents: number;
   /** Client labs a person may be stationed at - see HomeBasePicker. */
   sites?: WorksiteChoice[];
-  /** Client labs, offered as a home base when adding or editing somebody. */
-  sites?: SiteOption[];
+  /** The company's own site locations, for the staffed-location picker. */
+  ownSites?: OwnSite[];
   /** The reader - whose own file gets no access controls. */
   myEmail: string;
 }) {
@@ -85,7 +91,7 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
     <Panel
       title="The roster"
       count={roster.length || undefined}
-      hint="Everybody on staff here. Open somebody to set their title, pay and home base, or to file the receipts they handed you."
+      hint="Everybody on staff here. Open somebody for their pay, title and privileges, home and staffed location, contract, monthly reimbursements and how to reach them - or to file the receipts they handed you."
       empty={isOwner ? "Nobody on the roster yet - add someone to put them on staff." : "Nobody on the roster yet."}
       actions={isOwner ? (
         <button className="btn sm primary" onClick={() => setAdding(true)}>+ Add someone</button>
@@ -97,10 +103,9 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
       {openRow && (
         <PersonFile
           email={openRow.email} name={openRow.name} role={openRow.role}
-          profile={openRow.profile} pay={openRow.pay} perks={openRow.perks} kits={openRow.kits} sites={sites}
-          seesPay={seesPay} orgId={orgId} today={today}
           profile={openRow.profile} pay={openRow.pay} perks={openRow.perks} kits={openRow.kits}
-          seesPay={seesPay} orgId={orgId} today={today} sites={sites}
+          seesPay={seesPay} orgId={orgId} today={today} sites={sites} ownSites={ownSites}
+          papers={openRow.papers} stipends={openRow.stipends}
           canManage={isOwner} isMe={openRow.email.toLowerCase() === myEmail.toLowerCase()}
           onClose={() => setOpen(null)} />
       )}
@@ -130,6 +135,8 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
                   <div className="mut t-meta">
                     {r.email}
                     {r.profile.title ? ` · ${r.profile.title}` : seesPay && r.pay ? " · on payroll" : ""}
+                    {r.profile.siteId !== null && ownSites.find((x) => x.id === r.profile.siteId)
+                      ? ` · at ${siteLabel(ownSites.find((x) => x.id === r.profile.siteId)!)}` : ""}
                   </div>
                 </button>
               ),
