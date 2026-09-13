@@ -8,7 +8,8 @@ export type SystemRegistryRow = {
   externalId: string;
   /** What the system is, already worded by the page - its assets, or the model. */
   label: string;
-  client: string;
+  /** Whose it is - the owning organization's name, or the client text when nobody on the platform owns it. */
+  owner: string;
   model: string;
   location: string;
   lead: string;
@@ -26,11 +27,13 @@ const COLUMNS = ["System", "ID", "Model", "Location", "Lead", "Stage"];
  * The systems registry, in the asset registry's clothes: a real table grouped
  * by whose the machines are.
  *
- * Grouping by client rather than showing a client column is the point - a
- * registry is read by going to the lab, and a client's name repeated down a
+ * Grouping by owner rather than showing an owner column is the point - a
+ * registry is read by going to the lab, and a company's name repeated down a
  * column carries no information. The count in each heading is what tells you
- * how many machines a client has on the books. Within a client, systems keep
- * the page's order, which is by ID.
+ * how many machines an owner has on the books. Within an owner, systems keep
+ * the page's order, which is by ID. The heading is the OWNER (lib/systemRegistry
+ * .systemOwnerName), not the free-text client: a system LabZen owns with a blank
+ * label was heading a "(no client)" group while its own page said LabZen.
  *
  * No checkboxes: deleting a system is not a bulk job, so there is nothing to
  * select. The dot carries the system's state and the page renders the Legend
@@ -43,7 +46,7 @@ export default function SystemRegistryList({ rows, empty }: {
 }) {
   const by = new Map<string, SystemRegistryRow[]>();
   for (const r of rows) {
-    const k = r.client || "(no client)";
+    const k = r.owner || "(no owner)";
     const list = by.get(k);
     if (list) list.push(r); else by.set(k, [r]);
   }
@@ -62,10 +65,10 @@ export default function SystemRegistryList({ rows, empty }: {
         </div>
       )}
 
-      {groups.map(([client, list]) => (
-        <div key={client}>
+      {groups.map(([owner, list]) => (
+        <div key={owner}>
           <div className="reg-group">
-            <span className="reg-group-name">{client}</span>
+            <span className="reg-group-name">{owner}</span>
             <span className="reg-group-count">{list.length}</span>
           </div>
 

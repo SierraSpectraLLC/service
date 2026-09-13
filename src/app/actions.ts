@@ -823,7 +823,11 @@ export async function createInstrument(
     // real owner joins the platform and staff hand it over.
     const owner = await creatorOwns(u.orgId);
     if (owner !== null) {
-      await db.update(instruments).set({ ownerOrgId: owner }).where(eq(instruments.id, row.id));
+      // Same rule as a handoff (lib/owner.clientAfterHandoff): a blank label
+      // follows ownership. Left blank here, the registry headed the system
+      // "(no client)" while its own page named the owner.
+      await db.update(instruments).set({ ownerOrgId: owner, client: clientAfterHandoff(row.client, "", u.orgName) })
+        .where(eq(instruments.id, row.id));
     }
   } else {
     // Created by staff: share it with THEIR service organization, so its
