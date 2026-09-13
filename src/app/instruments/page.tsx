@@ -8,7 +8,9 @@ import { viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { getStageDefs } from "@/lib/stageDefs";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { SYSTEM_STATES, filterSystems, systemState } from "@/lib/systemRegistry";
-import { DataTable, FacetStrip, Id, PageHead, Pill, Toolbar } from "@/components/ui";
+import SystemRegistryList from "@/components/SystemRegistryList";
+import { FacetStrip, Legend, PageHead, Toolbar } from "@/components/ui";
+import type { Tone } from "@/lib/tones";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +28,10 @@ export const dynamic = "force-dynamic";
  * are here on purpose, marked, where the board holds them back - see
  * lib/systemRegistry and the tests/fleetPages note on which rooms are the
  * fleet. Staff only: a client has /units, which is this list in their words.
+ *
+ * Dressed as /assets is: one wide card, rows grouped under a heading with a
+ * count, a dot for where each system stands and a legend saying what the dots
+ * mean. Two lists read the same way should look the same.
  */
 export default async function SystemsPage({ searchParams }: {
   searchParams: Promise<{ q?: string; state?: string }>;
@@ -64,16 +70,14 @@ export default async function SystemsPage({ searchParams }: {
     if (s && s !== state) p.set("state", s);
     return `/instruments${p.size ? `?${p}` : ""}`;
   };
-  const stagePill = (name: string) => {
-    const d = defs.find((x) => x.name === name);
-    return d
-      ? <span className="pill" style={{ background: d.bg, color: d.fg }}>{name}</span>
-      : <Pill tone="neutral">{name}</Pill>;
-  };
+  const stageDef = (name: string) => defs.find((x) => x.name === name) ?? null;
   const stateWord = SYSTEM_STATES.reduce((m, s) => m.set(s.key, s.label), new Map<string, string>());
+  // In the fleet is the ordinary case, so it is the dot only; the others are
+  // named on the row as well, because a prospect's machine is not a job.
+  const STATE_TONE: Record<string, Tone> = { active: "good", prospect: "warn", former: "neutral", archived: "faint" };
 
   return (
-    <div className="container page">
+    <div className="container split">
       <PageHead
         crumb={<>Operations › <b>Systems</b></>}
         title="Systems"
@@ -97,42 +101,27 @@ export default async function SystemsPage({ searchParams }: {
           }))} />
         }
       />
-      <DataTable
-        cols={[
-          { key: "id", label: "ID", width: "90px" },
-          { key: "system", label: "System", width: "minmax(180px, 2fr)" },
-          { key: "stage", label: "Stage", width: "minmax(120px, 0.9fr)", hideMobile: true },
-          { key: "lead", label: "Lead", width: "minmax(100px, 0.7fr)", hideMobile: true },
-        ]}
-        rows={shown.map((i) => ({
-          key: i.id,
-          href: `/instruments/${i.id}`,
-          cells: {
-            id: <Id>{i.externalId}</Id>,
-            system: (
-              <span style={{ minWidth: 0, display: "block" }}>
-                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {i.label || <span className="mut">No assets listed</span>}
-                  {i.state !== "active" && (
-                    <> <Pill tone={i.state === "prospect" ? "warn" : "neutral"}>{stateWord.get(i.state)}</Pill></>
-                  )}
-                </span>
-                <span className="mut t-meta">
-                  {[i.client, i.location].filter(Boolean).join(" · ")}
-                </span>
-              </span>
-            ),
-            stage: i.stages.length ? (
-              <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                {stagePill(i.stages[0])}
-                {i.stages.length > 1 && <span className="mut t-meta">+{i.stages.length - 1}</span>}
-              </span>
-            ) : null,
-            lead: i.lead ? <span className="t-small">{i.lead}</span> : <span className="mut t-small">unassigned</span>,
-          },
-        }))}
-        empty={q.trim() || state ? "No systems match" : "No systems on record"}
-      />
+      <div className="card">
+        <SystemRegistryList
+          rows={shown.map((i) => {
+            const first = i.stages[0] ? stageDef(i.stages[0]) : null;
+            return {
+              id: i.id, externalId: i.externalId, label: i.label,
+              client: i.client, model: i.model, location: i.location, lead: i.lead,
+              stateTone: STATE_TONE[i.state] ?? "neutral",
+              stateWord: i.state === "active" ? null : stateWord.get(i.state) ?? i.state,
+              // A stage the vocabulary no longer names still shows, in the
+              // neutral pill's colors, rather than vanishing from the row.
+              stage: i.stages[0] ? (first ?? { name: i.stages[0], bg: "var(--t-neutral-bg)", fg: "var(--t-neutral-fg)" }) : null,
+              moreStages: Math.max(0, i.stages.length - 1),
+            };
+          })}
+          empty={q.trim() || state
+            ? <><b>No systems match</b>Adjust the search or the facets above.</>
+            : <><b>No systems on record</b>A system arrives with its first job, or by import.</>}
+        />
+      </div>
+      <Legend items={SYSTEM_STATES.map((s) => ({ tone: STATE_TONE[s.key] ?? "neutral", label: s.label.toLowerCase() }))} />
     </div>
   );
 }
