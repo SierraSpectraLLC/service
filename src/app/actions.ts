@@ -222,7 +222,7 @@ import {
 } from "@/lib/lead";
 import { leadWithOffers, wasOffered } from "@/lib/leadData";
 import { normalizePhone } from "@/lib/sms";
-import { isPlatformStaff, isStaffRole, mayAdminOrg, mayBillOrg, mayCreateOrgs, tenantOf } from "@/lib/tenants";
+import { isPlatformStaff, isStaffRole, mayAdminOrg, mayBillOrg, mayCreateOrgs, mayInviteInto, tenantOf } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
 import { signInIdentity } from "@/auth";
 import { maySeeTrail, safeQuery, trailAdmins } from "@/lib/trail";
@@ -7636,6 +7636,14 @@ const ALLOW_EMAIL = /^[^\s@]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
 const ALLOW_DOMAIN = /^@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
 
 /**
+ * The refusal both allowlist doors give an operator org. Its people are staff
+ * (house_members), and a client sign-in there would have no scope - see
+ * lib/tenants.mayInviteInto. Named so the message can point at the right door.
+ */
+const staffNotClients = (name: string) =>
+  ({ error: `${name} is a service company - its people are staff, added under Settings › People & ownership, not client sign-ins` });
+
+/**
  * A whole person at a client, in one go: who they are, what they may do, where
  * they sit - and, when email cannot be trusted to arrive, a temporary password
  * to read down the phone.
@@ -7667,8 +7675,11 @@ export async function addClientPerson(orgId: number, data: {
   const asStaff = isStaffRole(u.role);
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
   if (!org) return { error: "Not found" };
+  // Checked before either route: the client-editor route below would otherwise
+  // let a stray login at an operator org invite more of them.
+  if (org.isOperator) return staffNotClients(org.name);
   if (asStaff) {
-    if (!mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+    if (!mayInviteInto(tenantViewer(u), org)) return { error: "Not found" };
   } else if (u.orgId === null || orgId !== u.orgId) {
     return { error: "Not found" };
   }
@@ -7886,7 +7897,8 @@ export async function addClientAccess(raw: string, orgId: number, canEdit = fals
   // and staff may only name one their own workspace runs.
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
   if (!org) return { error: "Pick which organization they sign in as" };
-  if (asStaff && !mayAdminOrg(tenantViewer(u), org)) return { error: "Pick which organization they sign in as" };
+  if (org.isOperator) return staffNotClients(org.name);
+  if (asStaff && !mayInviteInto(tenantViewer(u), org)) return { error: "Pick which organization they sign in as" };
   await db.insert(clientAllowlist).values({ entry, orgId, canEdit, addedBy: u.name }).onConflictDoNothing();
   await audit({
     actor: u.email, entityType: "settings", entityId: entry,

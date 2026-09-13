@@ -24,6 +24,8 @@ function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; labe
 type OrgRow = {
   id: number; name: string; kind: string; themeColor: string;
   systems: number; logins: number; editors: number; recipients: string;
+  /** House staff, for an organization that runs a workspace; null for a client. */
+  staff: number | null;
 };
 type PersonRow = {
   name: string; email: string; org: string;
@@ -185,9 +187,11 @@ export default function PersonnelForm(props: {
               reach: (
                 <span className="mut t-meta">
                   {o.systems} system{o.systems === 1 ? "" : "s"} ·{" "}
-                  {o.logins === 0
-                    ? "nobody can sign in"
-                    : `${o.logins} sign-in${o.logins === 1 ? "" : "s"}${o.editors ? `, ${o.editors} can edit` : ""}`}
+                  {o.staff !== null
+                    ? `${o.staff} staff`
+                    : o.logins === 0
+                      ? "nobody can sign in"
+                      : `${o.logins} sign-in${o.logins === 1 ? "" : "s"}${o.editors ? `, ${o.editors} can edit` : ""}`}
                   {props.showRecipients && !o.recipients.trim() && " · no report recipients"}
                 </span>
               ),

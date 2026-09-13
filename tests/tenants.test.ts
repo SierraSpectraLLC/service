@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  actingOrgId, isHouseOf, isPlatformStaff, mayAdminOrg, mayCreateOrgs,
+  actingOrgId, isHouseOf, isPlatformStaff, mayAdminOrg, mayCreateOrgs, mayInviteInto,
   scopeSees, tenantOf, tenantScope, type OrgNode, type TenantViewer,
 } from "@/lib/tenants";
 
@@ -211,5 +211,26 @@ describe("delegated administration", () => {
     expect(mayAdminOrg(platform, orgs[WESTLAB])).toBe(true);
     expect(mayAdminOrg(platform, orgs[LABZEN])).toBe(true);
     expect(mayAdminOrg(acmeEditor, orgs[ACME])).toBe(false);
+  });
+});
+
+describe("who may be invited where", () => {
+  it("lets an operator invite client sign-ins into its own clients", () => {
+    expect(mayInviteInto(labzenStaff, orgs[WESTLAB])).toBe(true);
+    expect(mayInviteInto(platform, orgs[ACME])).toBe(true);
+  });
+
+  it("never allowlists anyone into a service company - its people are staff", () => {
+    // Its own workspace, which mayAdminOrg allows because settings live there.
+    expect(mayAdminOrg(labzenOwner, orgs[LABZEN])).toBe(true);
+    expect(mayInviteInto(labzenOwner, orgs[LABZEN])).toBe(false);
+    // Nor the platform into any operator, its own included.
+    expect(mayInviteInto(platform, orgs[SIERRA])).toBe(false);
+    expect(mayInviteInto(platform, orgs[LABZEN])).toBe(false);
+  });
+
+  it("still refuses another operator's client, and clients entirely", () => {
+    expect(mayInviteInto(labzenStaff, orgs[ACME])).toBe(false);
+    expect(mayInviteInto(acmeEditor, orgs[ACME])).toBe(false);
   });
 });
