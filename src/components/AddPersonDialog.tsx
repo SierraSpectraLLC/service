@@ -7,9 +7,6 @@ import AddressField from "@/components/AddressField";
 import { toast } from "@/components/ui/Toast";
 import { TEMP_DAYS_DEFAULT, TEMP_DAYS_MAX } from "@/lib/tempPassword";
 
-/** A client lab, offered as a home base for an engineer stationed on-site. */
-export type SiteOption = { label: string; address: string };
-
 const BLANK = {
   email: "", first: "", last: "", role: "staff", homeAddress: "",
   withPassword: false, days: TEMP_DAYS_DEFAULT,
@@ -29,8 +26,7 @@ const BLANK = {
  * it is shown exactly once and is in no email: this is where somebody reads it
  * down a phone.
  */
-export default function AddPersonDialog({ sites = [], onClose, onAdded }: {
-  sites?: SiteOption[];
+export default function AddPersonDialog({ onClose, onAdded }: {
   onClose: () => void;
   /** The row exists. Fires before the password view, if there is one. */
   onAdded?: () => void;
@@ -143,26 +139,15 @@ export default function AddPersonDialog({ sites = [], onClose, onAdded }: {
         </div>
       )}
 
-      <div className="dialog-section">Where their trips start</div>
-      <label>Home base</label>
-      {/* The point zero for the stipend radius and routed mileage. An
-          address of their own, or a client lab for somebody stationed
-          on-site - and theirs to change later on their own settings. */}
-      <AddressField value={draft.homeAddress} ariaLabel="Home base address"
+      <div className="dialog-section">Where they live</div>
+      <label>Home address</label>
+      {/* Their home - what payroll and the tax forms need, and where trips
+          start unless their file names a site location. An engineer
+          stationed at a client's lab gets that on their file once they are
+          on the roster; it is not typed in here as a home. */}
+      <AddressField value={draft.homeAddress} ariaLabel="Home address"
         onChange={(homeAddress) => setDraft({ ...draft, homeAddress })}
         placeholder="Street address - autocompletes when maps are configured" />
-      {sites.length > 0 && (
-        <div style={{ marginTop: 8 }}>
-          <select value="" aria-label="Use a client site"
-            onChange={(e) => { if (e.target.value) setDraft({ ...draft, homeAddress: e.target.value }); }}
-            className="t-small" style={{ width: "auto" }}>
-            <option value="">...or use a client lab&apos;s address</option>
-            {sites.filter((x) => x.address.trim()).map((x) => (
-              <option key={x.label} value={x.address}>{x.label}</option>
-            ))}
-          </select>
-        </div>
-      )}
     </Dialog>
   );
 }

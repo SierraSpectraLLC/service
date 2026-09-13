@@ -1308,7 +1308,11 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
    in the row's grid as if the wrapper weren't there - and becomes the card
    body on a phone: primary line, secondary cells as a wrapping meta line,
    actions pinned right. hide-m cells drop out on the phone as usual. */
-.dt { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+/* overflow-x: auto, not hidden. A table whose columns add up to more than its
+   pane - eight money columns beside a rail - used to lose its last column
+   off the right edge with nothing to say so; now it scrolls sideways. Sticky
+   heads lose nothing: hidden already made .dt the scroll container. */
+.dt { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; }
 .dt .reg-head, .dt .reg-row { padding-left: 14px; padding-right: 14px; }
 .dt .reg-group { padding-left: 14px; padding-right: 14px; }
 .dt-row { text-decoration: none; color: inherit; }

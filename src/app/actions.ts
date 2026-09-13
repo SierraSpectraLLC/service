@@ -123,7 +123,7 @@ import {
 } from "@/lib/folders";
 import { cleanExpiry, cleanLabel } from "@/lib/dropShare";
 import { mayReadAttachment } from "@/lib/fileAccess";
-import { checkServes, cleanRole, moveFallout } from "@/lib/assetServes";
+import { checkServes, cleanRole, moveFallout, resolveBatchServes } from "@/lib/assetServes";
 import {
   houseOf, myTenantOrgId, requireUser, requireEditor, requireStaff, requireOwner, requirePlatformOwner,
   requireRealOwner, tenantViewer, viewContext, VIEW_AS_COOKIE, type SessionUser,
@@ -823,7 +823,11 @@ export async function createInstrument(
     // real owner joins the platform and staff hand it over.
     const owner = await creatorOwns(u.orgId);
     if (owner !== null) {
-      await db.update(instruments).set({ ownerOrgId: owner }).where(eq(instruments.id, row.id));
+      // Same rule as a handoff (lib/owner.clientAfterHandoff): a blank label
+      // follows ownership. Left blank here, the registry headed the system
+      // "(no client)" while its own page named the owner.
+      await db.update(instruments).set({ ownerOrgId: owner, client: clientAfterHandoff(row.client, "", u.orgName) })
+        .where(eq(instruments.id, row.id));
     }
   } else {
     // Created by staff: share it with THEIR service organization, so its
@@ -901,6 +905,16 @@ export type AssetInput = {
    */
   ownerOrgId?: number | null;
   asFound?: string; location: string; note: string;
+  /**
+   * The module this unit serves, said as it is entered - the roughing pump's
+   * mass spec - so plumbing the stack is not a second trip through each
+   * unit's page. Either a module already on the system, or, in a batch, the
+   * 1-based ROW of the module entered alongside it (lib/assetServes
+   * .resolveBatchServes). Meaningless for shelf stock, and ignored there.
+   */
+  servesAssetId?: number | null;
+  servesRow?: number | null;
+  servesRole?: string;
 };
 
 const cleanAsset = (d: AssetInput) => ({
@@ -1014,6 +1028,14 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
   const siblings = instrumentId !== null
     ? await db.select().from(assets).where(eq(assets.instrumentId, instrumentId)) : [];
   const sortOrder = Math.max(0, ...siblings.map((x) => x.sortOrder)) + 1;
+  // A link asked for on entry is checked BEFORE the insert, against the
+  // system's own rows with the new unit standing in, so a refused link
+  // refuses the whole add rather than leaving a unit half-entered.
+  const wantsServes = instrumentId !== null && data.servesAssetId != null;
+  if (wantsServes) {
+    const check = checkServes({ id: -1, instrumentId, servesAssetId: null }, data.servesAssetId!, siblings);
+    if (!check.ok) return { error: check.error };
+  }
   // Whose unit it is. Stock added by a client organization stays theirs, so
   // they keep seeing it while it sits on no system; a provider's entries are
   // records, not property - see creatorOwns. When the house picked an owner
@@ -1038,6 +1060,7 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
       action: `added ${assetLabel(row)}`,
     });
     await generateCheckout(instrumentId, row, u.email, row.tenantOrgId);
+    if (wantsServes) await applyServes(u, row, data.servesAssetId!, data.servesRole ?? "", [...siblings, row]);
     rev(instrumentId);
   } else {
     // Stock: bought, on the shelf, not part of a system yet.
@@ -1080,7 +1103,11 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
 export async function createAssets(
   instrumentId: number | null,
   rows: AssetInput[],
-): Promise<{ error?: string; created?: number; failures?: { row: number; error: string }[] }> {
+): Promise<{
+  error?: string; created?: number; failures?: { row: number; error: string }[];
+  /** Rows that saved but could not be plumbed as asked - the unit exists, the link does not. */
+  linkFailures?: { row: number; error: string }[];
+}> {
   const u = await requireEditor();
   const usable = rows.filter((r) => r.kind.trim() && (r.model.trim() || r.serial.trim()));
   if (!usable.length) return { error: "Nothing to save - each row needs a type and either a model or a serial" };
@@ -1096,19 +1123,42 @@ export async function createAssets(
     .from(assets).where(forTenant(assets.tenantOrgId, readTenant(u)))).filter((a) => a.serial.trim())
     .map((a) => [normalizeSerial(a.serial), `${a.kind}${a.model ? ` ${a.model}` : ""}`]));
   const failures: { row: number; error: string }[] = [];
+  const createdIds: (number | null)[] = [];
   let created = 0;
   for (let i = 0; i < usable.length; i++) {
     const sn = normalizeSerial(usable[i].serial ?? "");
     if (sn && taken.has(sn)) {
       failures.push({ row: i + 1, error: `Serial ${usable[i].serial.trim()} is already on file as ${taken.get(sn)}` });
+      createdIds.push(null);
       continue;
     }
-    const res = await createAsset(instrumentId, usable[i]);
-    if (res.error) { failures.push({ row: i + 1, error: res.error }); continue; }
+    // A link to a row of this batch waits until the batch exists; a link to
+    // a module already on the system goes through createAsset as it would
+    // from the single form.
+    const { servesRow: _later, ...input } = usable[i];
+    const res = await createAsset(instrumentId, usable[i].servesRow != null ? { ...input, servesAssetId: null } : input);
+    if (res.error) { failures.push({ row: i + 1, error: res.error }); createdIds.push(null); continue; }
     if (sn) taken.set(sn, `${usable[i].kind}${usable[i].model ? ` ${usable[i].model}` : ""}`);
+    createdIds.push(res.id ?? null);
     created++;
   }
-  return { created, failures };
+  // The pumps entered two rows under their mass spec, plumbed now that both
+  // exist. A link that fails here is reported on its own: the unit IS saved,
+  // and keeping the row on the grid for a retry would enter it twice.
+  const linkFailures: { row: number; error: string }[] = [];
+  if (instrumentId !== null) {
+    const wanted = resolveBatchServes(usable.map((r) => ({ servesRow: r.servesRow })), createdIds);
+    for (const w of wanted) {
+      if (w.error) { linkFailures.push({ row: w.row, error: w.error }); continue; }
+      // Re-read per link: each one changes what the next may point at.
+      const siblings = await db.select().from(assets).where(eq(assets.instrumentId, instrumentId));
+      const self = siblings.find((s) => s.id === createdIds[w.row - 1]);
+      if (!self) continue;
+      const res = await applyServes(u, self, w.targetId, usable[w.row - 1].servesRole ?? "", siblings);
+      if (res.error) linkFailures.push({ row: w.row, error: res.error });
+    }
+  }
+  return { created, failures, linkFailures };
 }
 
 export async function updateAsset(assetId: number, data: AssetInput): Promise<{ error?: string }> {
@@ -1160,30 +1210,44 @@ export async function setAssetServes(
   const u = await requireEditor();
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!a) return { error: "Not found" };
-  const acc = await assetAccess(u, assetId);
-  if (!acc.see) return { error: "Not found" };
-  if (!acc.edit) return { error: "Read-only access to this asset" };
   const siblings = a.instrumentId === null ? [a] : await db.select().from(assets)
     .where(eq(assets.instrumentId, a.instrumentId));
+  return applyServes(u, a, servesAssetId, role, siblings);
+}
+
+/**
+ * The link itself: whose unit it is (assetAccess - the one gate, here rather
+ * than in each caller, so entry and the unit's own page cannot differ on it),
+ * then checked against the system's own rows, written, logged on the unit and
+ * audited. Shared by setAssetServes and by entry - a pump that names its mass
+ * spec as it is added gets exactly the link it would get from its own page.
+ */
+async function applyServes(
+  u: SessionUser, a: typeof assets.$inferSelect, servesAssetId: number | null, role: string,
+  siblings: (typeof assets.$inferSelect)[],
+): Promise<{ error?: string }> {
+  const acc = await assetAccess(u, a.id);
+  if (!acc.see) return { error: "Not found" };
+  if (!acc.edit) return { error: "Read-only access to this asset" };
   const check = checkServes(a, servesAssetId, siblings);
   if (!check.ok) return { error: check.error };
   const servesRole = check.servesAssetId === null ? "" : cleanRole(role);
   if (a.servesAssetId === check.servesAssetId && a.servesRole === servesRole) return {};
   await db.update(assets)
     .set({ servesAssetId: check.servesAssetId, servesRole })
-    .where(eq(assets.id, assetId));
+    .where(eq(assets.id, a.id));
   const target = check.servesAssetId === null ? null : siblings.find((s) => s.id === check.servesAssetId);
   const said = target
     ? `serves ${assetLabel(target)}${servesRole ? ` (${servesRole})` : ""}`
     : "no longer serves a particular module";
-  await logAssetEvent(assetId, "note", a.instrumentId, said, u.name);
+  await logAssetEvent(a.id, "note", a.instrumentId, said, u.name);
   await audit({
-    actor: u.email, instrumentId: a.instrumentId ?? undefined, entityType: "asset", entityId: assetId,
+    actor: u.email, instrumentId: a.instrumentId ?? undefined, entityType: "asset", entityId: a.id,
     action: `${assetLabel(a)} ${said}`,
   });
   if (a.instrumentId !== null) rev(a.instrumentId);
   revalidatePath("/assets");
-  revalidatePath(`/assets/${assetId}`);
+  revalidatePath(`/assets/${a.id}`);
   if (check.servesAssetId !== null) revalidatePath(`/assets/${check.servesAssetId}`);
   if (a.servesAssetId !== null) revalidatePath(`/assets/${a.servesAssetId}`);
   return {};
@@ -11958,10 +12022,12 @@ export async function saveMemberProfile(email: string, data: {
   homeAddress: string; phone: string; emergencyName: string; emergencyPhone: string;
   startedOn: string;
   /**
-   * Where they are STATIONED - one of the company's own site locations, as
-   * distinct from where they live. Null clears it; omitted leaves it alone,
-   * so a caller that knows nothing about sites cannot un-station somebody
-   * by saving a phone number.
+   * Their SITE LOCATION - one of the company's own sites, or a client lab
+   * for an engineer stationed there - as distinct from where they live. An
+   * override of the home for routed miles and the per-diem radius; the home
+   * stays on file as the home. Null clears it; omitted leaves it alone, so a
+   * caller that knows nothing about sites cannot un-station somebody by
+   * saving a phone number.
    */
   siteId?: number | null;
 }): Promise<{ error?: string; geocoded?: boolean }> {
@@ -11976,18 +12042,23 @@ export async function saveMemberProfile(email: string, data: {
   const startedOn = data.startedOn.trim();
   if (startedOn && !isIsoDay(startedOn)) return { error: "The start date needs to be a calendar day" };
 
-  // The staffed location has to be one of THEIR company's sites. Checked
-  // rather than trusted: the id comes from a select, and a hand-edited one
-  // would station an engineer at another company's lab - which is a data
-  // leak wearing a dropdown, the same one setSystemSite refuses.
+  // The site location has to be one THIS workspace knows: the company's own
+  // site, or a lab of a client it works with - the list worksiteChoicesFor
+  // offers. Checked rather than trusted: the id comes from a select, and a
+  // hand-edited one would station an engineer at another operator's lab -
+  // which is a data leak wearing a dropdown, the same one setSystemSite
+  // refuses.
   let siteId: number | null | undefined = data.siteId;
+  let ownSite = false;
   if (siteId != null) {
     const [site] = await db.select().from(orgSites).where(eq(orgSites.id, siteId));
-    if (!site || member.orgId === null || site.orgId !== member.orgId) {
-      return { error: "That is not one of your company's site locations" };
-    }
+    const theirs = !!site && member.orgId !== null
+      && (site.orgId === member.orgId || site.tenantOrgId === member.orgId);
+    if (!theirs) return { error: "That is not one of your company's sites or a client lab you work with" };
     siteId = site.id;
+    ownSite = site.orgId === member.orgId;
   }
+  const restationed = siteId !== undefined && siteId !== member.siteId;
 
   const clean = data.homeAddress.trim().slice(0, 300);
   const moved = clean !== member.homeAddress;
@@ -12002,12 +12073,13 @@ export async function saveMemberProfile(email: string, data: {
     ...(label ? { name: label } : {}),
     homeAddress: clean,
     ...(moved ? { homeLat: hit?.lat ?? null, homeLng: hit?.lng ?? null } : {}),
+    ...(siteId === undefined ? {} : { siteId }),
     phone: data.phone.trim().slice(0, 60),
     emergencyName: data.emergencyName.trim().slice(0, 120),
     emergencyPhone: data.emergencyPhone.trim().slice(0, 60),
     startedOn,
   }).where(eq(houseMembers.id, member.id));
-  if (moved) {
+  if (moved || restationed) {
     // Their routed answers start from a place that no longer stands.
     await db.delete(driveCache).where(eq(driveCache.memberEmail, member.email));
   }
@@ -12015,11 +12087,13 @@ export async function saveMemberProfile(email: string, data: {
   // back to them ("set by whoever administers your organization") and the
   // directory shows it. Made if they have never signed in, exactly as
   // updatePersonProfile does for a client contact.
-  // The staffed location rides on the same row, for the same reason: it is
-  // "which of their organization's sites this person sits at", which is what
-  // users.site_id has always meant for a client contact.
+  // users.site_id means "which of their OWN organization's sites this person
+  // sits at" - what it has always meant for a client contact, and what
+  // Settings › Organizations edits - so it follows the site location only
+  // when that is one of the company's own; a client's lab is not one of
+  // theirs, and the file (house_members.site_id) is the record of that.
   const title = data.title.trim().slice(0, 80);
-  const station = siteId === undefined ? {} : { siteId };
+  const station = siteId === undefined ? {} : { siteId: ownSite ? siteId : null };
   const [account] = await db.select({ id: users.id }).from(users).where(eq(users.email, member.email));
   if (account) await db.update(users).set({ title, ...station }).where(eq(users.id, account.id));
   else if (title || siteId != null) {

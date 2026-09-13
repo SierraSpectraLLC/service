@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  checkServes, cleanRole, isServed, moveFallout, serveCandidates, serversOf, servesLine, unitLabel,
+  checkServes, cleanRole, isServed, moveFallout, resolveBatchServes, serveCandidates, serversOf, servesLine, unitLabel,
 } from "@/lib/assetServes";
 
 // G-010's stack: a mass spec with two roughing pumps, an autosampler, and a
@@ -111,5 +111,28 @@ describe("reading it back", () => {
   it("bounds a role", () => {
     expect(cleanRole("  fore-line  ")).toBe("fore-line");
     expect(cleanRole("x".repeat(80))).toHaveLength(40);
+  });
+});
+
+describe("links asked for on entry", () => {
+  // A mass spec and its two pumps typed in together: the pumps name the
+  // spec's row, and the answer comes back as ids once the rows exist.
+  it("turns row numbers into the ids the batch created", () => {
+    const rows = [{}, { servesRow: 1 }, { servesRow: 1 }];
+    expect(resolveBatchServes(rows, [40, 41, 42])).toEqual([
+      { row: 2, targetId: 40 }, { row: 3, targetId: 40 },
+    ]);
+  });
+  it("says so when the module a row serves was not saved, and skips a row that itself was not", () => {
+    const rows = [{}, { servesRow: 1 }, { servesRow: 1 }];
+    expect(resolveBatchServes(rows, [null, 41, null])).toEqual([
+      { row: 2, targetId: null, error: "Row 1, which it serves, was not saved" },
+    ]);
+  });
+  it("refuses a row pointed at itself, and passes an existing module through", () => {
+    expect(resolveBatchServes([{ servesRow: 1 }], [40])).toEqual([
+      { row: 1, targetId: null, error: "A unit can't serve itself." },
+    ]);
+    expect(resolveBatchServes([{}, { servesAssetId: 7 }], [40, 41])).toEqual([{ row: 2, targetId: 7 }]);
   });
 });

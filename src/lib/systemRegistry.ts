@@ -10,6 +10,7 @@
 // to look after - marked as such, so nobody mistakes a prospect's LC-MS for a
 // job.
 import { stageOf } from "@/lib/orgStage";
+import type { OrgLite } from "@/lib/owner";
 
 export type SystemState = "active" | "prospect" | "former" | "archived";
 
@@ -32,8 +33,23 @@ export function systemState(row: { archived: boolean }, ownerStage: unknown): Sy
   return s === "client" ? "active" : s;
 }
 
+/**
+ * Whose system it is, as the registry heads its groups.
+ *
+ * A system carries ownership twice (lib/owner): the LINK, owner_org_id, which
+ * is what actually decides who can see it, and the free-text `client`, which
+ * predates organizations. The link wins when there is one - a machine LabZen
+ * owns is LabZen's whatever the label says, and a label left blank is not "no
+ * client", it is a label nobody filled in. Only a system nobody on the
+ * platform owns is named by its text, and one with neither is nobody's.
+ */
+export function systemOwnerName(row: { client: string; ownerOrgId: number | null }, orgs: OrgLite[]): string {
+  const org = row.ownerOrgId === null ? undefined : orgs.find((o) => o.id === row.ownerOrgId);
+  return org?.name ?? row.client.trim();
+}
+
 export type RegistryRow = {
-  externalId: string; label: string; client: string; model: string; serial: string;
+  externalId: string; label: string; client: string; owner: string; model: string; serial: string;
   location: string; lead: string; category: string; state: SystemState;
 };
 
@@ -49,7 +65,7 @@ export function filterSystems<T extends RegistryRow>(rows: T[], f: { q?: string;
   return rows.filter((r) => {
     if (state ? r.state !== state : r.state === "archived") return false;
     if (!needle) return true;
-    return [r.externalId, r.label, r.client, r.model, r.serial, r.location, r.lead, r.category]
+    return [r.externalId, r.label, r.client, r.owner, r.model, r.serial, r.location, r.lead, r.category]
       .join(" ").toLowerCase().includes(needle);
   });
 }

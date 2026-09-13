@@ -13,22 +13,47 @@ import { siteLabel } from "@/lib/sites";
 
 export type SiteMiles = {
   siteId: number;
-  /** Routed (or estimated) miles from THIS engineer's home, rounded whole. */
+  /** Routed (or estimated) miles from where THIS engineer's trips start, rounded whole. */
   miles: number;
   estimated: boolean;
 };
 
 /**
- * Road miles from one engineer's home to each of the given sites. Sites
- * without coordinates, or an engineer without a home base, simply drop out -
- * the caller falls back to the site's typed default, and nothing errors.
+ * Where this engineer's trips start.
+ *
+ * Their site location when they have one - the shop, or the client's lab a
+ * dedicated engineer is stationed at - else their home. The site is an
+ * OVERRIDE, not a fallback chain: a site that never geocoded answers null
+ * rather than quietly measuring from the front door, because a distance
+ * from the wrong doorstep flags honest claims and waves through the rest.
+ * Null is a real answer the callers handle (the site's typed default, then
+ * "somebody has to look at this").
+ */
+export async function tripOrigin(
+  member: { siteId: number | null; homeLat: number | null; homeLng: number | null },
+): Promise<LatLng | null> {
+  if (member.siteId !== null) {
+    const [site] = await db.select({ lat: orgSites.lat, lng: orgSites.lng })
+      .from(orgSites).where(eq(orgSites.id, member.siteId));
+    return site && site.lat !== null && site.lng !== null ? { lat: site.lat, lng: site.lng } : null;
+  }
+  if (member.homeLat === null || member.homeLng === null) return null;
+  return { lat: member.homeLat, lng: member.homeLng };
+}
+
+/**
+ * Road miles from where one engineer's trips start to each of the given
+ * sites. Sites without coordinates, or an engineer with no placeable origin,
+ * simply drop out - the caller falls back to the site's typed default, and
+ * nothing errors.
  */
 export async function tripMilesFor(email: string, siteIds: number[]): Promise<SiteMiles[]> {
   if (!siteIds.length) return [];
   const [member] = await db.select().from(houseMembers)
     .where(eq(houseMembers.email, email.toLowerCase()));
-  if (!member || member.homeLat === null || member.homeLng === null) return [];
-  const home: LatLng = { lat: member.homeLat, lng: member.homeLng };
+  if (!member) return [];
+  const home = await tripOrigin(member);
+  if (!home) return [];
 
   const sites = (await db.select().from(orgSites).where(inArray(orgSites.id, siteIds)))
     .filter((s) => s.lat !== null && s.lng !== null);
@@ -69,8 +94,9 @@ export type TripSite = {
   siteId: number;
   name: string;
   /**
-   * Road miles one way from the CLAIMANT's home, or null when the app cannot
-   * say - no home base on file, or a site that never geocoded. Null is a real
+   * Road miles one way from where the CLAIMANT's trips start (their site
+   * location, else their home), or null when the app cannot say - no origin
+   * on file, or a site that never geocoded. Null is a real
    * answer that the rulebook handles; a zero here would read as "next door"
    * and quietly flag every honest claim.
    */

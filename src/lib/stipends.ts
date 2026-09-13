@@ -358,4 +358,50 @@ function ordinal(n: number): string {
 }
 
 /** Re-exported so callers need one import for the whole schedule. */
+/**
+ * The schedules a shop actually asks for, written as sentences.
+ *
+ * A cadence select and a separate day-of-month select is two decisions to
+ * express one, and the second is meaningless in the weekly shape - which is
+ * how a form ends up with a disabled control nobody can explain. One list,
+ * offered wherever a standing reimbursement is set up - the roster's card and
+ * the person file - so the two forms cannot drift apart.
+ */
+export type StipendShape = {
+  key: string; label: string; cadence: Cadence;
+  everyMonths: number; dayOfMonth: number; everyWeeks: number;
+};
+export const STIPEND_SHAPES: StipendShape[] = [
+  { key: "m1-1",    label: "Monthly, on the 1st",        cadence: "months", everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 1 },
+  { key: "m1-15",   label: "Monthly, on the 15th",       cadence: "months", everyMonths: 1,  dayOfMonth: 15,       everyWeeks: 1 },
+  { key: "m1-last", label: "Monthly, on the last day",   cadence: "months", everyMonths: 1,  dayOfMonth: LAST_DAY, everyWeeks: 1 },
+  { key: "m1-day",  label: "Monthly, on a day I pick",   cadence: "months", everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 1 },
+  { key: "m3",      label: "Every quarter",              cadence: "months", everyMonths: 3,  dayOfMonth: 1,        everyWeeks: 1 },
+  { key: "m6",      label: "Every 6 months",             cadence: "months", everyMonths: 6,  dayOfMonth: 1,        everyWeeks: 1 },
+  { key: "m12",     label: "Every year",                 cadence: "months", everyMonths: 12, dayOfMonth: 1,        everyWeeks: 1 },
+  { key: "w1",      label: "Every week",                 cadence: "weeks",  everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 1 },
+  { key: "w2",      label: "Every other week",           cadence: "weeks",  everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 2 },
+  { key: "w4",      label: "Every 4 weeks",              cadence: "weeks",  everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 4 },
+];
+
+/**
+ * The terms a shape stands for, from what the form holds.
+ *
+ * Only the "day I pick" shape reads the day box; every other one carries its
+ * own day, so switching to "on the last day" cannot be silently overridden by
+ * a number left behind in a field nobody is looking at.
+ */
+export function shapeTerms(shapeKey: string, dayOfMonth: string, weekday: string) {
+  const shape = STIPEND_SHAPES.find((x) => x.key === shapeKey) ?? STIPEND_SHAPES[0];
+  const picksDay = shape.key === "m1-day";
+  return {
+    shape, picksDay,
+    terms: {
+      cadence: shape.cadence, everyMonths: shape.everyMonths,
+      dayOfMonth: picksDay ? parseInt(dayOfMonth, 10) || 0 : shape.dayOfMonth,
+      everyWeeks: shape.everyWeeks, weekday: parseInt(weekday, 10),
+    },
+  };
+}
+
 export { cycleDay, isDay };

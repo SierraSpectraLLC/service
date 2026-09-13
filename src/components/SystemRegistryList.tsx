@@ -8,7 +8,10 @@ export type SystemRegistryRow = {
   externalId: string;
   /** What the system is, already worded by the page - its assets, or the model. */
   label: string;
-  client: string;
+  /** Whose it is - the owning organization's name, or the client text when nobody on the platform owns it. */
+  owner: string;
+  /** What kind of system it is - the shop's own grouping ("LC-MS", "GC"). */
+  category: string;
   model: string;
   location: string;
   lead: string;
@@ -24,26 +27,33 @@ const COLUMNS = ["System", "ID", "Model", "Location", "Lead", "Stage"];
 
 /**
  * The systems registry, in the asset registry's clothes: a real table grouped
- * by whose the machines are.
+ * by what the machines are - or, on request, by whose they are.
  *
- * Grouping by client rather than showing a client column is the point - a
- * registry is read by going to the lab, and a client's name repeated down a
- * column carries no information. The count in each heading is what tells you
- * how many machines a client has on the books. Within a client, systems keep
- * the page's order, which is by ID.
+ * Grouping rather than showing the column is the point - a registry is read
+ * by going to the LC-MS section, and "LC-MS" repeated down a column carries no
+ * information. The count in each heading is what tells you how many of a
+ * kind are on the books. By type is the default because it is what the asset
+ * registry does, and two lists read the same way should section the same
+ * way; by owner is the toggle, and the page keeps the choice in the URL.
+ * Within a group, systems keep the page's order, which is by ID. The owner
+ * heading is lib/systemRegistry.systemOwnerName, not the free-text client: a
+ * system LabZen owns with a blank label was heading a "(no client)" group
+ * while its own page said LabZen.
  *
  * No checkboxes: deleting a system is not a bulk job, so there is nothing to
  * select. The dot carries the system's state and the page renders the Legend
  * for it; the row's one pill is its stage.
  */
-export default function SystemRegistryList({ rows, empty }: {
+export default function SystemRegistryList({ rows, empty, groupBy = "category" }: {
   rows: SystemRegistryRow[];
   /** What to say when there is nothing to show, worded by the page. */
   empty: React.ReactNode;
+  /** What the section headings are: the system's type (default) or its owner. */
+  groupBy?: "category" | "owner";
 }) {
   const by = new Map<string, SystemRegistryRow[]>();
   for (const r of rows) {
-    const k = r.client || "(no client)";
+    const k = groupBy === "owner" ? r.owner || "(no owner)" : r.category || "(no type)";
     const list = by.get(k);
     if (list) list.push(r); else by.set(k, [r]);
   }
@@ -62,10 +72,10 @@ export default function SystemRegistryList({ rows, empty }: {
         </div>
       )}
 
-      {groups.map(([client, list]) => (
-        <div key={client}>
+      {groups.map(([heading, list]) => (
+        <div key={heading}>
           <div className="reg-group">
-            <span className="reg-group-name">{client}</span>
+            <span className="reg-group-name">{heading}</span>
             <span className="reg-group-count">{list.length}</span>
           </div>
 

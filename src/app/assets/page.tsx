@@ -10,14 +10,19 @@ import AssetRegistryFilter from "@/components/AssetRegistryFilter";
 import NewAssetForm from "@/components/NewAssetForm";
 import AssetGridToggle from "@/components/AssetGridToggle";
 import AssetRegistryList from "@/components/AssetRegistryList";
+import GroupToggle from "@/components/GroupToggle";
 import { FacetStrip, Legend, PageHead, Toolbar } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default async function AssetsPage({ searchParams }: { searchParams: Promise<{ q?: string; kind?: string; status?: string; owner?: string }> }) {
+export default async function AssetsPage({ searchParams }: {
+  searchParams: Promise<{ q?: string; kind?: string; status?: string; owner?: string; group?: string }>;
+}) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
-  const { q = "", kind = "", status = "", owner = "" } = await searchParams;
+  const { q = "", kind = "", status = "", owner = "", group = "" } = await searchParams;
+  // Sectioned by type unless asked for owners; anything else is the default.
+  const groupBy = group === "owner" ? "owner" : "kind";
 
   // Units on systems shared with the viewer, plus any their own org owns.
   const [seeAssets, seeSystems] = await Promise.all([visibleAssetIds(user), visibleSystemIds(user)]);
@@ -67,15 +72,18 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
   const unattached = rows.filter((a) => a.instrumentId === null && a.status !== "Decommissioned").length;
   // Deleting records is staff work, so only staff get the checkboxes.
 
-  // Status facet hrefs keep every other filter in place - facet state is the URL.
-  const statusHref = (s: string) => {
+  // Facet and toggle hrefs keep every other filter in place - facet state is the URL.
+  const href = (over: { status?: string; group?: string }) => {
     const p = new URLSearchParams();
+    const m = { status, group: groupBy === "owner" ? "owner" : "", ...over };
     if (needle) p.set("q", needle);
     if (kind) p.set("kind", kind);
-    if (s && s !== status) p.set("status", s);
+    if (m.status) p.set("status", m.status);
     if (owner) p.set("owner", owner);
+    if (m.group) p.set("group", m.group);
     return `/assets${p.size ? `?${p}` : ""}`;
   };
+  const statusHref = (s: string) => href({ status: s && s !== status ? s : "" });
   const countFor = (s: string) => rows.filter((a) => a.status === s).length;
 
   return (
@@ -96,6 +104,7 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
             {kind && <input type="hidden" name="kind" value={kind} />}
             {status && <input type="hidden" name="status" value={status} />}
             {owner && <input type="hidden" name="owner" value={owner} />}
+            {groupBy === "owner" && <input type="hidden" name="group" value="owner" />}
             <input name="q" defaultValue={q} placeholder="Serial, model, owner, system..." aria-label="Search assets" />
           </form>
         }
@@ -105,8 +114,14 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
           }))} />
         }
         actions={
-          <AssetRegistryFilter q={q} kind={kind} status={status} owner={owner}
-            kinds={filterKinds} owners={owners} />
+          <>
+            <AssetRegistryFilter q={q} kind={kind} status={status} owner={owner} group={groupBy === "owner" ? "owner" : ""}
+              kinds={filterKinds} owners={owners} />
+            <GroupToggle value={groupBy} choices={[
+              { key: "kind", label: "By type", href: href({ group: "" }) },
+              { key: "owner", label: "By owner", href: href({ group: "owner" }) },
+            ]} />
+          </>
         }
       />
       <div className="card">
@@ -119,6 +134,7 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
 
         <AssetRegistryList
           canSelect={isStaff}
+          groupBy={groupBy}
           rows={filtered.map((a) => {
             const statusTone = ASSET_TONE[a.status] ?? "neutral";
             const sys = a.instrumentId !== null ? home.get(a.instrumentId) : undefined;

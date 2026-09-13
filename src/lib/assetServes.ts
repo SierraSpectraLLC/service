@@ -106,6 +106,40 @@ export function moveFallout(
   };
 }
 
+/**
+ * Which module each row of a batch asked to serve, once the batch exists.
+ *
+ * A mass spec and its two roughing pumps are entered together, and the pumps
+ * name the spec by its ROW - it has no id yet. This turns those row numbers
+ * into ids after the inserts, one answer per row that asked, so the action can
+ * link them with the same checkServes it uses for any other link. A row whose
+ * target was not saved gets a sentence rather than a silent miss: the pump
+ * exists, and somebody should know it is not plumbed.
+ */
+export function resolveBatchServes(
+  rows: { servesRow?: number | null; servesAssetId?: number | null }[],
+  createdIds: (number | null)[],
+): { row: number; targetId: number | null; error?: string }[] {
+  const out: { row: number; targetId: number | null; error?: string }[] = [];
+  rows.forEach((r, i) => {
+    if (r.servesRow == null && r.servesAssetId == null) return;
+    const row = i + 1;
+    if (createdIds[i] == null) return; // the row itself did not save; that failure is already reported
+    if (r.servesRow != null) {
+      if (r.servesRow === row) { out.push({ row, targetId: null, error: "A unit can't serve itself." }); return; }
+      const target = createdIds[r.servesRow - 1];
+      if (target == null) {
+        out.push({ row, targetId: null, error: `Row ${r.servesRow}, which it serves, was not saved` });
+        return;
+      }
+      out.push({ row, targetId: target });
+      return;
+    }
+    out.push({ row, targetId: r.servesAssetId ?? null });
+  });
+  return out;
+}
+
 /** "fore-line", trimmed and bounded. Blank is the ordinary case. */
 export const cleanRole = (role: string): string => role.trim().slice(0, 40);
 

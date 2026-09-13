@@ -82,7 +82,8 @@ export default async function PeoplePage() {
       .where(and(forTenant(stockrooms.tenantOrgId, t), eq(stockrooms.archived, false)))
       .orderBy(asc(stockrooms.name)),
     /* The client labs, so a person's file can station them at one - a
-       dedicated engineer's trips start at the client, not at their house. */
+       dedicated engineer's trips start at the client, not at their house,
+       and their house stays on file as their house. */
     worksiteChoicesFor(user),
   ]);
   /* The half of the person that is not on the roster row: their title and
@@ -167,7 +168,9 @@ export default async function PeoplePage() {
         homeAddress: m.homeAddress, phone: m.phone,
         emergencyName: m.emergencyName, emergencyPhone: m.emergencyPhone,
         startedOn: m.startedOn,
-        siteId: accountOf.get(m.email.toLowerCase())?.siteId ?? null,
+        /* Their site location off the file; a staffed location set before the
+           file carried one still reads, off the account row. */
+        siteId: m.siteId ?? accountOf.get(m.email.toLowerCase())?.siteId ?? null,
       },
       papers: paperRows.filter((f) => f.houseMemberId === m.id).map((f) => ({
         id: f.id, fileName: f.fileName, kind: f.kind, size: f.size, when: shopDay(f.createdAt),
@@ -258,7 +261,8 @@ export default async function PeoplePage() {
       </Panel>
 
       <PeopleDesk roster={roster} isOwner={isOwner} seesPay={seesPay} orgId={payOrg} today={today}
-        perksMonthCents={perksMonth} sites={siteChoices} ownSites={ownSites} myEmail={user.email} />
+        perksMonthCents={perksMonth} sites={siteChoices} ownSites={ownSites} myEmail={user.email}
+        categories={categoryRows.map((c) => c.name)} />
 
       {/* Under the roster, because it is a fact ABOUT the roster: what each
           person is owed every month whether or not they file anything. */}
