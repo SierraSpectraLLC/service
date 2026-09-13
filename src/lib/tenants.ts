@@ -236,3 +236,21 @@ export function mayAdminOrg(v: TenantViewer, org: OrgNode): boolean {
   if (org.isOperator) return org.id === v.operatorOrgId;   // their own workspace, nobody else's
   return org.parentOrgId === v.operatorOrgId;
 }
+
+/**
+ * May this viewer put a CLIENT SIGN-IN on an organization's allowlist?
+ *
+ * Narrower than mayAdminOrg by exactly one case: never an operator. A service
+ * company's people are its STAFF, kept in house_members and stamped with the
+ * workspace they work for - that is what makes "staff of whom" answerable. An
+ * allowlist entry naming an operator org would instead sign somebody in as a
+ * CLIENT of that company, and a client's scope is its org's parent operator;
+ * an operator has none, so the session would carry a null operatorOrgId, which
+ * readTenant reads as "no restriction". The page that offered the box hid the
+ * mistake behind a "People at Sierra Spectra" heading that looked like where
+ * employees go. It is not, and the server should say so rather than the UI
+ * merely not offering it.
+ */
+export function mayInviteInto(v: TenantViewer, org: OrgNode): boolean {
+  return !org.isOperator && mayAdminOrg(v, org);
+}

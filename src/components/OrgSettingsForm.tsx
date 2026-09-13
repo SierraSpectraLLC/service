@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
@@ -69,6 +70,14 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
     spectrumHeight: number | null;
     eodRecipients: string; digestRecipients: string; digestHour: number; digestDays: string;
     systems: number; isOperator: boolean; isSheetOrg: boolean;
+    /**
+     * Whether this organization RUNS A WORKSPACE (orgs.isOperator) - a service
+     * company with staff of its own, as opposed to a client of one. Not
+     * `isOperator` above, which asks whether it runs the whole instance.
+     * A workspace's people are house staff, so the client sign-in panel has
+     * nothing to offer it; see lib/tenants.mayInviteInto.
+     */
+    isWorkspace?: boolean;
     storageLimitMb: number; quota: Quota;
     remoteAccessEnabled: boolean; remoteDevices: number;
     resaleEnabled: boolean;
@@ -339,6 +348,59 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
 
   return (
     <>
+      {org.isWorkspace ? (
+        /* A service company's people are its STAFF, not client sign-ins. The
+           full panel below used to render here too, and its "+ New" box made
+           a workspace's own owner an allowlist entry for an employee - a
+           client login with no operator to be scoped to. The server now
+           refuses that; this panel says where employees actually go, and
+           shows a stray entry only so it can be removed. */
+        <Panel title={<>People at {org.name}</>}
+          hint="A service company's people are its staff." tone={people.length ? "warn" : undefined}>
+          <div className="mut t-small" style={{ padding: "6px 0" }}>
+            {org.name} runs a workspace, so the people who work here are <b>staff</b>: they sign in
+            through the house roster, see every system in the workspace, and are added, promoted and
+            revoked under <Link href="/settings/admin">Settings &rsaquo; People &amp; ownership</Link>.
+            The <Link href={`/settings/organizations/${org.id}?tab=staff`}>Staff</Link> tab lists them.
+          </div>
+          {people.length > 0 && (
+            <>
+              <div className="t-small" style={{ color: "var(--t-warn-fg)", padding: "6px 0" }}>
+                {people.length === 1 ? "This address was" : "These addresses were"} added as a <b>client</b> sign-in
+                to {org.name}. A client of a service company has no workspace to be scoped to, so the
+                entry grants nothing useful - remove it, and add the person under People &amp; ownership instead.
+              </div>
+              {people.map((r) => {
+                const domain = r.entry.trim().startsWith("@");
+                return (
+                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
+                    {r.name && <span className="t-body" style={{ fontWeight: 600 }}>{r.name}</span>}
+                    <span className="mono t-body">{r.entry}</span>
+                    {domain && <span className="pill info">whole domain</span>}
+                    <span className={`pill ${r.canEdit ? "good" : "neutral"}`}>{r.canEdit ? "editor" : "viewer"}</span>
+                    {(isOwner || !domain) && (
+                      <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)" }} disabled={pending}
+                        onClick={async () => {
+                          if (!(await confirmDialog({
+                            title: `Remove ${r.entry}?`,
+                            body: "Anyone covered only by this entry is signed out immediately. Add them under People & ownership if they work here.",
+                            action: `Remove ${r.entry}`, tone: "bad",
+                          }))) return;
+                          setPeopleError("");
+                          startTransition(async () => {
+                            await removeClientAccess(r.id);
+                            toast({ message: `Removed ${r.entry}` });
+                          });
+                        }}>remove</button>
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          )}
+          {peopleError && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{peopleError}</div>}
+        </Panel>
+      ) : (
       <Panel title={<>People at {org.name}</>}
         hint="Sign-in is by email code. Editors change; viewers read."
         actions={
@@ -587,6 +649,7 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
           </div>
         )}
       </Panel>
+      )}
 
       {adding && (
         <Dialog open onClose={() => setAdding(false)} title={`Add somebody at ${org.name}`} size="md"

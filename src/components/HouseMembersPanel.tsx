@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
+import Link from "next/link";
 import { clearHouseTempPassword, revokeHouseMember, setHouseMember, setHouseTempPassword } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import HomeBasePicker from "@/components/HomeBasePicker";
 import type { WorksiteChoice } from "@/lib/sites";
+import AddPersonDialog, { type SiteOption } from "@/components/AddPersonDialog";
 import { toast } from "@/components/ui/Toast";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
-import { TEMP_DAYS_DEFAULT, TEMP_DAYS_MAX } from "@/lib/tempPassword";
 
 export type HouseRow = {
   email: string; role: string; name: string; fromEnv: boolean; isRoot: boolean; locked: boolean;
@@ -33,12 +34,9 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
   myEmail: string;
   /** Client labs, offered as a home base for an engineer stationed on-site. */
   sites?: WorksiteChoice[];
+  sites?: SiteOption[];
 }) {
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState({
-    email: "", first: "", last: "", role: "staff", homeAddress: "",
-    withPassword: false, days: TEMP_DAYS_DEFAULT,
-  });
   const [error, setError] = useState("");
   /** Shown once, to be read down a phone. Never mailed, never stored plain. */
   const [minted, setMinted] = useState<null | { who: string; password: string; expiresOn: string }>(null);
@@ -67,7 +65,8 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
       <div className="mut t-small" style={{ marginBottom: 10 }}>
         Staff see and work every system in the shop. Owners additionally get Settings,
         organizations, stages, branding, hard deletes and signature revocation. Changes
-        take effect on their next page load - no redeploy, no signing out.
+        take effect on their next page load - no redeploy, no signing out. Their title,
+        pay, home base and person file are in <Link href="/people">Our people</Link>.
       </div>
 
       {adding && (() => {
@@ -164,6 +163,7 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
         </Dialog>
         );
       })()}
+      {adding && <AddPersonDialog sites={sites} onClose={() => setAdding(false)} />}
 
       {members.map((m) => (
         <div key={m.email} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>

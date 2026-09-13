@@ -75,6 +75,7 @@ beforeAll(async () => {
 beforeEach(async () => { who = null; await client.exec(RESET); });
 
 const PROFILE = {
+  name: "Bill Harner", title: "Field service engineer",
   homeAddress: "12 Foothill Rd, Reno NV 89509", phone: "555-0155",
   emergencyName: "R. Reyes", emergencyPhone: "555-0156", startedOn: "2024-05-01",
 };
@@ -94,6 +95,25 @@ describe("the person file", () => {
     expect(m.phone).toBe("555-0155");
     expect(m.emergencyName).toBe("R. Reyes");
     expect(m.startedOn).toBe("2024-05-01");
+  });
+
+  it("puts the title on the account row and the name on the roster, and keeps a name nobody typed", async () => {
+    who = HR;
+    const { saveMemberProfile } = await import("@/app/actions");
+    const { eq } = await import("drizzle-orm");
+    await saveMemberProfile("bill@sierra.test", PROFILE);
+    expect((await bill()).name).toBe("Bill Harner");
+    // No account yet - they have never signed in - so the title makes one, the
+    // way updatePersonProfile does for a client contact, and their first
+    // sign-in finds it by address.
+    const [account] = await testDb.select().from(schema.users).where(eq(schema.users.email, "bill@sierra.test"));
+    expect(account?.title).toBe("Field service engineer");
+    // A blank name is not an edit: reports are keyed on the name, so clearing
+    // it by accident would orphan their claims rather than rename them.
+    await saveMemberProfile("bill@sierra.test", { ...PROFILE, name: "  ", title: "" });
+    expect((await bill()).name).toBe("Bill Harner");
+    const [again] = await testDb.select().from(schema.users).where(eq(schema.users.email, "bill@sierra.test"));
+    expect(again?.title).toBe("");
   });
 
   it("lets the owner too, and nobody else on staff", async () => {

@@ -222,7 +222,7 @@ import {
 } from "@/lib/lead";
 import { leadWithOffers, wasOffered } from "@/lib/leadData";
 import { normalizePhone } from "@/lib/sms";
-import { isPlatformStaff, isStaffRole, mayAdminOrg, mayBillOrg, mayCreateOrgs, tenantOf } from "@/lib/tenants";
+import { isPlatformStaff, isStaffRole, mayAdminOrg, mayBillOrg, mayCreateOrgs, mayInviteInto, tenantOf } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
 import { signInIdentity } from "@/auth";
 import { maySeeTrail, safeQuery, trailAdmins } from "@/lib/trail";
@@ -7655,6 +7655,14 @@ const ALLOW_EMAIL = /^[^\s@]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
 const ALLOW_DOMAIN = /^@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
 
 /**
+ * The refusal both allowlist doors give an operator org. Its people are staff
+ * (house_members), and a client sign-in there would have no scope - see
+ * lib/tenants.mayInviteInto. Named so the message can point at the right door.
+ */
+const staffNotClients = (name: string) =>
+  ({ error: `${name} is a service company - its people are staff, added under Settings › People & ownership, not client sign-ins` });
+
+/**
  * A whole person at a client, in one go: who they are, what they may do, where
  * they sit - and, when email cannot be trusted to arrive, a temporary password
  * to read down the phone.
@@ -7686,8 +7694,11 @@ export async function addClientPerson(orgId: number, data: {
   const asStaff = isStaffRole(u.role);
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
   if (!org) return { error: "Not found" };
+  // Checked before either route: the client-editor route below would otherwise
+  // let a stray login at an operator org invite more of them.
+  if (org.isOperator) return staffNotClients(org.name);
   if (asStaff) {
-    if (!mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+    if (!mayInviteInto(tenantViewer(u), org)) return { error: "Not found" };
   } else if (u.orgId === null || orgId !== u.orgId) {
     return { error: "Not found" };
   }
@@ -7905,7 +7916,8 @@ export async function addClientAccess(raw: string, orgId: number, canEdit = fals
   // and staff may only name one their own workspace runs.
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
   if (!org) return { error: "Pick which organization they sign in as" };
-  if (asStaff && !mayAdminOrg(tenantViewer(u), org)) return { error: "Pick which organization they sign in as" };
+  if (org.isOperator) return staffNotClients(org.name);
+  if (asStaff && !mayInviteInto(tenantViewer(u), org)) return { error: "Pick which organization they sign in as" };
   await db.insert(clientAllowlist).values({ entry, orgId, canEdit, addedBy: u.name }).onConflictDoNothing();
   await audit({
     actor: u.email, entityType: "settings", entityId: entry,
@@ -11937,6 +11949,7 @@ export async function setHouseHr(email: string, on: boolean): Promise<{ error?: 
  * another company's person alike, so the shape of the error confirms nothing.
  */
 export async function saveMemberProfile(email: string, data: {
+  name: string; title: string;
   homeAddress: string; phone: string; emergencyName: string; emergencyPhone: string;
   startedOn: string;
 }): Promise<{ error?: string; geocoded?: boolean }> {
@@ -11957,7 +11970,11 @@ export async function saveMemberProfile(email: string, data: {
   // and an unchanged address must not burn a lookup or lose its pin to a
   // provider hiccup while somebody was only fixing the phone number.
   const hit = moved && clean ? await geocode(clean) : null;
+  // A blank name is not an edit: reports and the directory are keyed on it,
+  // so an accidental clear would orphan their claims rather than rename them.
+  const label = data.name.trim().slice(0, 80);
   await db.update(houseMembers).set({
+    ...(label ? { name: label } : {}),
     homeAddress: clean,
     ...(moved ? { homeLat: hit?.lat ?? null, homeLng: hit?.lng ?? null } : {}),
     phone: data.phone.trim().slice(0, 60),
@@ -11969,11 +11986,19 @@ export async function saveMemberProfile(email: string, data: {
     // Their routed answers start from a place that no longer stands.
     await db.delete(driveCache).where(eq(driveCache.memberEmail, member.email));
   }
+  // The title lives on the ACCOUNT row, where their own profile page reads it
+  // back to them ("set by whoever administers your organization") and the
+  // directory shows it. Made if they have never signed in, exactly as
+  // updatePersonProfile does for a client contact.
+  const title = data.title.trim().slice(0, 80);
+  const [account] = await db.select({ id: users.id }).from(users).where(eq(users.email, member.email));
+  if (account) await db.update(users).set({ title }).where(eq(users.id, account.id));
+  else if (title) await db.insert(users).values({ email: member.email, title, ...(label ? { name: label } : {}) });
   await audit({
     actor: u.email, entityType: "house", entityId: e, tenantOrgId: member.orgId,
     // The fact of the edit, never the address - the audit log is read by more
     // people than the person file is.
-    action: `updated ${member.name || e}'s person file`,
+    action: `updated ${label || member.name || e}'s person file`,
   });
   revalidatePath("/people");
   return { geocoded: moved && clean !== "" ? hit !== null : undefined };

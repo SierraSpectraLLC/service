@@ -303,7 +303,7 @@ function staffSections(ctx: NavContext): NavSection[] {
          to read. The page refuses them too; this keeps the door off the
          wall. */
       ...(ctx.isOwner ? [{ href: "/network", label: "Service companies" }] : []),
-      ...(ctx.adminsPeople ? [{ href: "/people", label: "People" }] : []),
+      ...(ctx.adminsPeople ? [{ href: "/people", label: "Our people" }] : []),
       /* Purchasing and Reimbursements, for the readers who have no Financial
          menu to find them in.
          They are things an engineer DOES rather than facts about how the
