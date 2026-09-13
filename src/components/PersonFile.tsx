@@ -273,9 +273,9 @@ export default function PersonFile({
           certification. Kept on the person file rather than the shelf - see
           uploadMemberPapers - so only whoever administers the people, and
           the person themselves, can open it. */}
-      <div className="dialog-section" style={{ marginTop: 14 }}>Contract &amp; paperwork</div>
+      <div className="dialog-section" style={{ marginTop: 16 }}>Contract &amp; paperwork</div>
       {papers.length === 0 && (
-        <div className="mut t-small" style={{ marginBottom: 6 }}>Nothing filed yet.</div>
+        <div className="mut t-small" style={{ marginBottom: 8 }}>Nothing filed yet.</div>
       )}
       {papers.map((f) => (
         <div key={f.id} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
@@ -295,7 +295,7 @@ export default function PersonFile({
             }}>×</button>
         </div>
       ))}
-      <div className="row-2" style={{ marginTop: 6, alignItems: "center" }}>
+      <div className="row-2" style={{ marginTop: 8, alignItems: "center" }}>
         <select value={paperKind} aria-label="Paper kind" style={{ width: "auto" }} disabled={!!busy}
           onChange={(e) => setPaperKind(e.target.value)}>
           {PAPER_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
@@ -318,9 +318,9 @@ export default function PersonFile({
       {/* What the company pays them back every month whether or not they file
           anything - internet, phone, tools. Read here; set up and changed on
           the Standing reimbursements card, which is the owner's. */}
-      <div className="dialog-section" style={{ marginTop: 14 }}>Monthly reimbursements</div>
+      <div className="dialog-section" style={{ marginTop: 16 }}>Monthly reimbursements</div>
       {stipends.length === 0 && (
-        <div className="mut t-small" style={{ marginBottom: 6 }}>
+        <div className="mut t-small" style={{ marginBottom: 8 }}>
           No standing reimbursements. The owner sets one up under Standing reimbursements on the Employees page.
         </div>
       )}
