@@ -125,10 +125,13 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
       {roster.length > 0 && (
         <DataTable
           cols={[
-            { key: "who", label: "Person", width: "minmax(180px, 1.6fr)" },
-            { key: "access", label: "Access", width: "150px" },
-            { key: "unclaimed", label: "Out of pocket", width: "140px", align: "right" },
-            { key: "claims", label: "Claims", width: "150px" },
+            // Sized to fit the rail pane (766px at the container's full width,
+            // gaps included): the roster used to add up to 818 and clip its
+            // action column off the right edge.
+            { key: "who", label: "Person", width: "minmax(160px, 1.6fr)" },
+            { key: "access", label: "Access", width: "120px" },
+            { key: "unclaimed", label: "Out of pocket", width: "110px", align: "right" },
+            { key: "claims", label: "Claims", width: "130px" },
             { key: "act", label: "", width: "150px", align: "right" },
           ]}
           rows={roster.map((r) => ({
@@ -136,11 +139,13 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
             cells: {
               who: (
                 <button type="button" onClick={() => setOpen(r.email)}
-                  style={{ background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer" }}>
+                  style={{ background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", display: "block", maxWidth: "100%" }}>
                   <span style={{ fontWeight: 600, color: "var(--link, inherit)" }}>
                     {r.name || <span className="mut">no name set</span>}
                   </span>
-                  <div className="mut t-meta">
+                  {/* Ellipsis on the line itself: the cell's own ellipsis does
+                      not reach into a button, so a long title was cut mid-word. */}
+                  <div className="mut t-meta" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {r.email}
                     {r.profile.title ? ` · ${r.profile.title}` : seesPay && r.pay ? " · on payroll" : ""}
                     {stationName(r.profile.siteId) ? ` · at ${stationName(r.profile.siteId)}` : ""}
