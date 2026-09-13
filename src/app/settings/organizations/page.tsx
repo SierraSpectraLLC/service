@@ -30,7 +30,7 @@ export default async function OrganizationsPage({ searchParams }: { searchParams
       email: users.email, firstName: users.firstName, lastName: users.lastName,
       title: users.title, siteId: users.siteId,
     }).from(users),
-    db.select({ email: houseMembers.email, orgId: houseMembers.orgId }).from(houseMembers),
+    db.select({ email: houseMembers.email, orgId: houseMembers.orgId, role: houseMembers.role }).from(houseMembers),
     // Site names go to the form whole, so this one is shipped rather than
     // merely joined against - another company's addresses, unfiltered.
     db.select({ id: orgSites.id, orgId: orgSites.orgId, name: orgSites.name })
@@ -74,6 +74,9 @@ export default async function OrganizationsPage({ searchParams }: { searchParams
           systems: shareCounts.filter((c) => c.orgId === o.id).length,
           logins: allowRows.filter((r) => r.orgId === o.id).length,
           editors: allowRows.filter((r) => r.orgId === o.id && r.canEdit).length,
+          // A service company's people are its staff; "nobody can sign in"
+          // beside one was the allowlist answering a question about the house.
+          staff: o.isOperator ? houseRows.filter((r) => r.orgId === o.id && r.role !== "none").length : null,
         }))}
         orphans={orphanRows.map((r) => ({ id: r.id, entry: r.entry }))}
         directory={people}

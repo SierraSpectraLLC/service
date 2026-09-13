@@ -189,7 +189,10 @@ export default async function OrgSettingsPage({ params, searchParams }: {
   const heroStats: HeroStat[] = [
     { value: ownedSystems.length, label: ownedSystems.length === 1 ? "system" : "systems" },
     { value: ownedAssets.length, label: ownedAssets.length === 1 ? "unit" : "units" },
-    { value: allowRows.length, label: allowRows.length === 1 ? "person" : "people" },
+    // A service company's people are its staff; the allowlist is for clients.
+    org.isOperator
+      ? { value: staffRows.length, label: "staff" }
+      : { value: allowRows.length, label: allowRows.length === 1 ? "person" : "people" },
     { value: siteRows.length, label: siteRows.length === 1 ? "site" : "sites" },
     ...(seesAgreements
       ? [{ value: activeAgreements, label: activeAgreements === 1 ? "active agreement" : "active agreements", tone: activeAgreements === 0 ? "warn" as const : undefined }]
@@ -254,6 +257,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
           resaleEnabled: org.resaleEnabled, remoteDevices: deviceCount,
           stage: stageOf(org.stage), ownedSystems: ownedSystems.length,
           isOperator: s?.operatorOrgId === org.id, isSheetOrg: s?.sheetOrgId === org.id,
+          isWorkspace: org.isOperator,
         }}
         people={allowRows.map((r) => {
           const a = accountOf.get(r.entry.trim().toLowerCase());
@@ -450,9 +454,18 @@ export default async function OrgSettingsPage({ params, searchParams }: {
           <div className="card-title">{org.name}&apos;s people</div>
           <div className="mut t-small" style={{ marginBottom: 10 }}>
             Staff of this service company. They see and work every system in its
-            workspace, and owners additionally get its Settings. Managed from
-            their own Settings &rsaquo; People - shown here so this page can
-            answer who works here.
+            workspace, and owners additionally get its Settings.{" "}
+            {user.operatorOrgId === org.id ? (
+              <>
+                Add, promote or revoke them under{" "}
+                <Link href="/settings/admin">Settings &rsaquo; People &amp; ownership</Link>.
+              </>
+            ) : (
+              <>
+                Managed from their own Settings &rsaquo; People - shown here so
+                this page can answer who works here.
+              </>
+            )}
           </div>
           <DataTable
             empty="Nobody yet"
