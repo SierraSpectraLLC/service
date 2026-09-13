@@ -9,6 +9,7 @@ import { getStageDefs } from "@/lib/stageDefs";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { SYSTEM_STATES, filterSystems, systemOwnerName, systemState } from "@/lib/systemRegistry";
 import SystemRegistryList from "@/components/SystemRegistryList";
+import GroupToggle from "@/components/GroupToggle";
 import { FacetStrip, Legend, PageHead, Toolbar } from "@/components/ui";
 import type { Tone } from "@/lib/tones";
 
@@ -34,12 +35,15 @@ export const dynamic = "force-dynamic";
  * mean. Two lists read the same way should look the same.
  */
 export default async function SystemsPage({ searchParams }: {
-  searchParams: Promise<{ q?: string; state?: string }>;
+  searchParams: Promise<{ q?: string; state?: string; group?: string }>;
 }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/units");
-  const { q = "", state = "" } = await searchParams;
+  const { q = "", state = "", group = "" } = await searchParams;
+  // Sectioned by type unless asked for owners - the asset registry's default,
+  // so the two pages read the same way. Anything else is the default.
+  const groupBy = group === "owner" ? "owner" : "category";
 
   const visible = await visibleSystemIds(user);
   const [rows, orgRows, defs] = await Promise.all([
@@ -63,13 +67,16 @@ export default async function SystemsPage({ searchParams }: {
   const countFor = (s: string) => items.filter((i) => i.state === s).length;
   const onRecord = items.filter((i) => i.state !== "archived").length;
 
-  // Facet hrefs keep the search in place - facet state is the URL.
-  const stateHref = (s: string) => {
+  // Facet hrefs keep the search and the grouping in place - facet state is the URL.
+  const href = (over: { state?: string; group?: string }) => {
     const p = new URLSearchParams();
+    const m = { state, group: groupBy === "owner" ? "owner" : "", ...over };
     if (q.trim()) p.set("q", q.trim());
-    if (s && s !== state) p.set("state", s);
+    if (m.state) p.set("state", m.state);
+    if (m.group) p.set("group", m.group);
     return `/instruments${p.size ? `?${p}` : ""}`;
   };
+  const stateHref = (s: string) => href({ state: s && s !== state ? s : "" });
   const stageDef = (name: string) => defs.find((x) => x.name === name) ?? null;
   const stateWord = SYSTEM_STATES.reduce((m, s) => m.set(s.key, s.label), new Map<string, string>());
   // In the fleet is the ordinary case, so it is the dot only; the others are
@@ -92,6 +99,7 @@ export default async function SystemsPage({ searchParams }: {
         search={
           <form action="/instruments">
             {state && <input type="hidden" name="state" value={state} />}
+            {groupBy === "owner" && <input type="hidden" name="group" value="owner" />}
             <input name="q" defaultValue={q} placeholder="ID, model, serial, owner, lead, location..." aria-label="Search systems" />
           </form>
         }
@@ -100,14 +108,21 @@ export default async function SystemsPage({ searchParams }: {
             key: s.key, label: s.label, count: countFor(s.key) || undefined, on: state === s.key, href: stateHref(s.key),
           }))} />
         }
+        actions={
+          <GroupToggle value={groupBy} choices={[
+            { key: "category", label: "By type", href: href({ group: "" }) },
+            { key: "owner", label: "By owner", href: href({ group: "owner" }) },
+          ]} />
+        }
       />
       <div className="card">
         <SystemRegistryList
+          groupBy={groupBy}
           rows={shown.map((i) => {
             const first = i.stages[0] ? stageDef(i.stages[0]) : null;
             return {
               id: i.id, externalId: i.externalId, label: i.label,
-              owner: i.owner, model: i.model, location: i.location, lead: i.lead,
+              owner: i.owner, category: i.category, model: i.model, location: i.location, lead: i.lead,
               stateTone: STATE_TONE[i.state] ?? "neutral",
               stateWord: i.state === "active" ? null : stateWord.get(i.state) ?? i.state,
               // A stage the vocabulary no longer names still shows, in the

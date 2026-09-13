@@ -123,7 +123,7 @@ import {
 } from "@/lib/folders";
 import { cleanExpiry, cleanLabel } from "@/lib/dropShare";
 import { mayReadAttachment } from "@/lib/fileAccess";
-import { checkServes, cleanRole, moveFallout } from "@/lib/assetServes";
+import { checkServes, cleanRole, moveFallout, resolveBatchServes } from "@/lib/assetServes";
 import {
   houseOf, myTenantOrgId, requireUser, requireEditor, requireStaff, requireOwner, requirePlatformOwner,
   requireRealOwner, tenantViewer, viewContext, VIEW_AS_COOKIE, type SessionUser,
@@ -905,6 +905,16 @@ export type AssetInput = {
    */
   ownerOrgId?: number | null;
   asFound?: string; location: string; note: string;
+  /**
+   * The module this unit serves, said as it is entered - the roughing pump's
+   * mass spec - so plumbing the stack is not a second trip through each
+   * unit's page. Either a module already on the system, or, in a batch, the
+   * 1-based ROW of the module entered alongside it (lib/assetServes
+   * .resolveBatchServes). Meaningless for shelf stock, and ignored there.
+   */
+  servesAssetId?: number | null;
+  servesRow?: number | null;
+  servesRole?: string;
 };
 
 const cleanAsset = (d: AssetInput) => ({
@@ -1018,6 +1028,14 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
   const siblings = instrumentId !== null
     ? await db.select().from(assets).where(eq(assets.instrumentId, instrumentId)) : [];
   const sortOrder = Math.max(0, ...siblings.map((x) => x.sortOrder)) + 1;
+  // A link asked for on entry is checked BEFORE the insert, against the
+  // system's own rows with the new unit standing in, so a refused link
+  // refuses the whole add rather than leaving a unit half-entered.
+  const wantsServes = instrumentId !== null && data.servesAssetId != null;
+  if (wantsServes) {
+    const check = checkServes({ id: -1, instrumentId, servesAssetId: null }, data.servesAssetId!, siblings);
+    if (!check.ok) return { error: check.error };
+  }
   // Whose unit it is. Stock added by a client organization stays theirs, so
   // they keep seeing it while it sits on no system; a provider's entries are
   // records, not property - see creatorOwns. When the house picked an owner
@@ -1042,6 +1060,7 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
       action: `added ${assetLabel(row)}`,
     });
     await generateCheckout(instrumentId, row, u.email, row.tenantOrgId);
+    if (wantsServes) await applyServes(u, row, data.servesAssetId!, data.servesRole ?? "", [...siblings, row]);
     rev(instrumentId);
   } else {
     // Stock: bought, on the shelf, not part of a system yet.
@@ -1084,7 +1103,11 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
 export async function createAssets(
   instrumentId: number | null,
   rows: AssetInput[],
-): Promise<{ error?: string; created?: number; failures?: { row: number; error: string }[] }> {
+): Promise<{
+  error?: string; created?: number; failures?: { row: number; error: string }[];
+  /** Rows that saved but could not be plumbed as asked - the unit exists, the link does not. */
+  linkFailures?: { row: number; error: string }[];
+}> {
   const u = await requireEditor();
   const usable = rows.filter((r) => r.kind.trim() && (r.model.trim() || r.serial.trim()));
   if (!usable.length) return { error: "Nothing to save - each row needs a type and either a model or a serial" };
@@ -1100,19 +1123,42 @@ export async function createAssets(
     .from(assets).where(forTenant(assets.tenantOrgId, readTenant(u)))).filter((a) => a.serial.trim())
     .map((a) => [normalizeSerial(a.serial), `${a.kind}${a.model ? ` ${a.model}` : ""}`]));
   const failures: { row: number; error: string }[] = [];
+  const createdIds: (number | null)[] = [];
   let created = 0;
   for (let i = 0; i < usable.length; i++) {
     const sn = normalizeSerial(usable[i].serial ?? "");
     if (sn && taken.has(sn)) {
       failures.push({ row: i + 1, error: `Serial ${usable[i].serial.trim()} is already on file as ${taken.get(sn)}` });
+      createdIds.push(null);
       continue;
     }
-    const res = await createAsset(instrumentId, usable[i]);
-    if (res.error) { failures.push({ row: i + 1, error: res.error }); continue; }
+    // A link to a row of this batch waits until the batch exists; a link to
+    // a module already on the system goes through createAsset as it would
+    // from the single form.
+    const { servesRow: _later, ...input } = usable[i];
+    const res = await createAsset(instrumentId, usable[i].servesRow != null ? { ...input, servesAssetId: null } : input);
+    if (res.error) { failures.push({ row: i + 1, error: res.error }); createdIds.push(null); continue; }
     if (sn) taken.set(sn, `${usable[i].kind}${usable[i].model ? ` ${usable[i].model}` : ""}`);
+    createdIds.push(res.id ?? null);
     created++;
   }
-  return { created, failures };
+  // The pumps entered two rows under their mass spec, plumbed now that both
+  // exist. A link that fails here is reported on its own: the unit IS saved,
+  // and keeping the row on the grid for a retry would enter it twice.
+  const linkFailures: { row: number; error: string }[] = [];
+  if (instrumentId !== null) {
+    const wanted = resolveBatchServes(usable.map((r) => ({ servesRow: r.servesRow })), createdIds);
+    for (const w of wanted) {
+      if (w.error) { linkFailures.push({ row: w.row, error: w.error }); continue; }
+      // Re-read per link: each one changes what the next may point at.
+      const siblings = await db.select().from(assets).where(eq(assets.instrumentId, instrumentId));
+      const self = siblings.find((s) => s.id === createdIds[w.row - 1]);
+      if (!self) continue;
+      const res = await applyServes(u, self, w.targetId, usable[w.row - 1].servesRole ?? "", siblings);
+      if (res.error) linkFailures.push({ row: w.row, error: res.error });
+    }
+  }
+  return { created, failures, linkFailures };
 }
 
 export async function updateAsset(assetId: number, data: AssetInput): Promise<{ error?: string }> {
@@ -1164,30 +1210,44 @@ export async function setAssetServes(
   const u = await requireEditor();
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!a) return { error: "Not found" };
-  const acc = await assetAccess(u, assetId);
-  if (!acc.see) return { error: "Not found" };
-  if (!acc.edit) return { error: "Read-only access to this asset" };
   const siblings = a.instrumentId === null ? [a] : await db.select().from(assets)
     .where(eq(assets.instrumentId, a.instrumentId));
+  return applyServes(u, a, servesAssetId, role, siblings);
+}
+
+/**
+ * The link itself: whose unit it is (assetAccess - the one gate, here rather
+ * than in each caller, so entry and the unit's own page cannot differ on it),
+ * then checked against the system's own rows, written, logged on the unit and
+ * audited. Shared by setAssetServes and by entry - a pump that names its mass
+ * spec as it is added gets exactly the link it would get from its own page.
+ */
+async function applyServes(
+  u: SessionUser, a: typeof assets.$inferSelect, servesAssetId: number | null, role: string,
+  siblings: (typeof assets.$inferSelect)[],
+): Promise<{ error?: string }> {
+  const acc = await assetAccess(u, a.id);
+  if (!acc.see) return { error: "Not found" };
+  if (!acc.edit) return { error: "Read-only access to this asset" };
   const check = checkServes(a, servesAssetId, siblings);
   if (!check.ok) return { error: check.error };
   const servesRole = check.servesAssetId === null ? "" : cleanRole(role);
   if (a.servesAssetId === check.servesAssetId && a.servesRole === servesRole) return {};
   await db.update(assets)
     .set({ servesAssetId: check.servesAssetId, servesRole })
-    .where(eq(assets.id, assetId));
+    .where(eq(assets.id, a.id));
   const target = check.servesAssetId === null ? null : siblings.find((s) => s.id === check.servesAssetId);
   const said = target
     ? `serves ${assetLabel(target)}${servesRole ? ` (${servesRole})` : ""}`
     : "no longer serves a particular module";
-  await logAssetEvent(assetId, "note", a.instrumentId, said, u.name);
+  await logAssetEvent(a.id, "note", a.instrumentId, said, u.name);
   await audit({
-    actor: u.email, instrumentId: a.instrumentId ?? undefined, entityType: "asset", entityId: assetId,
+    actor: u.email, instrumentId: a.instrumentId ?? undefined, entityType: "asset", entityId: a.id,
     action: `${assetLabel(a)} ${said}`,
   });
   if (a.instrumentId !== null) rev(a.instrumentId);
   revalidatePath("/assets");
-  revalidatePath(`/assets/${assetId}`);
+  revalidatePath(`/assets/${a.id}`);
   if (check.servesAssetId !== null) revalidatePath(`/assets/${check.servesAssetId}`);
   if (a.servesAssetId !== null) revalidatePath(`/assets/${a.servesAssetId}`);
   return {};

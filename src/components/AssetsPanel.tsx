@@ -6,7 +6,7 @@ import { ASSET_TONE } from "@/lib/stages";
 import Dialog from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { createAsset, attachAssets } from "@/app/actions";
-import { servesLine } from "@/lib/assetServes";
+import { servesLine, unitLabel } from "@/lib/assetServes";
 import CatalogSelect from "./CatalogSelect";
 import SpecTable from "./SpecTable";
 import AssetGrid, { type GridModel } from "./AssetGrid";
@@ -32,7 +32,11 @@ export type AssetRow = {
   specTermId?: number | null;
 };
 
-const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: "", asFound: "", location: "", note: "" };
+const empty = {
+  kind: "Pump", model: "", serial: "", manufacturer: "", owner: "", asFound: "", location: "", note: "",
+  /** "" or a module's id - see the Serves field. */
+  serves: "", servesRole: "",
+};
 
 export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, canEdit, catalogModels, gridModels, owners, makers, staff }: {
   // `unassigned`: every asset not currently on a system (spares, shelf stock).
@@ -61,10 +65,17 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
+  // What a new unit may serve: any module here that is not itself serving
+  // one - the same rule lib/assetServes.serveCandidates applies on the page.
+  const serveTargets = assets.filter((a) => !a.servesAssetId).map((a) => ({ id: a.id, label: unitLabel(a) }));
+
   const submit = () => {
     setError("");
     startTransition(async () => {
-      const res = await createAsset(instrumentId, draft);
+      const { serves, ...rest } = draft;
+      const res = await createAsset(instrumentId, {
+        ...rest, servesAssetId: serves ? parseInt(serves, 10) : null,
+      });
       if (res?.error) setError(res.error);
       else { setDraft(empty); setOpen(false); toast({ message: `Added ${draft.kind} ${draft.model || draft.serial}` }); }
     });
@@ -140,7 +151,7 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
           <div className="panel-head"><span className="card-title">Add several units</span></div>
           <div className="panel-hint">A row per unit; paste a block straight from a spreadsheet.</div>
           <AssetGrid instrumentId={instrumentId} kinds={kinds} models={gridModels} owners={owners}
-            onDone={() => setGrid(false)} />
+            existing={serveTargets} onDone={() => setGrid(false)} />
         </div>
       )}
 
@@ -175,6 +186,30 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
               <datalist id="maker-book">{(makers ?? []).map((m) => <option key={m} value={m} />)}</datalist></div>
             <div><label>Note</label><input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder='e.g. "seals replaced Jul 24"' /></div>
           </div>
+          {/* Said as it is entered, so a roughing pump is plumbed to its mass
+              spec in the same motion that records it. Only when there is
+              something to point at; a control that can only say no is worse
+              than no control. */}
+          {serveTargets.length > 0 && (
+            <div className="pf2" style={{ marginBottom: 8 }}>
+              <div>
+                <label>Serves</label>
+                <select value={draft.serves} aria-label="The module this unit serves"
+                  onChange={(e) => setDraft({ ...draft, serves: e.target.value })}>
+                  <option value="">Nothing in particular</option>
+                  {serveTargets.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </select>
+              </div>
+              {draft.serves && (
+                <div>
+                  <label>As</label>
+                  <input value={draft.servesRole} maxLength={40} placeholder="fore-line"
+                    aria-label="What it does for that module"
+                    onChange={(e) => setDraft({ ...draft, servesRole: e.target.value })} />
+                </div>
+              )}
+            </div>
+          )}
         </Dialog>
       )}
       {!open && error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginBottom: 8 }}>{error}</div>}

@@ -23,12 +23,15 @@ export type RegistryRow = {
 const COLUMNS = ["Model", "Serial", "Manufacturer", "Owner", "Where", "Status"];
 
 /**
- * The asset registry: a real table, grouped by what each unit IS.
+ * The asset registry: a real table, grouped by what each unit IS - or, on
+ * request, by whose it is.
  *
  * Grouping by type rather than showing a type column is the point - a registry
  * is read by going to the pumps, and a "Pump" chip repeated forty times down a
  * column carries no information. The count in each heading is what tells you
- * how deep the shelf is.
+ * how deep the shelf is. Grouped by owner it answers the other question the
+ * shelf gets asked - what of LabZen's is here - and the page keeps the choice
+ * in the URL.
  *
  * Selecting is staff-only because deleting is: the checkboxes aren't rendered
  * for anyone else, and removeAssets re-checks regardless.
@@ -37,9 +40,11 @@ const COLUMNS = ["Model", "Serial", "Manufacturer", "Owner", "Where", "Status"];
  * importer knew how to skip. It keeps the oldest of each matching group - the
  * record with the service history hanging off it - and ticks the rest.
  */
-export default function AssetRegistryList({ rows, canSelect }: {
+export default function AssetRegistryList({ rows, canSelect, groupBy = "kind" }: {
   rows: RegistryRow[];
   canSelect: boolean;
+  /** What the section headings are: the unit's type (default) or its owner. */
+  groupBy?: "kind" | "owner";
 }) {
   const router = useRouter();
   const [picked, setPicked] = useState<Set<number>>(new Set());
@@ -52,23 +57,26 @@ export default function AssetRegistryList({ rows, canSelect }: {
     return dupes.filter((id) => shown.has(id));
   }, [dupes, rows]);
 
-  // One section per type, alphabetical, and within a section by model then
-  // serial so identical units sit next to each other where a duplicate is
-  // obvious to the eye as well as to duplicateIds.
+  // One section per type (or per owner), alphabetical, and within a section
+  // by model then serial so identical units sit next to each other where a
+  // duplicate is obvious to the eye as well as to duplicateIds. Under an
+  // owner the type leads the sort, so their pumps still sit together.
   const groups = useMemo(() => {
     const by = new Map<string, RegistryRow[]>();
     for (const r of rows) {
-      const k = r.kind || "(no type)";
+      const k = groupBy === "owner" ? r.owner || "(no owner)" : r.kind || "(no type)";
       const list = by.get(k);
       if (list) list.push(r); else by.set(k, [r]);
     }
     return [...by.entries()]
       .map(([kind, list]) => ({
         kind,
-        list: [...list].sort((a, b) => a.model.localeCompare(b.model) || a.serial.localeCompare(b.serial)),
+        list: [...list].sort((a, b) =>
+          (groupBy === "owner" ? a.kind.localeCompare(b.kind) : 0)
+          || a.model.localeCompare(b.model) || a.serial.localeCompare(b.serial)),
       }))
       .sort((a, b) => a.kind.localeCompare(b.kind));
-  }, [rows]);
+  }, [rows, groupBy]);
 
   const toggle = (id: number) =>
     setPicked((cur) => {
