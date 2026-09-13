@@ -7,6 +7,7 @@ import { formatCents } from "@/lib/money";
 import {
   addressBlock, discountOf, greetingLine, specOverflow, specRows, SPEC_ROWS,
 } from "@/lib/quotes";
+import AddressField from "@/components/AddressField";
 import { Panel } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 
@@ -142,9 +143,9 @@ export default function QuoteLetterCard({
         </div>
         <div>
           <label htmlFor="ql-addr">Where it goes</label>
-          <textarea id="ql-addr" rows={3} value={d.clientAddress} style={{ width: "100%" }}
+          <AddressField id="ql-addr" rows={3} value={d.clientAddress}
             placeholder={billingAddress || "513 Parnassus Ave.\nSan Francisco, CA 94143"}
-            onChange={(e) => setD({ ...d, clientAddress: e.target.value })} />
+            onChange={(clientAddress) => setD({ ...d, clientAddress })} />
           <div className="mut t-meta" style={{ marginTop: 3 }}>
             {d.clientAddress.trim()
               ? "This quote only. The client's billing address is untouched."

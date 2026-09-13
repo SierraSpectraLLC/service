@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { createAssets, type AssetInput } from "@/app/actions";
 import { toast } from "@/components/ui/Toast";
 import { toCsv } from "@/lib/csv";
+import { orgNamed, type OrgLite } from "@/lib/owner";
 
 /** One catalog model, with the maker so picking a model fills it in. */
 export type GridModel = { name: string; manufacturer: string };
@@ -46,7 +47,8 @@ export default function AssetGrid({ instrumentId, kinds, models, owners, onDone 
   kinds: string[];
   /** Catalog models per asset type, each with its maker. */
   models: Record<string, GridModel[]>;
-  owners: string[];
+  /** The organizations a unit may belong to - see lib/owner.ownerChoices. */
+  owners: OrgLite[];
   onDone?: () => void;
 }) {
   const [rows, setRows] = useState<Row[]>([blank(kinds[0] ?? ""), blank(kinds[0] ?? ""), blank(kinds[0] ?? "")]);
@@ -102,7 +104,11 @@ export default function AssetGrid({ instrumentId, kinds, models, owners, onDone 
   const save = () => {
     setError(""); setFailures([]); setSaved("");
     startTransition(async () => {
-      const res = await createAssets(instrumentId, usable as AssetInput[]);
+      // An owner that names one of the offered organizations is that
+      // organization - the link travels with the name, so the client can
+      // actually open what the row says is theirs.
+      const input: AssetInput[] = usable.map((r) => ({ ...r, ownerOrgId: orgNamed(r.owner, owners)?.id ?? null }));
+      const res = await createAssets(instrumentId, input);
       if (res?.error) { setError(res.error); return; }
       setFailures(res.failures ?? []);
       setSaved(`${res.created} asset${res.created === 1 ? "" : "s"} added`);
@@ -190,7 +196,9 @@ export default function AssetGrid({ instrumentId, kinds, models, owners, onDone 
           </tbody>
         </table>
       </div>
-      <datalist id="grid-owners">{owners.map((o) => <option key={o} value={o} />)}</datalist>
+      {/* The organizations we work with, as a datalist rather than a select:
+          a company not on the platform is still a legitimate owner, typed. */}
+      <datalist id="grid-owners">{owners.map((o) => <option key={o.id} value={o.name} />)}</datalist>
 
       <div className="row-2" style={{ marginTop: 8 }}>
         <button className="btn sm" onClick={() => setRows((rs) => [...rs, blank(kinds[0] ?? "")])}>＋ Row</button>

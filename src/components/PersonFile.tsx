@@ -9,7 +9,8 @@ import type { SiteOption } from "@/components/AddPersonDialog";
 import { PAY_KINDS, type PayRow } from "@/lib/payroll";
 import { CADENCE_LABEL, PERK_CADENCES, perkActiveOn, perkMonthlyCents, type PerkRow } from "@/lib/perks";
 import { formatCents } from "@/lib/money";
-import AddressField from "@/components/AddressField";
+import HomeBasePicker from "@/components/HomeBasePicker";
+import type { WorksiteChoice } from "@/lib/sites";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { Pill } from "@/components/ui";
@@ -53,6 +54,8 @@ export default function PersonFile({
   perks: PerkRow[];
   /** The vans and field kits this person keeps. Empty for most people. */
   kits: KitRow[];
+  /** Client labs, for an engineer whose day starts at a client rather than at home. */
+  sites?: WorksiteChoice[];
   seesPay: boolean;
   /** The employing workspace - where a pay change is filed. Null hides the editors. */
   orgId: number | null;
@@ -130,6 +133,8 @@ export default function PersonFile({
             onChange={(e) => setP({ ...p, phone: e.target.value })} />
         </div>
       </div>
+      <label style={{ marginTop: 8 }}>Home address</label>
+      <HomeBasePicker value={p.homeAddress} ariaLabel="Home address" sites={sites} disabled={pending}
       <label style={{ marginTop: 8 }}>Home base</label>
       <AddressField value={p.homeAddress} ariaLabel="Home base"
         onChange={(homeAddress) => setP({ ...p, homeAddress })} />
@@ -146,6 +151,9 @@ export default function PersonFile({
         </div>
       )}
       <div className="field-hint">
+        Their point zero for the travel rulebook - the stipend radius and routed miles
+        measure from here. A dedicated engineer stationed at a client starts from that
+        client&apos;s lab: pick it above. They can also set it themselves.
         Where they work from - their own address, or a client lab for somebody stationed
         on-site. The stipend radius and routed miles measure from here. They can also
         set it themselves.

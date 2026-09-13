@@ -10,6 +10,7 @@ import SignInSettings from "@/components/SignInSettings";
 import HomeBaseCard from "@/components/HomeBaseCard";
 import { Panel, Stack } from "@/components/ui";
 import { smsConfigured } from "@/lib/sms";
+import { worksiteChoicesFor } from "@/lib/worksiteData";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export default async function AccountProfilePage() {
   const section = await navSection("account");
   const email = user.email.toLowerCase();
 
-  const [[me], [mine]] = await Promise.all([
+  const [[me], [mine], sites] = await Promise.all([
     db.select({ hash: users.passwordHash, phone: users.phone, title: users.title })
       .from(users).where(eq(users.email, email)),
     // The trip's starting point, for staff who drive. A client login has no
@@ -30,6 +31,8 @@ export default async function AccountProfilePage() {
       ? db.select({ homeAddress: houseMembers.homeAddress, homeLat: houseMembers.homeLat })
           .from(houseMembers).where(eq(houseMembers.email, email))
       : Promise.resolve([]),
+    // The client labs, for an engineer stationed at one full-time.
+    isStaffRole(user.role) ? worksiteChoicesFor(user) : Promise.resolve([]),
   ]);
 
   return (
@@ -44,7 +47,7 @@ export default async function AccountProfilePage() {
             <div className="t-body">{me.title}</div>
           </Panel>
         )}
-        {mine && <HomeBaseCard address={mine.homeAddress} placed={mine.homeLat !== null} />}
+        {mine && <HomeBaseCard address={mine.homeAddress} placed={mine.homeLat !== null} sites={sites} />}
       </Stack>
     </SectionShell>
   );

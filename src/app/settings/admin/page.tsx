@@ -2,13 +2,14 @@ import { redirect } from "next/navigation";
 import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/db";
-import { orgSites, instruments, orgs, systemShares, assets, accessRequests, engagementRecords, users } from "@/db/schema";
+import { instruments, orgs, systemShares, assets, accessRequests, engagementRecords, users } from "@/db/schema";
 import { currentUser } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { shopTime } from "@/lib/shopday";
 import { systemLabel } from "@/lib/systemLabel";
 import { forTenant, readTenant, visibleOrgs } from "@/lib/tenancy";
 import { tempState } from "@/lib/tempPassword";
+import { worksiteChoicesFor } from "@/lib/worksiteData";
 import SharePanel from "@/components/SharePanel";
 import AccessRequestsPanel from "@/components/AccessRequestsPanel";
 import HouseMembersPanel from "@/components/HouseMembersPanel";
@@ -39,11 +40,9 @@ export default async function AdminSettingsPage() {
    * predicate, which is how the instance's own operator keeps seeing all of it.
    */
   const tenant = readTenant(user);
-  const siteRows = await db.select({
-    name: orgSites.name, address: orgSites.address, orgName: orgs.name,
-  }).from(orgSites).innerJoin(orgs, eq(orgs.id, orgSites.orgId))
-    .where(and(eq(orgSites.archived, false), forTenant(orgSites.tenantOrgId, tenant)))
-    .orderBy(asc(orgs.name), asc(orgSites.name));
+  // Client labs, for stationing a new hire at one - the same list the person
+  // file and the engineer's own profile offer.
+  const siteRows = await worksiteChoicesFor(user);
   const [rows, orgRows, assetRows, shareRows, requestRows, recordRows] = await Promise.all([
     db.select().from(instruments).where(forTenant(instruments.tenantOrgId, tenant))
       .orderBy(asc(instruments.archived), asc(instruments.externalId)),
@@ -121,11 +120,7 @@ export default async function AdminSettingsPage() {
           };
         })}
         myEmail={user.email}
-        sites={siteRows.map((x) => {
-          const site = x.name || x.address.split("\n")[0] || "site";
-          // Some shops name sites with the client already in them.
-          return { label: site.startsWith(x.orgName) ? site : `${x.orgName} - ${site}`, address: x.address };
-        })} />
+        sites={siteRows} />
 
       {requestRows.length > 0 && (
         <Panel title="Waiting on a decision" count={requestRows.length}>

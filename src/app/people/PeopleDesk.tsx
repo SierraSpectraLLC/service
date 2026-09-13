@@ -11,6 +11,7 @@ import PersonFile, { type KitRow, type PersonProfile } from "@/components/Person
 import AddPersonDialog, { type SiteOption } from "@/components/AddPersonDialog";
 import type { PayRow } from "@/lib/payroll";
 import type { PerkRow } from "@/lib/perks";
+import type { WorksiteChoice } from "@/lib/sites";
 import { toast } from "@/components/ui/Toast";
 
 export type RosterRow = {
@@ -55,6 +56,8 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
   orgId: number | null;
   today: string;
   perksMonthCents: number;
+  /** Client labs a person may be stationed at - see HomeBasePicker. */
+  sites?: WorksiteChoice[];
   /** Client labs, offered as a home base when adding or editing somebody. */
   sites?: SiteOption[];
   /** The reader - whose own file gets no access controls. */
@@ -94,6 +97,8 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
       {openRow && (
         <PersonFile
           email={openRow.email} name={openRow.name} role={openRow.role}
+          profile={openRow.profile} pay={openRow.pay} perks={openRow.perks} kits={openRow.kits} sites={sites}
+          seesPay={seesPay} orgId={orgId} today={today}
           profile={openRow.profile} pay={openRow.pay} perks={openRow.perks} kits={openRow.kits}
           seesPay={seesPay} orgId={orgId} today={today} sites={sites}
           canManage={isOwner} isMe={openRow.email.toLowerCase() === myEmail.toLowerCase()}

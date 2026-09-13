@@ -20,6 +20,7 @@ import { PageHead, Panel } from "@/components/ui";
 import PeopleDesk, { type RosterRow } from "@/app/people/PeopleDesk";
 import StipendsCard, { type StipendRow } from "@/components/StipendsCard";
 import { nextStipendCycle } from "@/lib/stipends";
+import { worksiteChoicesFor } from "@/lib/worksiteData";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +56,7 @@ export default async function PeoplePage() {
   const today = shopToday();
   const isOwner = user.role === "owner";
 
-  const [members, reportRows, expenseRows, seesPay, stipendRows, categoryRows, kitRooms] = await Promise.all([
+  const [members, reportRows, expenseRows, seesPay, stipendRows, categoryRows, kitRooms, siteChoices] = await Promise.all([
     db.select().from(houseMembers)
       .where(and(forTenant(houseMembers.orgId, t), ne(houseMembers.role, "none")))
       .orderBy(asc(houseMembers.name), asc(houseMembers.email)),
@@ -78,6 +79,9 @@ export default async function PeoplePage() {
     db.select().from(stockrooms)
       .where(and(forTenant(stockrooms.tenantOrgId, t), eq(stockrooms.archived, false)))
       .orderBy(asc(stockrooms.name)),
+    /* The client labs, so a person's file can station them at one - a
+       dedicated engineer's trips start at the client, not at their house. */
+    worksiteChoicesFor(user),
   ]);
   /* The half of the person that is not on the roster row: their title lives on
      the account row, where their own profile page reads it back to them. */

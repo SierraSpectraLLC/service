@@ -4,6 +4,9 @@ import { useState, useTransition } from "react";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import Link from "next/link";
 import { clearHouseTempPassword, revokeHouseMember, setHouseMember, setHouseTempPassword } from "@/app/actions";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
+import HomeBasePicker from "@/components/HomeBasePicker";
+import type { WorksiteChoice } from "@/lib/sites";
 import AddPersonDialog, { type SiteOption } from "@/components/AddPersonDialog";
 import { toast } from "@/components/ui/Toast";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
@@ -30,6 +33,7 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
   members: HouseRow[];
   myEmail: string;
   /** Client labs, offered as a home base for an engineer stationed on-site. */
+  sites?: WorksiteChoice[];
   sites?: SiteOption[];
 }) {
   const [adding, setAdding] = useState(false);
@@ -65,6 +69,100 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
         pay, home base and person file are in <Link href="/people">Our people</Link>.
       </div>
 
+      {adding && (() => {
+        const fullName = [draft.first.trim(), draft.last.trim()].filter(Boolean).join(" ");
+        const save = (invite: boolean) => run(
+          async () => {
+            const res = await setHouseMember(draft.email, draft.role, fullName,
+              { homeAddress: draft.homeAddress, invite, withPassword: draft.withPassword, tempDays: draft.days });
+            if (!res?.error) {
+              toast({
+                message: invite
+                  ? res.invited
+                    ? `Added ${fullName || draft.email.trim()} and sent their invitation`
+                    : `Added ${fullName || draft.email.trim()} - the invitation email did not go out; they can still sign in`
+                  : `Added ${fullName || draft.email.trim()}`,
+              });
+              if (res.password && res.expiresOn) {
+                setMinted({ who: fullName || draft.email.trim(), password: res.password, expiresOn: res.expiresOn });
+              }
+            }
+            return res;
+          },
+          () => {
+            setAdding(false);
+            setDraft({ email: "", first: "", last: "", role: "staff", homeAddress: "", withPassword: false, days: TEMP_DAYS_DEFAULT });
+          },
+        );
+        return (
+        <Dialog open onClose={() => setAdding(false)} title="Add a person" size="md"
+          context="Fill in their profile now. They sign in by email code, or with a temporary password when mail is not arriving."
+          footer={
+            <>
+              <DialogStatus error={error} problem={!draft.email.trim() ? "their email address" : null} />
+              <button className="btn" onClick={() => setAdding(false)} disabled={pending}>Cancel</button>
+              <button className="btn" disabled={pending || !draft.email.trim()} onClick={() => save(false)}>
+                Add quietly
+              </button>
+              <button className="btn accent" disabled={pending || !draft.email.trim()} onClick={() => save(true)}>
+                {pending ? "Saving..." : "Add & send invite"}
+              </button>
+            </>
+          }>
+          <div className="dialog-section">Who they are</div>
+          <div className="pf3" style={{ marginBottom: 8 }}>
+            <div>
+              <label>First name</label>
+              <input value={draft.first} onChange={(e) => setDraft({ ...draft, first: e.target.value })} placeholder="Bill" autoFocus />
+            </div>
+            <div>
+              <label>Last name</label>
+              <input value={draft.last} onChange={(e) => setDraft({ ...draft, last: e.target.value })} placeholder="Harner" />
+            </div>
+            <div>
+              <label>Email *</label>
+              <input value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })}
+                placeholder="sjones@example.com" inputMode="email" />
+            </div>
+          </div>
+          <div className="dialog-section">What they may do</div>
+          <div style={{ marginBottom: 8 }}>
+            <label>Privileges</label>
+            <select value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} style={{ width: "auto" }}>
+              <option value="staff">Staff - every system, every job</option>
+              <option value="owner">Owner - staff plus settings, money and deletions</option>
+            </select>
+          </div>
+          <div className="dialog-section">How they get in</div>
+          <label className="t-body" style={{ display: "flex", alignItems: "center", gap: 6, margin: "0 0 4px", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+            <input type="checkbox" checked={draft.withPassword} style={{ width: 15, height: 15 }}
+              onChange={(e) => setDraft({ ...draft, withPassword: e.target.checked })} />
+            Also set a temporary password
+          </label>
+          <div className="mut t-meta" style={{ marginBottom: draft.withPassword ? 8 : 0 }}>
+            Sign-in is by emailed code. Tick this when mail is not getting through: we generate a
+            password, show it to you once to read out, and it stops working on its own.
+          </div>
+          {draft.withPassword && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+              <label style={{ margin: 0 }}>Good for</label>
+              <input type="number" min={1} max={TEMP_DAYS_MAX} value={draft.days} aria-label="Days the password lasts"
+                onChange={(e) => setDraft({ ...draft, days: parseInt(e.target.value) || TEMP_DAYS_DEFAULT })}
+                style={{ width: 80 }} />
+              <span className="mut t-meta">days, then codes only</span>
+            </div>
+          )}
+
+          <div className="dialog-section">Where their trips start</div>
+          <label>Home base</label>
+          {/* The point zero for the stipend radius and routed mileage. An
+              address of their own, or a client lab for somebody stationed
+              on-site - and theirs to change later on their own settings. */}
+          <HomeBasePicker value={draft.homeAddress} sites={sites}
+            onChange={(homeAddress) => setDraft({ ...draft, homeAddress })} />
+        </Dialog>
+        );
+      })()}
       {adding && <AddPersonDialog sites={sites} onClose={() => setAdding(false)} />}
 
       {members.map((m) => (

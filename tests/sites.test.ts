@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addressHint, addressLine, siteLabel, sitesFor, visitBrief } from "@/lib/sites";
+import { addressHint, addressLine, siteLabel, sitesFor, visitBrief, worksiteChoices, worksitesByOrg } from "@/lib/sites";
 
 const site = (over: Partial<{
   id: number; orgId: number; name: string; address: string; accessNotes: string; archived: boolean;
@@ -82,3 +82,26 @@ describe("what a tech reads before driving there", () => {
     expect(visitBrief({ name: "", address: "", accessNotes: "" })).toBe(null);
   });
 });
+
+describe("a client lab as somebody's home base", () => {
+  const rows = [
+    { orgName: "LabZen", name: "HQ", address: "780 Chadbourne Rd, Fairfield CA", archived: false },
+    { orgName: "LabZen", name: "Building 4", address: "", archived: false },
+    { orgName: "Acme Bio", name: "", address: "1 Main St\nReno NV", archived: false },
+    { orgName: "LabZen", name: "Old lab", address: "9 Gone Rd", archived: true },
+  ];
+
+  it("offers only live sites that have an address, by organization then name", () => {
+    expect(worksiteChoices(rows)).toEqual([
+      { orgName: "Acme Bio", label: "1 Main St, Reno NV", address: "1 Main St\nReno NV" },
+      { orgName: "LabZen", label: "HQ", address: "780 Chadbourne Rd, Fairfield CA" },
+    ]);
+  });
+
+  it("groups them for one optgroup per client", () => {
+    const groups = worksitesByOrg(worksiteChoices(rows));
+    expect(groups.map((g) => g.orgName)).toEqual(["Acme Bio", "LabZen"]);
+    expect(groups[1].sites.map((s) => s.label)).toEqual(["HQ"]);
+  });
+});
+

@@ -82,3 +82,35 @@ export function visitBrief(site: Pick<SiteLike, "name" | "address" | "accessNote
   const bits = [site.name.trim(), addressLine(site.address), site.accessNotes.trim()].filter(Boolean);
   return bits.length ? bits.join("\n") : null;
 }
+
+/**
+ * A client's lab, offered as somebody's home base.
+ *
+ * An engineer hired to sit at one client full-time starts every trip from
+ * that lab, not from their house - so the home-base pickers offer the sites
+ * of every organization this workspace works with, grouped by the
+ * organization, and choosing one copies its address into the person's own
+ * field. A copy rather than a pointer on purpose: the home base is the
+ * engineer's fact, geocoded and cached like any other, and it must not
+ * quietly move when somebody edits the site.
+ */
+export type WorksiteChoice = { orgName: string; label: string; address: string };
+
+export function worksiteChoices(
+  rows: { orgName: string; name: string; address: string; archived?: boolean }[],
+): WorksiteChoice[] {
+  return rows
+    .filter((r) => !r.archived && r.address.trim())
+    .map((r) => ({ orgName: r.orgName, label: siteLabel(r), address: r.address }))
+    .sort((a, b) => a.orgName.localeCompare(b.orgName) || a.label.localeCompare(b.label));
+}
+
+/** The choices by organization, in the order they were given - for an optgroup per client. */
+export function worksitesByOrg(choices: WorksiteChoice[]): { orgName: string; sites: WorksiteChoice[] }[] {
+  const out: { orgName: string; sites: WorksiteChoice[] }[] = [];
+  for (const c of choices) {
+    const group = out.find((g) => g.orgName === c.orgName);
+    if (group) group.sites.push(c); else out.push({ orgName: c.orgName, sites: [c] });
+  }
+  return out;
+}

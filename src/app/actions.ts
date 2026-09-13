@@ -242,7 +242,7 @@ import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/hous
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, scopeMatches, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { systemLabel } from "@/lib/systemLabel";
-import { clientAfterHandoff, ownerFields } from "@/lib/owner";
+import { clientAfterHandoff, ownerFields, type Ownership } from "@/lib/owner";
 import { isoDay, partDates } from "@/lib/partGroups";
 import { assignableNames, visibleDirectory } from "@/lib/directory";
 import { composeSystemDossier } from "@/lib/dossier";
@@ -891,7 +891,17 @@ async function creatorOwns(orgId: number | null): Promise<number | null> {
 // First-class units systems are built from. Work is recorded on the system
 // and tagged with the asset; lifecycle rows here give the dossier its spine.
 
-export type AssetInput = { kind: string; model: string; serial: string; manufacturer: string; owner: string; asFound?: string; location: string; note: string };
+export type AssetInput = {
+  kind: string; model: string; serial: string; manufacturer: string;
+  owner: string;
+  /**
+   * The organization the owner was PICKED as, when it came off the list of
+   * organizations rather than being typed. Sets the visibility link as well as
+   * the name (lib/owner); checked against what the caller may see.
+   */
+  ownerOrgId?: number | null;
+  asFound?: string; location: string; note: string;
+};
 
 const cleanAsset = (d: AssetInput) => ({
   // Open vocabulary: MODULE_KINDS is just the starter list, so the shop can
@@ -1004,13 +1014,22 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
   const siblings = instrumentId !== null
     ? await db.select().from(assets).where(eq(assets.instrumentId, instrumentId)) : [];
   const sortOrder = Math.max(0, ...siblings.map((x) => x.sortOrder)) + 1;
+  // Whose unit it is. Stock added by a client organization stays theirs, so
+  // they keep seeing it while it sits on no system; a provider's entries are
+  // records, not property - see creatorOwns. When the house picked an owner
+  // off the organization list, that pick is the LINK as well as the name: the
+  // pair that decides who can see the unit, written together so they cannot
+  // disagree (lib/owner). An id the caller cannot see was never on their list.
+  let ownership: Ownership = { orgId: await creatorOwns(u.orgId), name: a.owner };
+  if (isHouse(u.role) && data.ownerOrgId != null) {
+    const visible = (await visibleOrgs(u)).map((o) => ({ id: o.id, name: o.name }));
+    if (!visible.some((o) => o.id === data.ownerOrgId)) return { error: "Not found" };
+    ownership = ownerFields(data.ownerOrgId, a.owner, visible);
+  }
   const [row] = await db.insert(assets).values({
-    ...a, instrumentId, sortOrder, status: instrumentId !== null ? "In service" : "Spare",
+    ...a, owner: ownership.name, ownerOrgId: ownership.orgId,
+    instrumentId, sortOrder, status: instrumentId !== null ? "In service" : "Spare",
     tenantOrgId: instTenantOrgId ?? myTenantOrgId(u),
-    // Stock added by a client organization stays theirs, so they keep seeing it
-    // while it sits on no system. A provider's entries are records, not
-    // property - see creatorOwns.
-    ownerOrgId: await creatorOwns(u.orgId),
   }).returning();
   if (instrumentId !== null) {
     await logAssetEvent(row.id, "installed", instrumentId, `into ${externalId}`, u.name);

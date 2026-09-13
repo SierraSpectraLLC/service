@@ -11,6 +11,7 @@ import {
   choicesFor, FEE_KINDS, FEE_LABEL, termsLine, termsProblems, type FeeKind,
 } from "@/lib/referral";
 import { formatCents, parseMoney } from "@/lib/money";
+import AddressField from "@/components/AddressField";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { Panel, Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
@@ -274,8 +275,8 @@ export default function LeadBoard({ mine, offered, providers }: {
             </div>
           </div>
           <label style={{ marginTop: 8 }}>Address</label>
-          <input value={f.address} aria-label="Address" disabled={pending}
-            onChange={(e) => setF({ ...f, address: e.target.value })} />
+          <AddressField value={f.address} ariaLabel="Address" disabled={pending}
+            onChange={(address) => setF({ ...f, address })} />
 
           <div className="dialog-section" style={{ marginTop: 12 }}>Your finder&apos;s fee</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>

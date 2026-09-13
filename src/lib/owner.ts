@@ -72,6 +72,24 @@ export function orgNamed(typed: string, orgs: OrgLite[]): OrgLite | null {
 }
 
 /**
+ * The organizations offered as a unit's owner when it is entered.
+ *
+ * The organizations this workspace works with - not the names already sitting
+ * on old rows. A picker built from what was typed before offers every typo and
+ * every company since renamed, and never the client added yesterday; that is
+ * how the owner list stopped matching the organization list. Our own
+ * organization is left out: a blank owner is our own stock, which is what the
+ * column has always meant, and naming ourselves there would link our shelf to
+ * ourselves for no gain.
+ */
+export function ownerChoices(orgs: OrgLite[], ownOrgId: number | null): OrgLite[] {
+  return orgs
+    .filter((o) => o.id !== ownOrgId && o.name.trim())
+    .map((o) => ({ id: o.id, name: o.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
  * What a system's CLIENT should say after it changes hands.
  *
  * Owner and client are two different facts on a system, deliberately. The owner
