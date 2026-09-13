@@ -4,7 +4,8 @@ import { useState, useTransition } from "react";
 import { setMyHomeBase } from "@/app/actions";
 import { toast } from "@/components/ui/Toast";
 import { Field, Panel } from "@/components/ui";
-import AddressField from "@/components/AddressField";
+import HomeBasePicker from "@/components/HomeBasePicker";
+import type { WorksiteChoice } from "@/lib/sites";
 
 /**
  * The engineer's own point zero. It is their home address, so it lives on
@@ -12,10 +13,12 @@ import AddressField from "@/components/AddressField";
  * ever sees is miles - the trip strip on a work order says "112 mi from your
  * home base", never where the base is.
  */
-export default function HomeBaseCard({ address, placed }: {
+export default function HomeBaseCard({ address, placed, sites = [] }: {
   address: string;
   /** Whether the saved address geocoded - routed miles need a point, not a string. */
   placed: boolean;
+  /** Client labs, for somebody stationed at one rather than working from home. */
+  sites?: WorksiteChoice[];
 }) {
   const [draft, setDraft] = useState(address);
   const [msg, setMsg] = useState("");
@@ -33,9 +36,9 @@ export default function HomeBaseCard({ address, placed }: {
 
   return (
     <Panel title="Home base"
-      hint="Where your trips start. Work orders use it to figure road miles to a site - only the miles ever show, never the address.">
+      hint="Where your trips start. Work orders use it to figure road miles to a site - only the miles ever show, never the address. Stationed at a client's lab? Pick it instead of your home.">
       <Field label="Address">
-        <AddressField value={draft} ariaLabel="Home base address"
+        <HomeBasePicker value={draft} ariaLabel="Home base address" sites={sites}
           placeholder="1200 Idlewild Dr, Reno NV 89509"
           onChange={setDraft} />
       </Field>

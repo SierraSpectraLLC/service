@@ -10,6 +10,7 @@ import { DataTable, Panel, Pill } from "@/components/ui";
 import PersonFile, { type KitRow, type PersonProfile } from "@/components/PersonFile";
 import type { PayRow } from "@/lib/payroll";
 import type { PerkRow } from "@/lib/perks";
+import type { WorksiteChoice } from "@/lib/sites";
 import { toast } from "@/components/ui/Toast";
 
 export type RosterRow = {
@@ -41,7 +42,7 @@ export type RosterRow = {
  * open a claim in their name and start filling it, because the reason this
  * page exists is that people hand over receipts instead of filing anything.
  */
-export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, perksMonthCents }: {
+export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, perksMonthCents, sites = [] }: {
   roster: RosterRow[];
   /**
    * Only the owner may hand out HR. Everything else here is available to HR
@@ -54,6 +55,8 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
   orgId: number | null;
   today: string;
   perksMonthCents: number;
+  /** Client labs a person may be stationed at - see HomeBasePicker. */
+  sites?: WorksiteChoice[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -82,7 +85,7 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
       {openRow && (
         <PersonFile
           email={openRow.email} name={openRow.name} role={openRow.role}
-          profile={openRow.profile} pay={openRow.pay} perks={openRow.perks} kits={openRow.kits}
+          profile={openRow.profile} pay={openRow.pay} perks={openRow.perks} kits={openRow.kits} sites={sites}
           seesPay={seesPay} orgId={orgId} today={today}
           onClose={() => setOpen(null)} />
       )}

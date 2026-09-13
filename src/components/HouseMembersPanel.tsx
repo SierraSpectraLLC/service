@@ -4,7 +4,8 @@ import { useState, useTransition } from "react";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { clearHouseTempPassword, revokeHouseMember, setHouseMember, setHouseTempPassword } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
-import AddressField from "@/components/AddressField";
+import HomeBasePicker from "@/components/HomeBasePicker";
+import type { WorksiteChoice } from "@/lib/sites";
 import { toast } from "@/components/ui/Toast";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { TEMP_DAYS_DEFAULT, TEMP_DAYS_MAX } from "@/lib/tempPassword";
@@ -31,7 +32,7 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
   members: HouseRow[];
   myEmail: string;
   /** Client labs, offered as a home base for an engineer stationed on-site. */
-  sites?: { label: string; address: string }[];
+  sites?: WorksiteChoice[];
 }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState({
@@ -158,21 +159,8 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
           {/* The point zero for the stipend radius and routed mileage. An
               address of their own, or a client lab for somebody stationed
               on-site - and theirs to change later on their own settings. */}
-          <AddressField value={draft.homeAddress} ariaLabel="Home base address"
-            onChange={(homeAddress) => setDraft({ ...draft, homeAddress })}
-            placeholder="Street address - autocompletes when maps are configured" />
-          {sites.length > 0 && (
-            <div style={{ marginTop: 6 }}>
-              <select value="" aria-label="Use a client site"
-                onChange={(e) => { if (e.target.value) setDraft({ ...draft, homeAddress: e.target.value }); }}
-                className="t-small" style={{ width: "auto" }}>
-                <option value="">...or use a client lab&apos;s address</option>
-                {sites.filter((x) => x.address.trim()).map((x) => (
-                  <option key={x.label} value={x.address}>{x.label}</option>
-                ))}
-              </select>
-            </div>
-          )}
+          <HomeBasePicker value={draft.homeAddress} sites={sites}
+            onChange={(homeAddress) => setDraft({ ...draft, homeAddress })} />
         </Dialog>
         );
       })()}

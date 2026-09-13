@@ -116,10 +116,10 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
         <div className="mut t-small" style={{ marginBottom: 8 }}>
           Where {orgName}&apos;s invoices go. One per company - the labs are below.
         </div>
-        <textarea value={billing} rows={4} disabled={!canEdit || pending}
-          onChange={(e) => { setBilling(e.target.value); setBillingMsg(""); }}
+        <AddressField value={billing} rows={4} disabled={!canEdit || pending} ariaLabel="Billing address"
+          onChange={(next) => { setBilling(next); setBillingMsg(""); }}
           placeholder={"Accounts Payable\n123 Cedar St, Suite 400\nReno NV 89501"}
-          className="t-body" style={{ width: "100%", marginBottom: 6 }} />
+          className="t-body" style={{ marginBottom: 6 }} />
         {canEdit && (
           <button className="btn sm" disabled={pending || billing === billingAddress}
             onClick={() => startTransition(async () => {

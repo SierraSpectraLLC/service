@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -92,3 +93,67 @@ describe("with a browser key", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 });
+
+describe("a multi-line address block", () => {
+  const suggest = {
+    suggestions: [
+      { placePrediction: { placeId: "p1", text: { text: "123 Cedar St, Reno, NV, USA" } } },
+    ],
+  };
+
+  it("looks up the line being typed and a pick replaces only that line", async () => {
+    // An envelope: "Accounts Payable" above the street. The attention line is
+    // not an address and must survive the street being picked.
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY = "test-key";
+    const AddressField = await load();
+    const inputs: string[] = [];
+    vi.spyOn(global, "fetch").mockImplementation(async (url, init) => {
+      if (String(url).includes(":autocomplete")) {
+        inputs.push(JSON.parse(String(init?.body)).input);
+        return { ok: true, json: async () => suggest } as Response;
+      }
+      return { ok: true, json: async () => ({ formattedAddress: "123 Cedar St, Reno, NV 89501, USA" }) } as Response;
+    });
+    // Controlled, as every form holds it: what the pick edits is the value
+    // the field currently shows, not a copy of it.
+    const onChange = vi.fn();
+    const Block = () => {
+      const [v, setV] = useState("");
+      return <AddressField rows={3} value={v} onChange={(x) => { onChange(x); setV(x); }} ariaLabel="Billing address" />;
+    };
+    const typed = "Accounts Payable\n123 Cedar";
+    render(<Block />);
+    const box = screen.getByLabelText("Billing address") as HTMLTextAreaElement;
+    expect(box.tagName).toBe("TEXTAREA");
+    fireEvent.change(box, { target: { value: typed, selectionStart: typed.length } });
+    expect(onChange).toHaveBeenCalledWith(typed);
+    await waitFor(() => expect(screen.getByRole("listbox")).toBeTruthy(), { timeout: 2000 });
+    // Only the street line went to Places - the attention line is not a query.
+    expect(inputs).toEqual(["123 Cedar"]);
+
+    fireEvent.click(screen.getByText("123 Cedar St, Reno, NV, USA"));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith("Accounts Payable\n123 Cedar St, Reno, NV 89501, USA"));
+  });
+
+  it("stays a plain textarea without a key", async () => {
+    const AddressField = await load();
+    const spy = vi.spyOn(global, "fetch");
+    const onChange = vi.fn();
+    render(<AddressField rows={4} value="" onChange={onChange} ariaLabel="Billing address" />);
+    fireEvent.change(screen.getByLabelText("Billing address"), { target: { value: "Box 41\nRichmond, CA" } });
+    expect(onChange).toHaveBeenCalledWith("Box 41\nRichmond, CA");
+    await new Promise((r) => setTimeout(r, 400));
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe("replacing one line of a block", () => {
+  it("swaps the line and keeps the rest", async () => {
+    const { replaceLine } = await import("@/components/AddressField");
+    expect(replaceLine("Attn: Rita\n123 Ced\nSuite 4", 1, "123 Cedar St")).toBe("Attn: Rita\n123 Cedar St\nSuite 4");
+    expect(replaceLine("", 0, "123 Cedar St")).toBe("123 Cedar St");
+    // A line that no longer exists cannot be edited in place.
+    expect(replaceLine("one", 5, "two")).toBe("two");
+  });
+});
+

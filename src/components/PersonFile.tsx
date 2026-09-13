@@ -8,7 +8,8 @@ import {
 import { PAY_KINDS, type PayRow } from "@/lib/payroll";
 import { CADENCE_LABEL, PERK_CADENCES, perkActiveOn, perkMonthlyCents, type PerkRow } from "@/lib/perks";
 import { formatCents } from "@/lib/money";
-import AddressField from "@/components/AddressField";
+import HomeBasePicker from "@/components/HomeBasePicker";
+import type { WorksiteChoice } from "@/lib/sites";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { Pill } from "@/components/ui";
@@ -35,7 +36,7 @@ export type PersonProfile = {
 /** One of their kits, and what is counted in it. */
 export type KitRow = { id: number; name: string; lines: number; units: number; short: number };
 
-export default function PersonFile({ email, name, role, profile, pay, perks, kits, seesPay, orgId, today, onClose }: {
+export default function PersonFile({ email, name, role, profile, pay, perks, kits, sites = [], seesPay, orgId, today, onClose }: {
   email: string;
   name: string;
   role: string;
@@ -45,6 +46,8 @@ export default function PersonFile({ email, name, role, profile, pay, perks, kit
   perks: PerkRow[];
   /** The vans and field kits this person keeps. Empty for most people. */
   kits: KitRow[];
+  /** Client labs, for an engineer whose day starts at a client rather than at home. */
+  sites?: WorksiteChoice[];
   seesPay: boolean;
   /** The employing workspace - where a pay change is filed. Null hides the editors. */
   orgId: number | null;
@@ -105,11 +108,12 @@ export default function PersonFile({ email, name, role, profile, pay, perks, kit
         </div>
       </div>
       <label style={{ marginTop: 8 }}>Home address</label>
-      <AddressField value={p.homeAddress} ariaLabel="Home address"
+      <HomeBasePicker value={p.homeAddress} ariaLabel="Home address" sites={sites} disabled={pending}
         onChange={(homeAddress) => setP({ ...p, homeAddress })} />
       <div className="field-hint">
         Their point zero for the travel rulebook - the stipend radius and routed miles
-        measure from here. They can also set it themselves.
+        measure from here. A dedicated engineer stationed at a client starts from that
+        client&apos;s lab: pick it above. They can also set it themselves.
       </div>
       <div className="pf2" style={{ marginTop: 8 }}>
         <div>
