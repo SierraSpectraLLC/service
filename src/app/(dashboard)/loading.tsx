@@ -10,7 +10,10 @@
 // page it was drawn for fixes both.
 export default function Loading() {
   return (
-    <div className="container page">
+    /* The width the board itself uses, not the reading width: a skeleton in a
+       narrower column than the page it stands in for makes the whole layout
+       jump sideways the moment the data lands. */
+    <div className="container wide">
       <div className="metric-grid" style={{ marginBottom: 14 }}>
         {[0, 1, 2, 3, 4].map((i) => (
           <div key={i} className="card" style={{ padding: "12px 14px", marginBottom: 0 }}>

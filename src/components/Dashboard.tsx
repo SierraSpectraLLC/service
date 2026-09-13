@@ -241,7 +241,13 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
   };
 
   return (
-    <div className="container">
+    /* `wide`, like every other landing on this route (the reseller pipeline,
+       the client lab) and like the header row itself. At the default 960 the
+       column sat 60px inboard of the header, so the page title started to the
+       right of the logo above it and the whole screen read as slightly
+       misaligned - the one shell in the app whose content did not line up with
+       its own chrome. */
+    <div className="container wide">
       {/* "Today", not "Dashboard". The nav word and the page's own title were
           two different words for one destination - the tab bar said Today, the
           header said Dashboard, and this said Dashboard again. One word per

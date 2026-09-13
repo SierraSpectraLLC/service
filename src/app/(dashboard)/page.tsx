@@ -701,7 +701,10 @@ export default async function Home({ searchParams }: {
         showShipping={isStaff || (user.orgId !== null && (orgNames.find((o) => o.id === user.orgId)?.resaleEnabled ?? false))}
       />
       {(pastEngagements.length > 0 || previouslyOwned.length > 0) && (
-        <div className="container" style={{ paddingTop: 0 }}>
+        /* Same width as the Dashboard above it: these shelves continue that
+           page's column, and a step in the gutter halfway down reads as two
+           pages stacked. */
+        <div className="container wide" style={{ paddingTop: 0 }}>
           {pastEngagements.length > 0 && (
             <FrozenShelf
               title="Past engagements"
