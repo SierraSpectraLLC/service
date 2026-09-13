@@ -1035,15 +1035,27 @@ export const houseMembers = pgTable("house_members", {
    */
   canAdminPeople: boolean("can_admin_people").notNull().default(false),
   /**
-   * The engineer's own point zero - where the stipend radius is measured
-   * from, and where a routed trip starts. Set by the engineer themselves on
-   * their own settings page, because it is their home: nobody else should be
-   * typing it, and they can leave it blank. Coordinates are the geocode of
-   * the address at the time it was saved.
+   * Where the engineer lives - what payroll and the tax forms need, and the
+   * point zero for the stipend radius and routed trips unless site_id below
+   * says otherwise. Set by the engineer themselves on their own settings
+   * page, or by whoever administers the people from the intake paperwork;
+   * blank is allowed. Coordinates are the geocode of the address at the time
+   * it was saved. A client's lab is NOT a home: an engineer stationed at one
+   * gets a site_id, and this stays where they live.
    */
   homeAddress: text("home_address").notNull().default(""),
   homeLat: doublePrecision("home_lat"),
   homeLng: doublePrecision("home_lng"),
+  /**
+   * Their site location, when their day does not start at their front door:
+   * one of the company's own sites, or a client's lab for an engineer
+   * stationed there. An OVERRIDE of the home address for routed miles and
+   * the per-diem radius (lib/tripMiles.tripOrigin), never a replacement for
+   * it - both facts stay on file. Distinct from users.site_id, which means
+   * "which of their own organization's sites they sit at" and follows this
+   * only when this is one of those.
+   */
+  siteId: integer("site_id").references(() => orgSites.id, { onDelete: "set null" }),
   /**
    * The person file - the half of an employee record that is not pay.
    *

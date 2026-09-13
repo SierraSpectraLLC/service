@@ -52,9 +52,10 @@ const OTHER_OWNER: Who = {
 };
 
 const RESET = `
-  DELETE FROM perks; DELETE FROM payroll;
+  DELETE FROM perks; DELETE FROM payroll; DELETE FROM drive_cache;
   UPDATE house_members SET home_address = '', phone = '', emergency_name = '',
-    emergency_phone = '', started_on = '', home_lat = NULL, home_lng = NULL;
+    emergency_phone = '', started_on = '', home_lat = NULL, home_lng = NULL, site_id = NULL;
+  UPDATE users SET site_id = NULL;
 `;
 
 beforeAll(async () => {
@@ -62,8 +63,16 @@ beforeAll(async () => {
   await client.exec(`
     INSERT INTO orgs (id, name, kind, is_operator) VALUES
       (3, 'Sierra Spectra', 'provider', true),
-      (5, 'Cascade Analytical', 'provider', true);
+      (5, 'Cascade Analytical', 'provider', true),
+      (7, 'LabZen', 'client', false);
     SELECT setval('orgs_id_seq', 100);
+    -- Where somebody can be stationed: Sierra's own shop (never geocoded), a
+    -- lab of Sierra's client, and a site of the other operator's.
+    INSERT INTO org_sites (id, tenant_org_id, org_id, name, address, lat, lng) VALUES
+      (11, 3, 3, 'Reno shop', '1 Yard Way, Reno NV', NULL, NULL),
+      (12, 3, 7, 'LabZen HQ', '780 Chadbourne Rd, Fairfield CA', 38.2, -122.1),
+      (13, 5, 5, 'Cascade yard', '9 Elsewhere Rd', 45.0, -120.0);
+    SELECT setval('org_sites_id_seq', 100);
     INSERT INTO house_members (email, org_id, role, name, can_admin_people) VALUES
       ('joe@sierra.test',  3, 'owner', 'Joe',  false),
       ('pat@sierra.test',  3, 'staff', 'Pat',  true),
@@ -132,6 +141,53 @@ describe("the person file", () => {
     const { saveMemberProfile } = await import("@/app/actions");
     expect((await saveMemberProfile("bill@sierra.test", PROFILE)).error).toBe("Not found");
     expect((await bill()).phone).toBe("");
+  });
+
+  it("stations them at one of our sites or a client lab, and keeps the home as the home", async () => {
+    who = HR;
+    const { saveMemberProfile } = await import("@/app/actions");
+    const { eq } = await import("drizzle-orm");
+    const account = async () => (await testDb.select().from(schema.users)
+      .where(eq(schema.users.email, "bill@sierra.test")))[0];
+    // Our own shop: the account row's "which of their organization's sites"
+    // follows, because it is one of theirs.
+    expect((await saveMemberProfile("bill@sierra.test", { ...PROFILE, siteId: 11 })).error).toBeUndefined();
+    expect((await bill()).siteId).toBe(11);
+    expect((await account())?.siteId).toBe(11);
+    // A client's lab: the file says so, the home stays the home, and the
+    // account row does not call a client's lab one of ours.
+    expect((await saveMemberProfile("bill@sierra.test", { ...PROFILE, siteId: 12 })).error).toBeUndefined();
+    expect((await bill()).siteId).toBe(12);
+    expect((await bill()).homeAddress).toContain("Foothill");
+    expect((await account())?.siteId).toBeNull();
+    // Back to the front door.
+    expect((await saveMemberProfile("bill@sierra.test", { ...PROFILE, siteId: null })).error).toBeUndefined();
+    expect((await bill()).siteId).toBeNull();
+  });
+
+  it("refuses another operator's site, and leaves the station alone when the caller says nothing about it", async () => {
+    who = HR;
+    const { saveMemberProfile } = await import("@/app/actions");
+    expect((await saveMemberProfile("bill@sierra.test", { ...PROFILE, siteId: 13 })).error).toMatch(/not one of your company/);
+    expect((await bill()).siteId).toBeNull();
+    await saveMemberProfile("bill@sierra.test", { ...PROFILE, siteId: 11 });
+    // A phone fix from a form that knows nothing about sites must not un-station them.
+    await saveMemberProfile("bill@sierra.test", { ...PROFILE, phone: "555-0001" });
+    expect((await bill()).siteId).toBe(11);
+  });
+
+  it("starts their trips from the site location when they have one, else from home", async () => {
+    who = HR;
+    const { saveMemberProfile } = await import("@/app/actions");
+    const { tripOrigin } = await import("@/lib/tripMiles");
+    await saveMemberProfile("bill@sierra.test", PROFILE);
+    expect(await tripOrigin(await bill())).toEqual({ lat: 37.5, lng: -122.0 });
+    await saveMemberProfile("bill@sierra.test", { ...PROFILE, siteId: 12 });
+    expect(await tripOrigin(await bill())).toEqual({ lat: 38.2, lng: -122.1 });
+    // A site that never geocoded is still where they start - not their home,
+    // which would price every trip off the wrong doorstep.
+    await saveMemberProfile("bill@sierra.test", { ...PROFILE, siteId: 11 });
+    expect(await tripOrigin(await bill())).toBeNull();
   });
 
   it("does not re-geocode an address nobody touched", async () => {

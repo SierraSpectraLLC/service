@@ -11,8 +11,8 @@
 // the walk stops.
 import { describe, expect, it } from "vitest";
 import {
-  checkStipend, dueStipendCycles, nextStipendCycle, perksTitle, previewFirstCycle,
-  stipendDescription, stipendLive, type StipendTerms,
+  LAST_DAY, STIPEND_SHAPES, checkStipend, dueStipendCycles, nextStipendCycle, perksTitle, previewFirstCycle,
+  shapeTerms, stipendDescription, stipendLive, type StipendTerms,
 } from "@/lib/stipends";
 
 const INTERNET: StipendTerms = {
@@ -179,5 +179,28 @@ describe("what the form will not let through", () => {
     expect(checkStipend({ ...draft, dayOfMonth: 32 })).toBeTruthy();
     expect(checkStipend({ ...draft, startsOn: "" })).toBeTruthy();
     expect(checkStipend({ ...draft, endsOn: "2026-07-01" })).toBeTruthy();
+  });
+});
+
+describe("the schedules on offer", () => {
+  // One list behind both forms - the roster's card and the person file - so
+  // what one offers the other offers, and every entry is a schedule the
+  // checker accepts as it stands.
+  it("every shape is a schedule the checker accepts, and only one asks for a day", () => {
+    for (const s of STIPEND_SHAPES) {
+      const { terms, picksDay } = shapeTerms(s.key, "15", "5");
+      expect(picksDay).toBe(s.key === "m1-day");
+      expect(checkStipend({
+        person: "Bill", label: "Internet", amountCents: 3500, ...terms, startsOn: "2026-06-01", endsOn: "",
+      })).toBeNull();
+    }
+  });
+  it("reads the day box only for the shape that picks a day", () => {
+    expect(shapeTerms("m1-day", "15", "1").terms.dayOfMonth).toBe(15);
+    // A 15 left behind in the box must not override "on the last day".
+    expect(shapeTerms("m1-last", "15", "1").terms.dayOfMonth).toBe(LAST_DAY);
+    expect(shapeTerms("w2", "15", "5").terms).toMatchObject({ cadence: "weeks", everyWeeks: 2, weekday: 5 });
+    // An unknown key is the first shape, not a crash.
+    expect(shapeTerms("nope", "1", "1").shape.key).toBe("m1-1");
   });
 });

@@ -9,7 +9,6 @@ import { shopTime } from "@/lib/shopday";
 import { systemLabel } from "@/lib/systemLabel";
 import { forTenant, readTenant, visibleOrgs } from "@/lib/tenancy";
 import { tempState } from "@/lib/tempPassword";
-import { worksiteChoicesFor } from "@/lib/worksiteData";
 import SharePanel from "@/components/SharePanel";
 import AccessRequestsPanel from "@/components/AccessRequestsPanel";
 import HouseMembersPanel from "@/components/HouseMembersPanel";
@@ -40,9 +39,6 @@ export default async function AdminSettingsPage() {
    * predicate, which is how the instance's own operator keeps seeing all of it.
    */
   const tenant = readTenant(user);
-  // Client labs, for stationing a new hire at one - the same list the person
-  // file and the engineer's own profile offer.
-  const siteRows = await worksiteChoicesFor(user);
   const [rows, orgRows, assetRows, shareRows, requestRows, recordRows] = await Promise.all([
     db.select().from(instruments).where(forTenant(instruments.tenantOrgId, tenant))
       .orderBy(asc(instruments.archived), asc(instruments.externalId)),
@@ -119,8 +115,7 @@ export default async function AdminSettingsPage() {
               : st.kind === "expired" ? "expired" : `${st.daysLeft}d left`,
           };
         })}
-        myEmail={user.email}
-        sites={siteRows} />
+        myEmail={user.email} />
 
       {requestRows.length > 0 && (
         <Panel title="Waiting on a decision" count={requestRows.length}>

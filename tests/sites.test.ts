@@ -83,18 +83,18 @@ describe("what a tech reads before driving there", () => {
   });
 });
 
-describe("a client lab as somebody's home base", () => {
+describe("a client lab as somebody's site location", () => {
   const rows = [
-    { orgName: "LabZen", name: "HQ", address: "780 Chadbourne Rd, Fairfield CA", archived: false },
-    { orgName: "LabZen", name: "Building 4", address: "", archived: false },
-    { orgName: "Acme Bio", name: "", address: "1 Main St\nReno NV", archived: false },
-    { orgName: "LabZen", name: "Old lab", address: "9 Gone Rd", archived: true },
+    { id: 1, orgName: "LabZen", name: "HQ", address: "780 Chadbourne Rd, Fairfield CA", archived: false },
+    { id: 2, orgName: "LabZen", name: "Building 4", address: "", archived: false },
+    { id: 3, orgName: "Acme Bio", name: "", address: "1 Main St\nReno NV", archived: false },
+    { id: 4, orgName: "LabZen", name: "Old lab", address: "9 Gone Rd", archived: true },
   ];
 
-  it("offers only live sites that have an address, by organization then name", () => {
+  it("offers only live sites that have an address, by organization then name, each by its id", () => {
     expect(worksiteChoices(rows)).toEqual([
-      { orgName: "Acme Bio", label: "1 Main St, Reno NV", address: "1 Main St\nReno NV" },
-      { orgName: "LabZen", label: "HQ", address: "780 Chadbourne Rd, Fairfield CA" },
+      { id: 3, orgName: "Acme Bio", label: "1 Main St, Reno NV", address: "1 Main St\nReno NV" },
+      { id: 1, orgName: "LabZen", label: "HQ", address: "780 Chadbourne Rd, Fairfield CA" },
     ]);
   });
 

@@ -4411,3 +4411,16 @@ ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "specs_right" text NOT NULL DEFAUL
 -- the person file, not the document library - see the column in schema.ts and
 -- lib/fileAccess for who may read it.
 ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "house_member_id" integer REFERENCES "house_members"("id") ON DELETE CASCADE;
+
+-- Where an engineer's day starts when it is not their front door: the shop, or
+-- the client's lab a dedicated engineer is stationed at. An override of the
+-- home address for routed miles and the per-diem radius, never a replacement
+-- for it - the home stays on file as the home, which is what the tax forms
+-- need. See the column in schema.ts and lib/tripMiles.tripOrigin.
+ALTER TABLE "house_members" ADD COLUMN IF NOT EXISTS "site_id" integer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'house_members_site_id_org_sites_id_fk') THEN
+    ALTER TABLE "house_members" ADD CONSTRAINT "house_members_site_id_org_sites_id_fk"
+      FOREIGN KEY ("site_id") REFERENCES "org_sites"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

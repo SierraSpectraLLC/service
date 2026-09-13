@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { createStipend, updateStipend } from "@/app/actions";
 import {
-  LAST_DAY, WEEKDAY_NAMES, checkStipend, monthlyEquivalentCents, previewFirstCycle,
-  stipendCadenceLabel,
+  STIPEND_SHAPES, WEEKDAY_NAMES, checkStipend, monthlyEquivalentCents, previewFirstCycle,
+  shapeTerms, stipendCadenceLabel,
 } from "@/lib/stipends";
 import { formatCents } from "@/lib/money";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
@@ -34,28 +34,6 @@ export type StipendRow = {
   nextOn: string;
   note: string;
 };
-
-/**
- * The dropdown's options, flattened into one list.
- *
- * A cadence select and a separate day-of-month select is two decisions to
- * express one, and the second one is meaningless in the weekly shape - which
- * is how a form ends up with a disabled control nobody can explain. These are
- * the schedules a shop actually asks for, written as sentences.
- */
-const SHAPES: { key: string; label: string; cadence: string;
-  everyMonths: number; dayOfMonth: number; everyWeeks: number }[] = [
-  { key: "m1-1",    label: "Monthly, on the 1st",        cadence: "months", everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 1 },
-  { key: "m1-15",   label: "Monthly, on the 15th",       cadence: "months", everyMonths: 1,  dayOfMonth: 15,       everyWeeks: 1 },
-  { key: "m1-last", label: "Monthly, on the last day",   cadence: "months", everyMonths: 1,  dayOfMonth: LAST_DAY, everyWeeks: 1 },
-  { key: "m1-day",  label: "Monthly, on a day I pick",   cadence: "months", everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 1 },
-  { key: "m3",      label: "Every quarter",              cadence: "months", everyMonths: 3,  dayOfMonth: 1,        everyWeeks: 1 },
-  { key: "m6",      label: "Every 6 months",             cadence: "months", everyMonths: 6,  dayOfMonth: 1,        everyWeeks: 1 },
-  { key: "m12",     label: "Every year",                 cadence: "months", everyMonths: 12, dayOfMonth: 1,        everyWeeks: 1 },
-  { key: "w1",      label: "Every week",                 cadence: "weeks",  everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 1 },
-  { key: "w2",      label: "Every other week",           cadence: "weeks",  everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 2 },
-  { key: "w4",      label: "Every 4 weeks",              cadence: "weeks",  everyMonths: 1,  dayOfMonth: 1,        everyWeeks: 4 },
-];
 
 /**
  * Standing reimbursements: the internet stipend, the phone allowance.
@@ -106,18 +84,7 @@ export default function StipendsCard({ rows, roster, categories, isOwner, today 
   };
 
   const cents = Math.round(parseFloat(draft.amount.replace(/[^0-9.]/g, "")) * 100) || 0;
-  const shape = SHAPES.find((x) => x.key === draft.shape) ?? SHAPES[0];
-  // Only the "day I pick" shape reads the day box; every other one carries its
-  // own day, so switching to "on the last day" cannot be silently overridden
-  // by a number left behind in a field nobody is looking at.
-  const picksDay = shape.key === "m1-day";
-  const terms = {
-    cadence: shape.cadence,
-    everyMonths: shape.everyMonths,
-    dayOfMonth: picksDay ? parseInt(draft.dayOfMonth, 10) || 0 : shape.dayOfMonth,
-    everyWeeks: shape.everyWeeks,
-    weekday: parseInt(draft.weekday, 10),
-  };
+  const { shape, picksDay, terms } = shapeTerms(draft.shape, draft.dayOfMonth, draft.weekday);
   const problem = checkStipend({
     person: draft.person, label: draft.label, amountCents: cents,
     ...terms, startsOn: draft.startsOn, endsOn: draft.endsOn,
@@ -271,7 +238,7 @@ export default function StipendsCard({ rows, roster, categories, isOwner, today 
               <label>How often</label>
               <select value={draft.shape} aria-label="How often"
                 onChange={(e) => setDraft({ ...draft, shape: e.target.value })}>
-                {SHAPES.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
+                {STIPEND_SHAPES.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
               </select>
             </div>
           </div>

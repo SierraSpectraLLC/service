@@ -154,11 +154,11 @@ describe("paperwork on the person file", () => {
   });
 });
 
-describe("the staffed location", () => {
+describe("the site location", () => {
   const account = async () => (await testDb.select().from(schema.users))
     .find((u) => u.email === "bill@sierra.test");
 
-  it("is one of the company's own sites, and lands on the account row", async () => {
+  it("is one of the company's own sites, and lands on the account row as theirs", async () => {
     who = HR;
     const { saveMemberProfile } = await import("@/app/actions");
     expect((await saveMemberProfile("bill@sierra.test", { ...PROFILE, siteId: 10 })).error).toBeUndefined();
@@ -170,13 +170,13 @@ describe("the staffed location", () => {
     expect((await account())?.siteId).toBeNull();
   });
 
-  it("refuses another company's site, and a site that does not exist", async () => {
+  it("refuses another operator's site, and a site that does not exist", async () => {
     who = OWNER;
     const { saveMemberProfile } = await import("@/app/actions");
     expect((await saveMemberProfile("bill@sierra.test", { ...PROFILE, siteId: 11 })).error)
-      .toContain("not one of your company's site locations");
+      .toContain("not one of your company's sites or a client lab");
     expect((await saveMemberProfile("bill@sierra.test", { ...PROFILE, siteId: 999 })).error)
-      .toContain("not one of your company's site locations");
+      .toContain("not one of your company's sites or a client lab");
     expect((await account())?.siteId ?? null).toBeNull();
   });
 });

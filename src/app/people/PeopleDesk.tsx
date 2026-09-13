@@ -49,7 +49,7 @@ export type RosterRow = {
  * open a claim in their name and start filling it, because the reason this
  * page exists is that people hand over receipts instead of filing anything.
  */
-export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, perksMonthCents, sites = [], ownSites = [], myEmail }: {
+export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, perksMonthCents, sites = [], ownSites = [], myEmail, categories = [] }: {
   roster: RosterRow[];
   /**
    * Only the owner may hand out HR. Everything else here is available to HR
@@ -62,17 +62,25 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
   orgId: number | null;
   today: string;
   perksMonthCents: number;
-  /** Client labs a person may be stationed at - see HomeBasePicker. */
+  /** Client labs a person may be stationed at - the site-location picker's second half. */
   sites?: WorksiteChoice[];
-  /** The company's own site locations, for the staffed-location picker. */
+  /** The company's own site locations - the picker's first half. */
   ownSites?: OwnSite[];
   /** The reader - whose own file gets no access controls. */
   myEmail: string;
+  /** Expense categories, for setting up a standing reimbursement from a file. */
+  categories?: string[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  /** Where they are stationed, by name: one of ours, or a client's lab. */
+  const stationName = (id: number | null): string => {
+    if (id === null) return "";
+    const own = ownSites.find((x) => x.id === id);
+    return own ? siteLabel(own) : sites.find((s) => s.id === id)?.label ?? "";
+  };
   const openRow = roster.find((r) => r.email === open) ?? null;
 
   const toggleHr = (row: RosterRow) =>
@@ -98,14 +106,14 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
       ) : undefined}
     >
       {adding && (
-        <AddPersonDialog sites={sites} onClose={() => setAdding(false)} onAdded={() => router.refresh()} />
+        <AddPersonDialog onClose={() => setAdding(false)} onAdded={() => router.refresh()} />
       )}
       {openRow && (
         <PersonFile
           email={openRow.email} name={openRow.name} role={openRow.role}
           profile={openRow.profile} pay={openRow.pay} perks={openRow.perks} kits={openRow.kits}
           seesPay={seesPay} orgId={orgId} today={today} sites={sites} ownSites={ownSites}
-          papers={openRow.papers} stipends={openRow.stipends}
+          papers={openRow.papers} stipends={openRow.stipends} categories={categories}
           canManage={isOwner} isMe={openRow.email.toLowerCase() === myEmail.toLowerCase()}
           onClose={() => setOpen(null)} />
       )}
@@ -135,8 +143,7 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
                   <div className="mut t-meta">
                     {r.email}
                     {r.profile.title ? ` · ${r.profile.title}` : seesPay && r.pay ? " · on payroll" : ""}
-                    {r.profile.siteId !== null && ownSites.find((x) => x.id === r.profile.siteId)
-                      ? ` · at ${siteLabel(ownSites.find((x) => x.id === r.profile.siteId)!)}` : ""}
+                    {stationName(r.profile.siteId) ? ` · at ${stationName(r.profile.siteId)}` : ""}
                   </div>
                 </button>
               ),

@@ -84,24 +84,23 @@ export function visitBrief(site: Pick<SiteLike, "name" | "address" | "accessNote
 }
 
 /**
- * A client's lab, offered as somebody's home base.
+ * A client's lab, offered as somebody's site location.
  *
  * An engineer hired to sit at one client full-time starts every trip from
- * that lab, not from their house - so the home-base pickers offer the sites
- * of every organization this workspace works with, grouped by the
- * organization, and choosing one copies its address into the person's own
- * field. A copy rather than a pointer on purpose: the home base is the
- * engineer's fact, geocoded and cached like any other, and it must not
- * quietly move when somebody edits the site.
+ * that lab, not from their house - so the site-location picker offers the
+ * sites of every organization this workspace works with, grouped by the
+ * organization. What is saved is the site's id (house_members.site_id): the
+ * lab is the client's fact, and when the client moves it, the engineer's
+ * trips move with it. Their home address stays their own, separately.
  */
-export type WorksiteChoice = { orgName: string; label: string; address: string };
+export type WorksiteChoice = { id: number; orgName: string; label: string; address: string };
 
 export function worksiteChoices(
-  rows: { orgName: string; name: string; address: string; archived?: boolean }[],
+  rows: { id: number; orgName: string; name: string; address: string; archived?: boolean }[],
 ): WorksiteChoice[] {
   return rows
     .filter((r) => !r.archived && r.address.trim())
-    .map((r) => ({ orgName: r.orgName, label: siteLabel(r), address: r.address }))
+    .map((r) => ({ id: r.id, orgName: r.orgName, label: siteLabel(r), address: r.address }))
     .sort((a, b) => a.orgName.localeCompare(b.orgName) || a.label.localeCompare(b.label));
 }
 

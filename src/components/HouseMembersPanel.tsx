@@ -5,7 +5,6 @@ import { confirmReason } from "@/components/ui/ConfirmDialog";
 import Link from "next/link";
 import { clearHouseTempPassword, revokeHouseMember, setHouseMember, setHouseTempPassword } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
-import type { WorksiteChoice } from "@/lib/sites";
 import AddPersonDialog from "@/components/AddPersonDialog";
 import { toast } from "@/components/ui/Toast";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
@@ -28,11 +27,9 @@ const ROLE = {
  * this is the superuser list, and it's why every rule here is also enforced
  * server-side rather than just greyed out.
  */
-export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
+export default function HouseMembersPanel({ members, myEmail }: {
   members: HouseRow[];
   myEmail: string;
-  /** Client labs, offered as a home base for an engineer stationed on-site. */
-  sites?: WorksiteChoice[];
 }) {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
@@ -67,7 +64,7 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
         pay, home base, staffed location and paperwork are under <Link href="/people">Employees</Link>.
       </div>
 
-      {adding && <AddPersonDialog sites={sites} onClose={() => setAdding(false)} />}
+      {adding && <AddPersonDialog onClose={() => setAdding(false)} />}
 
       {members.map((m) => (
         <div key={m.email} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>

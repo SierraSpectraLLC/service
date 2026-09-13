@@ -11962,10 +11962,12 @@ export async function saveMemberProfile(email: string, data: {
   homeAddress: string; phone: string; emergencyName: string; emergencyPhone: string;
   startedOn: string;
   /**
-   * Where they are STATIONED - one of the company's own site locations, as
-   * distinct from where they live. Null clears it; omitted leaves it alone,
-   * so a caller that knows nothing about sites cannot un-station somebody
-   * by saving a phone number.
+   * Their SITE LOCATION - one of the company's own sites, or a client lab
+   * for an engineer stationed there - as distinct from where they live. An
+   * override of the home for routed miles and the per-diem radius; the home
+   * stays on file as the home. Null clears it; omitted leaves it alone, so a
+   * caller that knows nothing about sites cannot un-station somebody by
+   * saving a phone number.
    */
   siteId?: number | null;
 }): Promise<{ error?: string; geocoded?: boolean }> {
@@ -11980,18 +11982,23 @@ export async function saveMemberProfile(email: string, data: {
   const startedOn = data.startedOn.trim();
   if (startedOn && !isIsoDay(startedOn)) return { error: "The start date needs to be a calendar day" };
 
-  // The staffed location has to be one of THEIR company's sites. Checked
-  // rather than trusted: the id comes from a select, and a hand-edited one
-  // would station an engineer at another company's lab - which is a data
-  // leak wearing a dropdown, the same one setSystemSite refuses.
+  // The site location has to be one THIS workspace knows: the company's own
+  // site, or a lab of a client it works with - the list worksiteChoicesFor
+  // offers. Checked rather than trusted: the id comes from a select, and a
+  // hand-edited one would station an engineer at another operator's lab -
+  // which is a data leak wearing a dropdown, the same one setSystemSite
+  // refuses.
   let siteId: number | null | undefined = data.siteId;
+  let ownSite = false;
   if (siteId != null) {
     const [site] = await db.select().from(orgSites).where(eq(orgSites.id, siteId));
-    if (!site || member.orgId === null || site.orgId !== member.orgId) {
-      return { error: "That is not one of your company's site locations" };
-    }
+    const theirs = !!site && member.orgId !== null
+      && (site.orgId === member.orgId || site.tenantOrgId === member.orgId);
+    if (!theirs) return { error: "That is not one of your company's sites or a client lab you work with" };
     siteId = site.id;
+    ownSite = site.orgId === member.orgId;
   }
+  const restationed = siteId !== undefined && siteId !== member.siteId;
 
   const clean = data.homeAddress.trim().slice(0, 300);
   const moved = clean !== member.homeAddress;
@@ -12006,12 +12013,13 @@ export async function saveMemberProfile(email: string, data: {
     ...(label ? { name: label } : {}),
     homeAddress: clean,
     ...(moved ? { homeLat: hit?.lat ?? null, homeLng: hit?.lng ?? null } : {}),
+    ...(siteId === undefined ? {} : { siteId }),
     phone: data.phone.trim().slice(0, 60),
     emergencyName: data.emergencyName.trim().slice(0, 120),
     emergencyPhone: data.emergencyPhone.trim().slice(0, 60),
     startedOn,
   }).where(eq(houseMembers.id, member.id));
-  if (moved) {
+  if (moved || restationed) {
     // Their routed answers start from a place that no longer stands.
     await db.delete(driveCache).where(eq(driveCache.memberEmail, member.email));
   }
@@ -12019,11 +12027,13 @@ export async function saveMemberProfile(email: string, data: {
   // back to them ("set by whoever administers your organization") and the
   // directory shows it. Made if they have never signed in, exactly as
   // updatePersonProfile does for a client contact.
-  // The staffed location rides on the same row, for the same reason: it is
-  // "which of their organization's sites this person sits at", which is what
-  // users.site_id has always meant for a client contact.
+  // users.site_id means "which of their OWN organization's sites this person
+  // sits at" - what it has always meant for a client contact, and what
+  // Settings › Organizations edits - so it follows the site location only
+  // when that is one of the company's own; a client's lab is not one of
+  // theirs, and the file (house_members.site_id) is the record of that.
   const title = data.title.trim().slice(0, 80);
-  const station = siteId === undefined ? {} : { siteId };
+  const station = siteId === undefined ? {} : { siteId: ownSite ? siteId : null };
   const [account] = await db.select({ id: users.id }).from(users).where(eq(users.email, member.email));
   if (account) await db.update(users).set({ title, ...station }).where(eq(users.id, account.id));
   else if (title || siteId != null) {

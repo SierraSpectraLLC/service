@@ -4,21 +4,20 @@ import { useState, useTransition } from "react";
 import { setMyHomeBase } from "@/app/actions";
 import { toast } from "@/components/ui/Toast";
 import { Field, Panel } from "@/components/ui";
-import HomeBasePicker from "@/components/HomeBasePicker";
-import type { WorksiteChoice } from "@/lib/sites";
+import AddressField from "@/components/AddressField";
 
 /**
- * The engineer's own point zero. It is their home address, so it lives on
- * THEIR settings page and nobody types it for them. What the rest of the app
- * ever sees is miles - the trip strip on a work order says "112 mi from your
- * home base", never where the base is.
+ * The engineer's own home. It lives on THEIR settings page because it is
+ * their address; the office can fill it from the intake paperwork too. What
+ * the rest of the app ever sees is miles - the trip strip on a work order
+ * says "112 mi from your home base", never where the base is. An engineer
+ * stationed at a client's lab has that on their file as a site location,
+ * separately: the lab is not their home, and this field is not where it goes.
  */
-export default function HomeBaseCard({ address, placed, sites = [] }: {
+export default function HomeBaseCard({ address, placed }: {
   address: string;
   /** Whether the saved address geocoded - routed miles need a point, not a string. */
   placed: boolean;
-  /** Client labs, for somebody stationed at one rather than working from home. */
-  sites?: WorksiteChoice[];
 }) {
   const [draft, setDraft] = useState(address);
   const [msg, setMsg] = useState("");
@@ -36,9 +35,9 @@ export default function HomeBaseCard({ address, placed, sites = [] }: {
 
   return (
     <Panel title="Home base"
-      hint="Where your trips start. Work orders use it to figure road miles to a site - only the miles ever show, never the address. Stationed at a client's lab? Pick it instead of your home.">
+      hint="Where you live, and where your trips start unless your file names a site location. Work orders use it to figure road miles to a site - only the miles ever show, never the address.">
       <Field label="Address">
-        <HomeBasePicker value={draft} ariaLabel="Home base address" sites={sites}
+        <AddressField value={draft} ariaLabel="Home base address"
           placeholder="1200 Idlewild Dr, Reno NV 89509"
           onChange={setDraft} />
       </Field>
