@@ -707,6 +707,48 @@ export async function addInstrumentNote(target: WorkTarget, text: string): Promi
 }
 
 /** Retire a system from the active fleet (or bring it back). The editor-safe alternative to deleting. */
+/**
+ * One change across several systems - the registry's checkboxes.
+ *
+ * Each system goes through the single-record action for that field, so a
+ * bulk edit is exactly the edit its page would make: the same "can this
+ * person edit this system" check, the same audit line, the same catalog
+ * follow-through when a type changes. A system that refuses is reported by
+ * id rather than aborting the rest; the others are done, and the person is
+ * told which were not. Nothing here decides who may edit what.
+ */
+export async function updateSystems(
+  ids: number[],
+  patch: { client?: string; category?: string; lead?: string; archived?: boolean },
+): Promise<{ error?: string; done?: number; failures?: { id: number; error: string }[] }> {
+  await requireEditor();
+  const targets = [...new Set(ids)];
+  if (!targets.length) return { error: "Nothing selected" };
+  if (targets.length > 200) return { error: "Change 200 systems at a time" };
+  if (patch.client === undefined && patch.category === undefined && patch.lead === undefined && patch.archived === undefined) {
+    return { error: "Nothing to change" };
+  }
+  const failures: { id: number; error: string }[] = [];
+  let done = 0;
+  for (const id of targets) {
+    try {
+      if (patch.client !== undefined || patch.category !== undefined) {
+        const res = await updateInstrument(id, { client: patch.client, category: patch.category });
+        if (res.error) { failures.push({ id, error: res.error }); continue; }
+      }
+      if (patch.lead !== undefined) await setInstrumentLead(id, patch.lead);
+      if (patch.archived !== undefined) await setInstrumentArchived(id, patch.archived);
+      done++;
+    } catch (e) {
+      // The single actions throw for a system the caller may not edit and for
+      // an unknown lead; the thrown line is the reason, worded for the log.
+      failures.push({ id, error: (e as Error).message || "Could not change it" });
+    }
+  }
+  revalidatePath("/instruments");
+  return { done, failures };
+}
+
 export async function setInstrumentArchived(instrumentId: number, archived: boolean) {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
