@@ -156,3 +156,41 @@ export function bands(rows: Band[]): { shown: (Band & { share: number })[]; tota
  */
 export const labelFits = (text: string, widthPx: number): boolean =>
   widthPx >= text.length * 6.2 + 24;
+
+export type RunningCosts = {
+  /** Payroll and overhead as the two bands of one bar; payroll is absent, not zero, when withheld. */
+  rows: Band[];
+  totalCents: number;
+  /** Collected less the costs above - the same "this period" figure /money draws. */
+  leftCents: number;
+  /** False when the reader may not see payroll, so the total is only part of the truth. */
+  complete: boolean;
+};
+
+/**
+ * What it cost to run the shop this period, and what collecting left behind.
+ *
+ * Two costs and not three, on purpose: payroll and overhead are what the
+ * business spends to EXIST, whether or not a job happens, which is why /money
+ * subtracts exactly these two from what was collected and calls the result
+ * "this period". Reimbursements paid out are left aside - most of that money
+ * was a job's cost, already carried by that job's margin, and counting it here
+ * would charge it twice.
+ *
+ * A withheld payroll is ABSENT, not zero. The row is dropped and `complete`
+ * says so, so the page can say "before payroll" rather than show a total that
+ * quietly leaves out the biggest line - the same rule lib/financeData applies
+ * to the rail badge.
+ */
+export function runningCosts(
+  collectedCents: number,
+  payrollCents: number | null,
+  overheadCents: number,
+): RunningCosts {
+  const rows: Band[] = [
+    ...(payrollCents === null ? [] : [{ key: "payroll", label: "Payroll", cents: payrollCents }]),
+    { key: "overhead", label: "Overhead", cents: overheadCents },
+  ];
+  const totalCents = rows.reduce((n, r) => n + r.cents, 0);
+  return { rows, totalCents, leftCents: collectedCents - totalCents, complete: payrollCents !== null };
+}
