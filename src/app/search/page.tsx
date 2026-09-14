@@ -12,6 +12,7 @@ import { findOutsideMatches } from "@/lib/serialLookup";
 import { MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { alnum, searchTerms } from "@/lib/search";
 import { navIndex } from "@/lib/nav";
+import { getModules } from "@/lib/flags";
 import { navTree } from "@/lib/navData";
 import SearchBox from "@/components/SearchBox";
 import { RequestAccessCard, CreateSystemForm } from "@/components/LookupPanels";
@@ -32,6 +33,7 @@ type Hit = { id: number; group: string; title: string; sub: string; href: string
 export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string; in?: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
+  const modules = await getModules();
   const { q: raw, in: inGroup = "" } = await searchParams;
   const q = (raw ?? "").trim();
   const terms = searchTerms(q);
@@ -114,7 +116,11 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
         [parts.partNumber, parts.serial],
       ))).limit(25),
       db.select().from(attachments).where(and(workScope(attachments.instrumentId, attachments.assetId), every([attachments.fileName, attachments.description]))).limit(25),
-      db.select().from(discussionPosts).where(and(inSystems(discussionPosts.instrumentId), every([discussionPosts.body]))).orderBy(desc(discussionPosts.createdAt)).limit(25),
+      // Nothing from the talk module while it is off - search must not be a
+      // side door onto a room that has no door of its own.
+      modules.discussions
+        ? db.select().from(discussionPosts).where(and(inSystems(discussionPosts.instrumentId), every([discussionPosts.body]))).orderBy(desc(discussionPosts.createdAt)).limit(25)
+        : Promise.resolve([]),
       db.select().from(assets).where(and(inAssets(assets.id), everyIdent(
         [assets.model, assets.serial, assets.note, assets.manufacturer, assets.kind],
         [assets.model, assets.serial],

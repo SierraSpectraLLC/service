@@ -53,7 +53,11 @@ export default async function SettingsPage() {
           spectrumHeight: look.spectrumHeight,
           spectrumStops: look.spectrumStops,
         }}
-        modules={{ sheetSync: s?.sheetSyncEnabled ?? false, eod: s?.eodEnabled ?? false, digest: s?.digestEnabled ?? false, remote: s?.remoteEnabled ?? false, publicCatalog: s?.publicCatalogEnabled ?? false }}
+        modules={{
+          sheetSync: s?.sheetSyncEnabled ?? false, eod: s?.eodEnabled ?? false, digest: s?.digestEnabled ?? false,
+          remote: s?.remoteEnabled ?? false, publicCatalog: s?.publicCatalogEnabled ?? false,
+          discussions: s?.discussionsEnabled ?? false,
+        }}
       />
     </div>
   );

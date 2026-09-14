@@ -47,7 +47,7 @@ type OrgRow = { id: number; name: string; kind: string };
 export default function ConfigurationForm(props: {
   stageDefs: StageRow[];
   orgs: OrgRow[];
-  modules: { sheetSync: boolean; eod: boolean; digest: boolean; remote: boolean; publicCatalog: boolean };
+  modules: { sheetSync: boolean; eod: boolean; digest: boolean; remote: boolean; publicCatalog: boolean; discussions: boolean };
   platformName: string; platformTagline: string; publicContactEmail: string; operatorOrgId: number | null;
   /** When the internal edition of the daily digest goes out, in shop time. */
   digestHour: number;
@@ -270,6 +270,7 @@ export default function ConfigurationForm(props: {
           ["digest", "Daily staff digest", props.modules.digest],
           ["remote", "Remote support", props.modules.remote],
           ["publicCatalog", "Public equipment library", props.modules.publicCatalog],
+          ["discussions", "Discussions, comments and messages", props.modules.discussions],
         ] as const).map(([key, label, on]) => (
           <div key={key} style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>

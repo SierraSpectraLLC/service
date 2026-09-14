@@ -101,9 +101,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         .catch(() => [])
     : [];
   const unread = unreadRows.length;
-  // Same posture for the two conversation counts.
-  const unreadTalk = user ? await unreadDiscussions(user).catch(() => 0) : 0;
-  const unreadDm = user ? await unreadMessages(user.email).catch(() => 0) : 0;
+  // Same posture for the two conversation counts - and no count at all when
+  // the talk module is off, since there is no icon to hang it on.
+  const unreadTalk = user && modules.discussions ? await unreadDiscussions(user).catch(() => 0) : 0;
+  const unreadDm = user && modules.discussions ? await unreadMessages(user.email).catch(() => 0) : 0;
 
   /*
    * THE NAV, AS ONE TREE.
@@ -215,11 +216,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                       what the system told you, this is where people talk. A
                       discussion post already raises a notification, so merging
                       them would make one control both the alert and the room. */}
-                  <NavIcon href="/discussions" label="Discussions" count={unreadTalk}><MessagesIcon /></NavIcon>
+                  {modules.discussions && (
+                    <NavIcon href="/discussions" label="Discussions" count={unreadTalk}><MessagesIcon /></NavIcon>
+                  )}
                   {/* Its own icon again, and for the same reason: the bubble is
                       the room attached to a system, this is mail addressed to
-                      you by a person. */}
-                  <NavIcon href="/messages" label="Messages" count={unreadDm}><InboxIcon /></NavIcon>
+                      you by a person. Both go with the talk module. */}
+                  {modules.discussions && (
+                    <NavIcon href="/messages" label="Messages" count={unreadDm}><InboxIcon /></NavIcon>
+                  )}
                   {/* Live: polls for new arrivals, toasts them, and (opt-in)
                       raises OS notifications when the tab is hidden. */}
                   <NotificationCenter initialUnread={unread} />

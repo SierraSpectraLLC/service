@@ -11205,6 +11205,7 @@ const MODULES = {
   publicCatalog: { col: "publicCatalogEnabled", label: "public equipment library" },
   // The one that watches people rather than machines. See lib/trail.
   trail: { col: "trailEnabled", label: "activity trail" },
+  discussions: { col: "discussionsEnabled", label: "discussions, comments and messages" },
 } as const;
 
 export async function setModule(

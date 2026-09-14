@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { messageThreads, threadMembers, messages } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { getModules } from "@/lib/flags";
 import { visibleDirectory } from "@/lib/directory";
 import { messageableFrom, threadTitle, unreadCount } from "@/lib/messages";
 import { fmtWhen } from "@/lib/when";
@@ -21,6 +22,8 @@ export const dynamic = "force-dynamic";
 export default async function MessagesPage({ searchParams }: { searchParams: Promise<{ q?: string; unread?: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
+  // A module that is off has no pages, the same as the others in lib/flags.
+  if (!(await getModules()).discussions) redirect("/");
   const { q = "", unread = "" } = await searchParams;
   const me = user.email.toLowerCase();
 

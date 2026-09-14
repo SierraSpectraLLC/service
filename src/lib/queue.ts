@@ -52,6 +52,27 @@ export function canKick(
 }
 
 /**
+ * Whether the queue is a fact about this system at all.
+ *
+ * The queue exists for machines that MOVE: house-stewarded stock on the bench,
+ * a provider's or a reseller's inventory, a refurbished system parked with a
+ * client while they run acceptance tests. A lab client's own instrument does
+ * none of that. It sits in their lab, the shop services it through work
+ * orders, and there is no second queue to move it into and nobody to hand it
+ * to - so "Ours to move, nobody is waiting on anyone else" above every one of
+ * their records was the shop describing a machine that was never going
+ * anywhere, and "Hand it on" was a button with nowhere to point.
+ *
+ * Null owner is the house's own stock, which is exactly what the queue is
+ * for. An owner the viewer cannot resolve reads the same way: showing a
+ * control that does not apply is a smaller mistake than hiding one that does.
+ */
+export function queueApplies(owner: { kind: string; resaleEnabled: boolean } | null | undefined): boolean {
+  if (!owner) return true;
+  return owner.kind !== "client" || owner.resaleEnabled;
+}
+
+/**
  * A wait nobody owes a move on.
  *
  * The shop's own screen had no word for this. queueView says who HOLDS it and

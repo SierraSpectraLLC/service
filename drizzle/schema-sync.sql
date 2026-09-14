@@ -4424,3 +4424,9 @@ DO $$ BEGIN
       FOREIGN KEY ("site_id") REFERENCES "org_sites"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- Discussions, work-order comments and messages, as a module. Off by default:
+-- the talk surfaces were one operator's way of keeping the conversation on the
+-- record, and a shop that talks elsewhere gets icons and cards it never opens.
+-- Nothing posted is touched - it comes back with the switch. See lib/flags.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "discussions_enabled" boolean NOT NULL DEFAULT false;
