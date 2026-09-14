@@ -850,11 +850,31 @@ export async function setInstrumentLead(instrumentId: number, lead: string) {
   rev(instrumentId);
 }
 
+/**
+ * A new system on the books.
+ *
+ * Returns the id, or a sentence. The id used to be the whole return, so the
+ * ONE thing a person typing a tag gets wrong - a tag already on the books -
+ * hit the column's unique constraint and reached the browser as a crash
+ * rather than as a sentence. Two callers had grown their own pre-check to
+ * dodge that; the check belongs here, where every door gets it.
+ *
+ * Tags are compared case-insensitively, which is how the importer already
+ * treats them: "g-010" and "G-010" are one machine to everybody who reads
+ * them, and a pair that differs only in case is a duplicate record waiting
+ * to be found the hard way.
+ */
 export async function createInstrument(
   data: { externalId: string; client: string; category?: string; priority: number; lead?: string },
-) {
+): Promise<{ id?: number; error?: string }> {
   // Editors, not just staff: LabZen adds their internal systems themselves.
   const u = await requireEditor();
+  const externalId = data.externalId.trim();
+  if (!externalId) return { error: "System ID required" };
+  if (externalId.length > 40) return { error: "System ID must be 40 characters or fewer" };
+  const [clash] = await db.select({ externalId: instruments.externalId }).from(instruments)
+    .where(sql`lower(${instruments.externalId}) = ${externalId.toLowerCase()}`);
+  if (clash) return { error: `${clash.externalId} is already used by another system` };
   let lead = (data.lead ?? "").trim();
   if (lead && !(await assignableNames(u)).has(lead)) lead = "";
   const [row] = await db.insert(instruments).values({
@@ -862,7 +882,7 @@ export async function createInstrument(
     // model stays blank: the system is named by the assets added to it
     // (lib/systemLabel). The column lives on only as the pre-asset fallback
     // for older records and sheet imports.
-    externalId: data.externalId.trim(), client: data.client.trim(),
+    externalId, client: data.client.trim(),
     category: (data.category ?? "").trim(), model: "",
     priority: data.priority || 99, lead, stages: ["Intake"],
   }).returning();
@@ -917,7 +937,7 @@ export async function createInstrument(
   // Recurring upkeep that belongs to the instrument rather than to a unit in it.
   await applySystemProcedures(row.id, shopToday(), u.email);
   rev(row.id);
-  return row.id;
+  return { id: row.id };
 }
 
 export async function deleteInstrument(instrumentId: number, reason: string): Promise<{ error?: string }> {
@@ -1456,13 +1476,15 @@ export async function trackAssetAsSystem(
     .where(eq(instruments.externalId, tag));
   if (clash) return { error: `${tag} is taken by another system.` };
 
-  const instrumentId = await createInstrument({
+  const made = await createInstrument({
     externalId: tag,
     client: a.owner,
     // The unit's type is the system's type when the unit is all there is.
     category: a.kind,
     priority: 99,
   });
+  if (made.id === undefined) return { error: made.error ?? "Could not create the system" };
+  const instrumentId = made.id;
   const attached = await attachAssets([assetId], instrumentId);
   if (attached.error && !attached.attached) return { error: attached.error };
 
@@ -10226,8 +10248,12 @@ export async function importFleet(rows: ImportRow[], dryRun: boolean): Promise<{
           continue;
         }
         if (!dryRun) {
-          const id = await createInstrument({ externalId: sysId, client: r.client.trim(), category: r.category.trim(), priority: 99 });
-          createdThisRun.set(sysId.toLowerCase(), id);
+          const made = await createInstrument({ externalId: sysId, client: r.client.trim(), category: r.category.trim(), priority: 99 });
+          if (made.id === undefined) {
+            results.push({ row: n + 1, action: `skipped: ${made.error ?? "could not create the system"}` });
+            continue;
+          }
+          createdThisRun.set(sysId.toLowerCase(), made.id);
         } else createdThisRun.set(sysId.toLowerCase(), -1);
         systemsMade++;
         results.push({ row: n + 1, action: `create system ${sysId}` });
@@ -10248,7 +10274,12 @@ export async function importFleet(rows: ImportRow[], dryRun: boolean): Promise<{
           sysAction = `into ${sysId}`;
         } else {
           if (!dryRun) {
-            instrumentId = await createInstrument({ externalId: sysId, client: r.client.trim(), category: r.category.trim(), priority: 99 });
+            const made = await createInstrument({ externalId: sysId, client: r.client.trim(), category: r.category.trim(), priority: 99 });
+            if (made.id === undefined) {
+              results.push({ row: n + 1, action: `skipped: ${made.error ?? "could not create the system"}` });
+              continue;
+            }
+            instrumentId = made.id;
             createdThisRun.set(sysId.toLowerCase(), instrumentId);
           } else { createdThisRun.set(sysId.toLowerCase(), -1); instrumentId = -1; }
           systemsMade++;
@@ -10890,7 +10921,9 @@ export async function createSystemFromSerial(data: {
   if (existing.some((a) => a.instrumentId !== null)) {
     return { error: "That serial is already on a system here - request access instead" };
   }
-  const id = await createInstrument({ externalId: ext, client: data.client, category: data.category, priority: 99 });
+  const made = await createInstrument({ externalId: ext, client: data.client, category: data.category, priority: 99 });
+  if (made.id === undefined) return { error: made.error ?? "Could not create the system" };
+  const id = made.id;
   const res = await createAsset(id, {
     kind: data.kind, model: data.model, serial: data.serial.trim(), manufacturer: data.manufacturer,
     owner: data.client, asFound: "", location: "", note: "",
@@ -20240,7 +20273,9 @@ export async function createRestorationProject(
     const clash = await db.select({ id: instruments.id }).from(instruments)
       .where(sql`lower(${instruments.externalId}) = ${externalId.toLowerCase()}`);
     if (clash.length) return { error: `${externalId} is already on the books - pick another tag.` };
-    instrumentId = await createInstrument({ externalId, client: "", category: "", priority: 99 });
+    const made = await createInstrument({ externalId, client: "", category: "", priority: 99 });
+    if (made.id === undefined) return { error: made.error ?? "Could not create the system" };
+    instrumentId = made.id;
     const name = (target.name ?? "").trim();
     if (name) await db.update(instruments).set({ name }).where(eq(instruments.id, instrumentId));
   }

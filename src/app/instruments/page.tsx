@@ -12,6 +12,7 @@ import { getSystemLabels } from "@/lib/systemLabel";
 import { SYSTEM_STATES, filterSystems, systemOwnerName, systemState } from "@/lib/systemRegistry";
 import SystemRegistryList from "@/components/SystemRegistryList";
 import GroupToggle from "@/components/GroupToggle";
+import { NewSystemButton } from "@/components/NewSystemDialog";
 import { FacetStrip, Legend, PageHead, Toolbar } from "@/components/ui";
 import type { Tone } from "@/lib/tones";
 
@@ -113,6 +114,10 @@ export default async function SystemsPage({ searchParams }: {
           <>
             <a className="btn link" href="/assets">All units</a>
             <a className="btn link" href="/api/export/systems">Export systems</a>
+            {/* The list of every system on record is where somebody goes to
+                put one on it. It offers the same three lists the selection
+                bar does, so the form and the bar cannot disagree. */}
+            <NewSystemButton clients={bulk.clients} categories={bulk.categories} people={bulk.people} />
           </>
         } />
       <Toolbar

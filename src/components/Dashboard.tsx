@@ -1,16 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { boardAttention, boardTone } from "@/lib/boardRow";
-import PickOrAdd from "./PickOrAdd";
-import CatalogSelect from "./CatalogSelect";
-import { createInstrument } from "@/app/actions";
-import Dialog from "@/components/ui/Dialog";
+import NewSystemDialog from "./NewSystemDialog";
 import { DataTable, Dot, FacetStrip, Id, Legend, PageHead, Panel, Toolbar } from "@/components/ui";
 import type { DataRow } from "@/components/ui/DataTable";
-import { toast } from "@/components/ui/Toast";
 import { matchesQuery } from "@/lib/search";
 
 type StageDefLite = { name: string; bg: string; fg: string };
@@ -73,8 +69,6 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
   const [sortBy, setSortBy] = useState<"default" | "owner" | "id">(
     initial?.sort === "owner" || initial?.sort === "id" ? initial.sort : "default");
   const [showNew, setShowNew] = useState(false);
-  const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", lead: "" });
-  const [pending, startTransition] = useTransition();
 
   // The URL mirrors the filter state (debounced for typing), so the filtered
   // board is a link. replace, not push: filtering is not ten history entries.
@@ -191,20 +185,6 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
     gas: filtered.filter((i) => i.gasIssues.length > 0).length,
     shipped: filtered.filter((i) => i.stages.includes("Shipped") || i.stages.includes("Waiting to ship")).length,
     parked: data.filter((i) => !i.queueMine).length,
-  };
-
-  const submitNew = () => {
-    if (!draft.externalId.trim()) return;
-    startTransition(async () => {
-      const id = await createInstrument({
-        externalId: draft.externalId, client: draft.client, category: draft.category,
-        priority: parseInt(draft.priority) || 99, lead: draft.lead,
-      });
-      setShowNew(false);
-      toast({ message: `Created ${draft.externalId.trim()}` });
-      setDraft({ externalId: "", client: "", category: "", priority: "", lead: "" });
-      router.push(`/instruments/${id}`);
-    });
   };
 
   const toRow = (i: Row): DataRow => {
@@ -406,44 +386,8 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
       )}
 
       {showNew && (
-        <Dialog open onClose={() => setShowNew(false)} title="New instrument"
-          context="The system is named by the assets you add on its page."
-          footer={
-            <>
-              <span className="dialog-status" />
-              <button className="btn" onClick={() => setShowNew(false)} disabled={pending}>Cancel</button>
-              <button className="btn accent" onClick={submitNew} disabled={pending}>
-                {pending ? "Creating..." : "Create instrument"}
-              </button>
-            </>
-          }>
-          <div className="pf3" style={{ marginBottom: 8 }}>
-            <div><label>System ID *</label><input value={draft.externalId} onChange={(e) => setDraft({ ...draft, externalId: e.target.value })} placeholder="G-012" /></div>
-            <div>
-              <label>Client</label>
-              <PickOrAdd value={draft.client} options={clients} newLabel="+ New client..." placeholder="New client name"
-                onChange={(client) => setDraft({ ...draft, client })} />
-            </div>
-            <div><label>Priority</label><input value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} placeholder="11" /></div>
-          </div>
-          <div className="pf2" style={{ marginBottom: 8 }}>
-            <div>
-              <label>Category</label>
-              <CatalogSelect value={draft.category} options={categories} ariaLabel="System category"
-                onChange={(category) => setDraft({ ...draft, category })}
-                hint="Define system types in Settings → Catalog" />
-            </div>
-          </div>
-          {people.length > 0 && (
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span className="mut t-small">Lead:</span>
-              <select value={draft.lead} onChange={(e) => setDraft({ ...draft, lead: e.target.value })} className="t-small" style={{ width: "auto" }}>
-                <option value="">-</option>
-                {people.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-          )}
-        </Dialog>
+        <NewSystemDialog clients={clients} categories={categories} people={people}
+          onClose={() => setShowNew(false)} />
       )}
 
       <DataTable
