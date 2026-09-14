@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { and, eq, gte, isNull } from "drizzle-orm";
+import { and, eq, gte, isNotNull, isNull, notExists, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   agreements, clientAllowlist, expenseReports, expenses, orgs, payments, payroll,
@@ -87,6 +87,34 @@ export type SpendFigures = {
  * figures in the section that are theirs. One copy, so the badge an engineer
  * sees on Purchasing is the same number the overview adds up.
  */
+/**
+ * Which expense rows are overhead.
+ *
+ * "No work order" was the whole rule, and it was right until a claim could be
+ * filed against a client with no job (expense_reports.org_id). A plug bought
+ * for LabZen on a handshake has no work order, but it is not what it cost the
+ * shop to exist this month: it is what the shop absorbed for LabZen, and Job
+ * costing counts it there. Leaving it here as well would show the same $24 as
+ * two different kinds of money on two pages.
+ *
+ * So: no work order, AND not on a claim that names a client. A claim with no
+ * client is still overhead - Bill's plug for the shop is a running cost
+ * whether Bill bought it or the shop did; the desk records who is owed for
+ * it, the ledger what it cost. Those are two facts, not a double count.
+ *
+ * One predicate for the three readers (the ledger, the rail figure, and the
+ * payroll page's "other cost" column), so they cannot drift.
+ */
+export const overheadExpense = () => and(
+  isNull(expenses.workOrderId),
+  notExists(
+    db.select({ one: sql`1` }).from(expenseReports).where(and(
+      eq(expenseReports.id, expenses.reportId),
+      isNotNull(expenseReports.orgId),
+    )),
+  ),
+);
+
 export async function spendFigures(tenantOrgId: number | null): Promise<SpendFigures> {
   const [poRows, poLineRows, reportRows, reportExpenses] = await Promise.all([
     db.select().from(purchaseOrders).where(forTenant(purchaseOrders.tenantOrgId, tenantOrgId)),
@@ -183,7 +211,7 @@ export async function financeFigures(
       paidOutFigures(t, from),
       db.select().from(expenses)
         .where(and(
-          isNull(expenses.workOrderId),
+          overheadExpense(),
           forTenant(expenses.tenantOrgId, t),
           gte(expenses.incurredOn, from),
         )),
