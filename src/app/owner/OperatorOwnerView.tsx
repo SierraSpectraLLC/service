@@ -3,14 +3,14 @@ import { myTenantOrgId, type SessionUser } from "@/lib/authz";
 import { readTenant, visibleOrgs } from "@/lib/tenancy";
 import { brandForTenant } from "@/lib/brand";
 import { formatCents, formatDollars } from "@/lib/money";
-import { periodSpan } from "@/lib/finance";
+import { periodSpan, withPeriod } from "@/lib/finance";
 import { booksContext } from "@/lib/financeData";
 import { allInvoices, asStatementRow } from "@/lib/invoiceData";
 import { aging, invoiceView } from "@/lib/statement";
 import { coverageBoard } from "@/lib/pmPlanData";
 import { coverageRollup } from "@/lib/pmPlan";
 import { ladder } from "@/lib/chartPalette";
-import { bands, cashByMonth, lastMonths, topDebtors } from "@/lib/ownerCharts";
+import { bands, cashByMonth, lastMonths, runningCosts, topDebtors } from "@/lib/ownerCharts";
 import PositionLine from "@/components/PositionLine";
 import TrendChart from "@/components/charts/TrendChart";
 import SplitBar from "@/components/charts/SplitBar";
@@ -41,7 +41,8 @@ import { DataTable, Id, PageHead, Panel, Pill } from "@/components/ui";
  *     is two lines on ONE axis - the gap between them IS the collection lag,
  *     and a second y-scale would let that gap say whatever was convenient;
  *   - ageing and the pipeline are ordered bands of one whole, so they are
- *     stacked bars in a validated ordinal ramp;
+ *     stacked bars in a validated ordinal ramp, and so is the period's cost -
+ *     payroll and overhead are the two parts of "what it took to exist";
  *   - clients have no natural order, so the debtor chart is one series in one
  *     colour, its length carrying the only thing it knows.
  *
@@ -58,7 +59,7 @@ export default async function OperatorOwnerView({ user, periodParam }: {
   // The window, the permission and every figure, asked the one way. This
   // redirects a staff member who may not read the books, which is the same
   // thing /money does to them.
-  const { period, today, figures: fig } = await booksContext(user, periodParam);
+  const { period, today, seesPayroll, figures: fig } = await booksContext(user, periodParam);
   const tenant = readTenant(user);
   const [brand, invoices, orgRows] = await Promise.all([
     brandForTenant(myTenantOrgId(user)),
@@ -147,11 +148,25 @@ export default async function OperatorOwnerView({ user, periodParam }: {
   const collected = cash.map((m) => m.collectedCents);
   const pastDueShare = owed > 0 ? Math.round((mIn.pastDueCents / owed) * 100) : 0;
 
+  /*
+   * What it cost to run the shop this period, and what collecting left. The
+   * same two lines /money subtracts for its "this period" figure, read from the
+   * same booksContext, so the two pages cannot disagree about it. Payroll is
+   * null for a reader who may not see the register and stays ABSENT here - the
+   * bar loses a band and the copy says "before payroll", rather than a $0 line
+   * that would be a lie. Overhead is always filled in for a books reader; the
+   * fallback is for the type.
+   */
+  const costs = runningCosts(mIn.paidCents, mOut.payrollCents, mOut.overheadCents ?? 0);
+  const costBands = bands(costs.rows);
+  const costRamp = ladder(2);
+  const costLabel = costs.complete ? "payroll and overhead" : "overhead, before payroll";
+
   return (
     <div className="container wide">
       <PageHead
         title="Owner view"
-        sub={`${brand.operatorName} · what is owed, what is owed out, and what needs you · ${periodSpan(today, period)}`}
+        sub={`${brand.operatorName} · what is owed, what is going out, and what needs you · ${periodSpan(today, period)}`}
         /* The way back. These two pages are one person's two questions - what
            is the shop doing today, and how is the business doing - so each
            carries the door to the other and neither needs a nav word. */
@@ -199,6 +214,16 @@ export default async function OperatorOwnerView({ user, periodParam }: {
           sub="Money that actually arrived"
           spark={collected}
         />
+        <StatTile
+          /* The other half of the collected figure beside it. Not a state, so
+             no tone: a big payroll is not a problem, it is a business. The
+             verdict - whether the period paid for itself - is drawn below,
+             where the subtraction is shown rather than implied. */
+          label={period === "ytd" ? "Spent this year" : period === "quarter" ? "Spent this quarter" : "Spent this month"}
+          value={formatDollars(costs.totalCents)}
+          sub={costs.complete ? "Payroll and overhead" : "Overhead only - the register is not yours to read"}
+          href={withPeriod("/money/expenses", period)}
+        />
       </div>
 
       <Panel
@@ -212,6 +237,63 @@ export default async function OperatorOwnerView({ user, periodParam }: {
           height={210}
         />
       </Panel>
+
+      <div className="chart-pair">
+        <Panel
+          title="Going out"
+          hint={`What it costs to exist, whether or not a job happens: ${costLabel}, ${periodSpan(today, period)}.`}
+          empty={costs.complete
+            ? "Nothing has gone out to payroll or overhead this period."
+            : "No overhead has been recorded this period."}
+          actions={<>
+            {seesPayroll && (
+              <Link className="btn sm" href={withPeriod("/money/payroll", period)}>Payroll</Link>
+            )}
+            <Link className="btn sm" href={withPeriod("/money/expenses", period)}>Overhead</Link>
+          </>}
+        >
+          {costBands.shown.length > 0 && (
+            <SplitBar
+              slices={costBands.shown.map((b, i) => ({ ...b, color: costRamp[["payroll", "overhead"].indexOf(b.key)] ?? costRamp[i] }))}
+              totalCents={costBands.totalCents}
+              unit="spent this period"
+            />
+          )}
+        </Panel>
+
+        <Panel
+          title="After costs"
+          hint="Collected, less what it cost to be open while collecting it. Open orders and unpaid claims are not in here - they have not moved yet, and the position line above already counts them."
+        >
+          {/* The subtraction, performed and shown. A figure with nothing under
+              it is a figure somebody has to take on trust; the three lines
+              are its working. */}
+          <div className={`bignum${costs.leftCents < 0 ? " neg" : ""}`}>{formatCents(costs.leftCents)}</div>
+          <div className="biglab">
+            left {costs.complete ? "after payroll and overhead" : "after overhead, before payroll"}
+            {" · "}{periodSpan(today, period)}
+          </div>
+          <div className="rule" />
+          <div className="ledger">
+            <span className="grow">Collected<span className="sub">money that actually arrived</span></span>
+            <span className="money">{formatCents(mIn.paidCents)}</span>
+          </div>
+          {mOut.payrollCents !== null && (
+            <div className="ledger">
+              <span className="grow">Payroll<span className="sub">gross, employer costs included</span></span>
+              <span className="money">&minus;{formatCents(mOut.payrollCents)}</span>
+            </div>
+          )}
+          <div className="ledger">
+            <span className="grow">Overhead<span className="sub">runs whether or not anyone works</span></span>
+            <span className="money">&minus;{formatCents(mOut.overheadCents ?? 0)}</span>
+          </div>
+          <div className="ledger total">
+            <span className="grow">Left this period</span>
+            <span className={`money${costs.leftCents < 0 ? " neg" : ""}`}>{formatCents(costs.leftCents)}</span>
+          </div>
+        </Panel>
+      </div>
 
       <div className="chart-pair">
         <Panel

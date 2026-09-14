@@ -11,7 +11,7 @@
 // the business is paid the day it bills.
 import { describe, expect, it } from "vitest";
 import {
-  bands, cashByMonth, labelFits, lastMonths, monthLabel, niceTicks, topDebtors,
+  bands, cashByMonth, labelFits, lastMonths, monthLabel, niceTicks, runningCosts, topDebtors,
   type CashInvoice,
 } from "@/lib/ownerCharts";
 import { ladder, inkOn, RAMP, SERIES } from "@/lib/chartPalette";
@@ -205,5 +205,41 @@ describe("the palette rules", () => {
      */
     expect(SERIES.slice(0, 3)).toEqual(["#1D6396", "#E8613C", "#2E6B2E"]);
     expect(SERIES).toHaveLength(4);
+  });
+});
+
+describe("what it costs to run the shop", () => {
+  it("adds payroll and overhead, and subtracts them from what was collected", () => {
+    // The same arithmetic /money performs for its "this period" figure, so the
+    // owner view and the overview cannot say two different things about it.
+    const got = runningCosts(2_000_000, 1_200_000, 300_000);
+    expect(got.rows.map((r) => [r.key, r.cents])).toEqual([["payroll", 1_200_000], ["overhead", 300_000]]);
+    expect(got.totalCents).toBe(1_500_000);
+    expect(got.leftCents).toBe(500_000);
+    expect(got.complete).toBe(true);
+  });
+
+  it("goes negative when the month cost more than it collected", () => {
+    expect(runningCosts(100_000, 800_000, 50_000).leftCents).toBe(-750_000);
+  });
+
+  it("drops a withheld payroll rather than counting it as nothing", () => {
+    // A reader who may not see payroll gets a bar with one band and a flag
+    // saying the total is incomplete - not a $0 payroll band, which would be
+    // a lie, and not a silent total that leaves out the biggest cost.
+    const got = runningCosts(2_000_000, null, 300_000);
+    expect(got.rows.map((r) => r.key)).toEqual(["overhead"]);
+    expect(got.totalCents).toBe(300_000);
+    expect(got.leftCents).toBe(1_700_000);
+    expect(got.complete).toBe(false);
+  });
+
+  it("keeps an empty payroll as a band, so the page can say the register is empty", () => {
+    // Zero is a fact - nobody on the register this month - and bands() drops
+    // it from the drawn bar on its own; this keeps the fact distinct from
+    // "withheld".
+    const got = runningCosts(0, 0, 0);
+    expect(got.rows.map((r) => r.key)).toEqual(["payroll", "overhead"]);
+    expect(got.complete).toBe(true);
   });
 });
