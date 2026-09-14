@@ -30,6 +30,21 @@ export type SystemRegistryRow = {
   moreStages: number;
 };
 
+/**
+ * What the bar is holding, before Apply runs it.
+ *
+ * A field that is absent is left alone; a field present and empty CLEARS it
+ * ("(no type)"). The two are different instructions and a single string could
+ * not tell them apart, which is why the pickers stage into this rather than
+ * into their own values.
+ */
+export type BulkDraft = {
+  client?: string;
+  category?: string;
+  lead?: string;
+  ownerOrgId?: number | null;
+};
+
 /** What the selection bar may set across the ticked systems. */
 export type BulkOptions = {
   clients: string[];
@@ -63,12 +78,18 @@ const COLUMNS = ["System", "ID", "Model", "Location", "Lead", "Stage"];
  * through updateSystems, which runs each system through its own single-record
  * action - same check of who may edit it, same audit line.
  *
- * Owner asks twice. Every other picker here changes what a record SAYS and is
- * undone by picking again; ownership changes who can OPEN it, and thirty-six
+ * Nothing runs until Apply. The pickers STAGE - set the type and the lead and
+ * the client, read the sentence the bar builds back, then commit - because a
+ * picker that fires on choice makes three round trips out of one intention and
+ * gives no moment to notice that the wrong four rows are ticked. One Apply is
+ * one call, so a system gets one visit rather than three.
+ *
+ * Owner asks twice. Every other field here changes what a record SAYS and is
+ * undone by setting it again; ownership changes who can OPEN it, and thirty-six
  * systems handed to the wrong organization is thirty-six records read by
- * people who should not have seen them. So the second dialog names the
- * organization, the count, and the consequence in those words before
- * anything runs.
+ * people who should not have seen them. So when ownership is among the staged
+ * changes, Apply names the organization, the count, and the consequence in
+ * those words before anything runs.
  *
  * The dot carries the system's state and the page renders the Legend for it;
  * the row's one pill is its stage.
@@ -85,6 +106,7 @@ export default function SystemRegistryList({ rows, empty, groupBy = "category", 
 }) {
   const router = useRouter();
   const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [draft, setDraft] = useState<BulkDraft>({});
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -109,10 +131,10 @@ export default function SystemRegistryList({ rows, empty, groupBy = "category", 
       for (const r of list) { if (all) next.delete(r.id); else next.add(r.id); }
       return next;
     });
-  const clear = () => setPicked(new Set());
+  const clear = () => { setPicked(new Set()); setDraft({}); setError(""); };
 
-  /** One change across the ticked systems, with the outcome said in full. */
-  const apply = (patch: Parameters<typeof updateSystems>[1], said: string) => {
+  /** One call across the ticked systems, with the outcome said in full. */
+  const run = (patch: BulkDraft & { archived?: boolean }, did: string) => {
     const ids = [...picked];
     if (!ids.length) return;
     setError("");
@@ -124,11 +146,65 @@ export default function SystemRegistryList({ rows, empty, groupBy = "category", 
         const name = (id: number) => rows.find((r) => r.id === id)?.externalId ?? `#${id}`;
         setError(`${res.done} changed, ${bad.length} not: ${bad.map((f) => `${name(f.id)} - ${f.error}`).join("; ")}`);
       } else {
-        toast({ message: `${said} on ${res.done} system${res.done === 1 ? "" : "s"}` });
+        toast({ message: `${did} on ${res.done} system${res.done === 1 ? "" : "s"}` });
       }
       clear();
       router.refresh();
     });
+  };
+
+  /**
+   * A picker's choice, staged. "" is the picker's own "leave it alone"; "-" is
+   * the explicit clear, which stages the empty value rather than nothing.
+   */
+  const stage = (key: "client" | "category" | "lead", raw: string) =>
+    setDraft((d) => {
+      const next = { ...d };
+      if (raw === "") delete next[key]; else next[key] = raw === "-" ? "" : raw;
+      return next;
+    });
+  const stageOwner = (raw: string) =>
+    setDraft((d) => {
+      const next = { ...d };
+      if (raw === "") delete next.ownerOrgId;
+      else next.ownerOrgId = raw === "-" ? null : parseInt(raw, 10);
+      return next;
+    });
+  /** What a picker shows: "-" for a staged clear, the value, else nothing. */
+  const shown = (v: string | undefined) => (v === undefined ? "" : v === "" ? "-" : v);
+  const ownerShown = draft.ownerOrgId === undefined ? "" : draft.ownerOrgId === null ? "-" : String(draft.ownerOrgId);
+  const staged = Object.keys(draft).length > 0;
+  const ownerName = (id: number) => options?.owners.find((o) => o.id === id)?.name ?? "the organization";
+
+  /** The staged changes as a phrase, for the button, the toast and the log. */
+  const said = (() => {
+    const parts: string[] = [];
+    if (draft.client !== undefined) parts.push(draft.client ? `client ${draft.client}` : "no client");
+    if (draft.category !== undefined) parts.push(draft.category ? `type ${draft.category}` : "no type");
+    if (draft.lead !== undefined) parts.push(draft.lead ? `lead ${draft.lead}` : "no lead");
+    if (draft.ownerOrgId !== undefined) {
+      parts.push(draft.ownerOrgId === null ? "house-stewarded" : `owner ${ownerName(draft.ownerOrgId)}`);
+    }
+    return parts.join(", ");
+  })();
+
+  const apply = async () => {
+    if (!staged) return;
+    const n = picked.size;
+    const many = `${n} system${n === 1 ? "" : "s"}`;
+    // The one field that changes who can OPEN a record asks again, naming what
+    // it means - and it asks here, at the commit, where the count is final.
+    if (draft.ownerOrgId !== undefined) {
+      const name = draft.ownerOrgId === null ? null : ownerName(draft.ownerOrgId);
+      if (!(await confirmDialog({
+        title: name ? `Make ${name} the owner of ${many}?` : `Return ${many} to house stewardship?`,
+        body: name
+          ? `${name} will be able to open all ${n} - the record, its history and its files - and their editors decide who else gets access. Where a system's client label was naming the previous owner it follows to ${name}; a label somebody set by hand stays as it is. Each change is on the record's audit trail.`
+          : `Ownership goes back to the house. The organizations that hold a share keep it - this changes who OWNS the ${many}, not who has been given access.`,
+        action: name ? `Hand over ${many}` : `Return ${many}`,
+      }))) return;
+    }
+    run(draft, `Set ${said}`);
   };
 
   // Selection column first, then the dot, then the six columns: the system's
@@ -147,46 +223,29 @@ export default function SystemRegistryList({ rows, empty, groupBy = "category", 
         }}>
           <b className="t-body" style={{ color: "var(--t-info-fg)" }}>{picked.size} selected</b>
           <button className="btn sm" onClick={clear} disabled={pending}>Clear</button>
-          {/* Each picker applies on choice, as the record's own pickers do.
-              They read "Set ..." until chosen, so nothing looks preselected. */}
-          <select value="" aria-label="Set the client" disabled={pending} className="t-small" style={pickerStyle}
-            onChange={(e) => { if (e.target.value !== "") apply({ client: e.target.value === "-" ? "" : e.target.value }, e.target.value === "-" ? "Cleared the client" : `Set the client to ${e.target.value}`); }}>
+          {/* Each picker holds its choice until Apply. They read "Set ..."
+              while unset, so nothing looks staged that is not. */}
+          <select value={shown(draft.client)} aria-label="Set the client" disabled={pending}
+            className="t-small" style={pickerStyle} onChange={(e) => stage("client", e.target.value)}>
             <option value="">Set client...</option>
             {options.clients.map((c) => <option key={c} value={c}>{c}</option>)}
             <option value="-">(no client)</option>
           </select>
-          <select value="" aria-label="Set the type" disabled={pending} className="t-small" style={pickerStyle}
-            onChange={(e) => { if (e.target.value !== "") apply({ category: e.target.value === "-" ? "" : e.target.value }, e.target.value === "-" ? "Cleared the type" : `Set the type to ${e.target.value}`); }}>
+          <select value={shown(draft.category)} aria-label="Set the type" disabled={pending}
+            className="t-small" style={pickerStyle} onChange={(e) => stage("category", e.target.value)}>
             <option value="">Set type...</option>
             {options.categories.map((c) => <option key={c} value={c}>{c}</option>)}
             <option value="-">(no type)</option>
           </select>
-          <select value="" aria-label="Set the lead" disabled={pending} className="t-small" style={pickerStyle}
-            onChange={(e) => { if (e.target.value !== "") apply({ lead: e.target.value === "-" ? "" : e.target.value }, e.target.value === "-" ? "Cleared the lead" : `Assigned ${e.target.value}`); }}>
+          <select value={shown(draft.lead)} aria-label="Set the lead" disabled={pending}
+            className="t-small" style={pickerStyle} onChange={(e) => stage("lead", e.target.value)}>
             <option value="">Set lead...</option>
             {options.people.map((p) => <option key={p} value={p}>{p}</option>)}
             <option value="-">(unassigned)</option>
           </select>
           {options.owners.length > 0 && (
-            <select value="" aria-label="Set the owner" disabled={pending} className="t-small" style={pickerStyle}
-              onChange={async (e) => {
-                const v = e.target.value;
-                // Reset the picker first: the confirm is a round trip, and a
-                // cancelled one must not leave the box reading like a state.
-                e.target.value = "";
-                if (v === "") return;
-                const org = v === "-" ? null : options.owners.find((o) => String(o.id) === v) ?? null;
-                const n = picked.size;
-                const many = `${n} system${n === 1 ? "" : "s"}`;
-                if (!(await confirmDialog({
-                  title: org ? `Make ${org.name} the owner of ${many}?` : `Return ${many} to house stewardship?`,
-                  body: org
-                    ? `${org.name} will be able to open all ${n} - the record, its history and its files - and their editors decide who else gets access. Where a system's client label was naming the previous owner it follows to ${org.name}; a label somebody set by hand stays as it is. Each change is on the record's audit trail.`
-                    : `Ownership goes back to the house. The organizations that hold a share keep it - this changes who OWNS the ${many}, not who has been given access.`,
-                  action: org ? `Hand over ${many}` : `Return ${many}`,
-                }))) return;
-                apply({ ownerOrgId: org?.id ?? null }, org ? `Made ${org.name} the owner` : "Returned to house stewardship");
-              }}>
+            <select value={ownerShown} aria-label="Set the owner" disabled={pending}
+              className="t-small" style={pickerStyle} onChange={(e) => stageOwner(e.target.value)}>
               <option value="">Set owner...</option>
               {options.owners.map((o) => (
                 <option key={o.id} value={o.id}>{o.name}{o.kind === "provider" ? " (provider)" : ""}</option>
@@ -194,6 +253,13 @@ export default function SystemRegistryList({ rows, empty, groupBy = "category", 
               <option value="-">(house-stewarded)</option>
             </select>
           )}
+          <button className="btn sm accent" onClick={apply} disabled={pending || !staged}>
+            {pending ? "Applying..." : `Apply to ${picked.size}`}
+          </button>
+          {/* Archiving is not one of the staged fields: it is the one change
+              here that takes the systems off the working boards, so it keeps
+              its own button and its own confirm rather than hiding inside a
+              picker somebody set three changes ago. */}
           <button className="btn sm" style={{ marginLeft: "auto" }} disabled={pending}
             onClick={async () => {
               if (!(await confirmDialog({
@@ -201,10 +267,17 @@ export default function SystemRegistryList({ rows, empty, groupBy = "category", 
                 body: "They keep all their history and can be restored any time. They leave the dashboard, EOD, and sheet parity.",
                 action: `Archive ${picked.size}`,
               }))) return;
-              apply({ archived: true }, "Archived");
+              run({ archived: true }, "Archived");
             }}>
-            {pending ? "Working..." : `Archive ${picked.size}`}
+            Archive {picked.size}
           </button>
+          {/* The staged changes read back as a sentence, so Apply is pressed
+              on something somebody has seen rather than remembered. */}
+          {staged && (
+            <div className="t-meta" style={{ flexBasis: "100%", color: "var(--t-info-fg)" }}>
+              Apply will set {said} on {picked.size} system{picked.size === 1 ? "" : "s"}.
+            </div>
+          )}
         </div>
       )}
       {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}

@@ -77,6 +77,20 @@ describe("changing several systems at once", () => {
     expect((await systems()).map((s) => s.client)).toEqual(["GMI", "LabZen", "LabZen"]);
   }, SLOW);
 
+  it("takes several fields in one call - what one Apply sends", async () => {
+    const { updateSystems } = await import("@/app/actions");
+    const res = await updateSystems([21, 22], {
+      client: "LabZen", category: "LC-MS", lead: "Bill Reyes", ownerOrgId: LABZEN,
+    });
+    expect(res).toEqual({ done: 2, failures: [] });
+    const after = await systems();
+    expect(after.slice(0, 2).map((s) => [s.client, s.category, s.lead, s.ownerOrgId]))
+      .toEqual([["LabZen", "LC-MS", "Bill Reyes", LABZEN], ["LabZen", "LC-MS", "Bill Reyes", LABZEN]]);
+    // The client typed alongside the handover is the one that stands: owner
+    // goes first precisely so its label follow-through cannot overwrite it.
+    expect(after[2].client).toBe("");
+  }, SLOW);
+
   it("archives a batch, and clears a value with an empty string", async () => {
     const { updateSystems } = await import("@/app/actions");
     expect((await updateSystems([21, 22], { archived: true })).done).toBe(2);
