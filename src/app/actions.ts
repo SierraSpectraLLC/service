@@ -54,10 +54,7 @@ import {
   serializeKits, shapeOf, type IncludedKit,
 } from "@/lib/agreements";
 import { isOrgStage, stageOf, STAGE_WORD } from "@/lib/orgStage";
-import {
-  closeLine, moverOf, severityOf, woAcceptsWork, woMove, woOpen, WO_LABEL,
-  type Mover,
-} from "@/lib/workOrders";
+import { bookingSpan, checkBooking, closeLine, moverOf, severityOf, type Mover, WO_LABEL, woAcceptsWork, woLive, woMove, woOpen } from "@/lib/workOrders";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import {
   applyProcedures, applySystemProcedures, backfillProcedure, createPmTask, generateDuePmTasks,
@@ -6838,6 +6835,50 @@ export async function logPastWorkOrder(
 }
 
 /** The ask, the urgency and who has it. The house's to edit - it runs the job. */
+/**
+ * Put a job on the calendar: the first day on site and the last.
+ *
+ * The shop's call, because a booking is a van and an engineer committed to a
+ * day - the same reason naming an assignee is gated. A client asks for a week
+ * through their calendar or a note; this is the shop saying yes to it. The
+ * span lands on the calendar under Booked visits, linked to the job, and on
+ * the job's own page. A blank first day clears the booking.
+ *
+ * Gated on the job's OWN workspace, not only on which side the caller sits:
+ * mover is "house" for staff of any operator, and a job is one company's.
+ */
+export async function bookWorkOrder(
+  woId: number, data: { bookedOn: string; bookedUntil?: string },
+): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const found = await loadWorkOrder(u, woId);
+  if ("error" in found) return found;
+  const { wo, mover } = found;
+  if (mover !== "house" || !houseOf(u, wo.tenantOrgId)) return { error: "That is the service team's to book." };
+  if (!woLive(wo.state)) return { error: `${wo.number} is ${WO_LABEL[wo.state] ?? wo.state} - reopen it to book it.` };
+  const bookedOn = data.bookedOn.trim();
+  const bookedUntil = (data.bookedUntil ?? "").trim();
+  if (bookedOn) {
+    const wrong = checkBooking({ bookedOn, bookedUntil });
+    if (wrong) return { error: wrong };
+  }
+  const next = bookedOn ? { bookedOn, bookedUntil: bookedUntil === bookedOn ? "" : bookedUntil } : { bookedOn: "", bookedUntil: "" };
+  if (next.bookedOn === wo.bookedOn && next.bookedUntil === wo.bookedUntil) return {};
+  await db.update(workOrders).set(next).where(eq(workOrders.id, woId));
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId ?? undefined, assetId: wo.assetId ?? undefined,
+    entityType: "workorder", entityId: wo.number, tenantOrgId: wo.tenantOrgId,
+    action: next.bookedOn
+      ? `booked ${wo.number} for ${bookingSpan(next)}`
+      : `took ${wo.number} off the calendar (was ${bookingSpan(wo)})`,
+    field: "booked", oldValue: wo.bookedOn ? bookingSpan(wo) : "", newValue: next.bookedOn ? bookingSpan(next) : "",
+  });
+  revalidatePath(`/work/${woId}`);
+  revalidatePath("/work");
+  revalidatePath("/calendar");
+  return {};
+}
+
 export async function updateWorkOrder(
   woId: number, data: { title: string; body: string; severity: string; assignee: string },
 ): Promise<{ error?: string }> {

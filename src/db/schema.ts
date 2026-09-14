@@ -2336,6 +2336,17 @@ export const workOrders = pgTable("work_orders", {
   state: text("state").notNull().default("open"),
   assignee: text("assignee").notNull().default(""),
   openedOn: text("opened_on").notNull().default(""),  // YYYY-MM-DD in shop time
+  /**
+   * When the job is BOOKED: the first day on site and the last, YYYY-MM-DD in
+   * shop time, blank when nobody has put it on a day. A client asks for the
+   * week of the 19th and the shop commits to it here; the calendar draws the
+   * span under Booked visits, linked to the job, and the job's own page says
+   * the dates. One record for the request, the block and the work - before
+   * this the only way to hold a week was a calendar note that knew nothing
+   * about the job. Bounded in lib/workOrders.checkBooking.
+   */
+  bookedOn: text("booked_on").notNull().default(""),
+  bookedUntil: text("booked_until").notNull().default(""),
   // '' = raised by hand | 'issue' = the client said something is wrong |
   // 'pm_request' = the client asked for upkeep
   origin: text("origin").notNull().default(""),

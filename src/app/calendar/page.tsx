@@ -3,17 +3,19 @@ import { redirect } from "next/navigation";
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  agreements, appSettings, assets, calendarNotes, instruments, invoices, orgs, pmSchedules, quotes, tasks,
+  agreements, appSettings, assets, calendarNotes, instruments, invoices, orgs, pmSchedules, quotes, tasks, workOrders,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isPlatformStaff, isStaffRole, tenantViewer } from "@/lib/tenants";
-import { forTenant, maySeeOrgMoney, readTenant, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, maySeeOrgMoney, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { woLive } from "@/lib/workOrders";
 import { assembleEvents, monthGrid, monthOf, monthTitle, shiftMonth } from "@/lib/calendar";
 import { clientCalendarInputs, forClient } from "@/lib/clientCalendarData";
 import { shopToday } from "@/lib/shopday";
 import CalendarBoard from "@/components/CalendarBoard";
 import CalendarFeedCard from "@/components/CalendarFeedCard";
 import ClientCalendarActions from "@/components/ClientCalendarActions";
+import CalendarNoteButton from "@/components/CalendarNoteButton";
 import { PageHead } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -50,7 +52,7 @@ export default async function CalendarPage({ searchParams }: {
 
   if (!staff) return clientCalendar({ user, ym, weeks, from, to, today });
 
-  const [schedRows, taskRows, quoteRows, invoiceRows, agreementRows, orgRows, instRows, assetRows, settings, noteRows] =
+  const [schedRows, taskRows, quoteRows, invoiceRows, agreementRows, orgRows, instRows, assetRows, settings, noteRows, bookedRows, ownOrgs] =
     await Promise.all([
       db.select().from(pmSchedules).where(forTenant(pmSchedules.tenantOrgId, t)),
       // Dated open tasks; a PM task's schedule already speaks for it.
@@ -70,6 +72,16 @@ export default async function CalendarPage({ searchParams }: {
          exist - it is the fact that stops a van being sent to a locked door,
          and it is only useful to the shop if the shop can see it. */
       db.select().from(calendarNotes).where(forTenant(calendarNotes.tenantOrgId, t)),
+      /* Jobs somebody has put on a day. Read as booked visits: to the
+         calendar an engineer on site is one fact whether a PM schedule or a
+         work order sent them. Settled jobs drop off by themselves. */
+      db.select({
+        id: workOrders.id, number: workOrders.number, title: workOrders.title, state: workOrders.state,
+        bookedOn: workOrders.bookedOn, bookedUntil: workOrders.bookedUntil,
+        instrumentId: workOrders.instrumentId, orgId: workOrders.orgId,
+      }).from(workOrders).where(and(forTenant(workOrders.tenantOrgId, t), ne(workOrders.bookedOn, ""))),
+      // The companies a note can be about, for the shop's own note form.
+      visibleOrgs(user),
     ]);
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
   const sysLabel = new Map(instRows.map((i) => [i.id, i.externalId]));
@@ -102,6 +114,11 @@ export default async function CalendarPage({ searchParams }: {
       billDescription: a.billDescription, billDayOfMonth: a.billDayOfMonth,
       billLeadDays: a.billLeadDays, billNextOn: a.billNextOn, billLastOn: a.billLastOn,
     })),
+    bookings: bookedRows.filter((w) => woLive(w.state)).map((w) => ({
+      id: w.id, number: w.number, title: w.title, bookedOn: w.bookedOn, bookedUntil: w.bookedUntil,
+      system: w.instrumentId === null ? "" : (sysLabel.get(w.instrumentId) ?? ""),
+      orgName: w.orgId === null ? "" : (orgName.get(w.orgId) ?? ""),
+    })),
     notes: noteRows.map((x) => ({
       id: x.id, onDate: x.onDate, endsOn: x.endsOn, title: x.title,
       // Whose it is, because on the shop's calendar that is the fact: "shut
@@ -116,7 +133,12 @@ export default async function CalendarPage({ searchParams }: {
         title="Calendar"
         sub="Every dated fact in one place: booked visits, maintenance due, tasks, money, and what clients have told us about their own year."
         actions={
-          <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            {/* The shop's own note - a shutdown week at a client, a holiday,
+                a delivery. Clients had the button on their calendar and the
+                shop, which reads every note, had no way to write one. */}
+            <CalendarNoteButton today={today} month={ym}
+              orgs={ownOrgs.filter((o) => o.kind === "client").map((o) => ({ id: o.id, name: o.name }))} />
             <Link className="btn sm" href={`/calendar?m=${shiftMonth(ym, -1)}`} aria-label="Previous month">←</Link>
             <b className="t-body" style={{ minWidth: 110, textAlign: "center" }}>{monthTitle(ym)}</b>
             <Link className="btn sm" href={`/calendar?m=${shiftMonth(ym, 1)}`} aria-label="Next month">→</Link>

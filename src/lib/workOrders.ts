@@ -19,6 +19,8 @@
 import { addDays } from "@/lib/pm";
 import type { Tone } from "@/lib/tones";
 
+import { daysBetween, isDay } from "@/lib/calendarNotes";
+
 export const WO_STATES = ["open", "active", "waiting", "resolved", "closed", "cancelled"] as const;
 export type WoState = (typeof WO_STATES)[number];
 
@@ -309,3 +311,45 @@ export function closeLine(
  * because "I forgot to log Tuesday" arrives after the work is done, not before.
  */
 export const woAcceptsWork = (state: string) => woLive(state);
+
+/**
+ * How long one booking may run. Sixty days, the same bound a calendar note
+ * has and for the same reason: a booking is drawn on every day it covers, and
+ * a typo'd year would paint a whole calendar with one job.
+ */
+export const BOOKING_MAX_DAYS = 60;
+
+export type Booking = { bookedOn: string; bookedUntil?: string };
+
+/**
+ * What is wrong with a booking, or null.
+ *
+ * A first day is required and has to exist (Date.parse rolls Feb 31st into
+ * March; lib/calendarNotes.isDay does not). The last day is optional - one
+ * day on site is the common case - and when given cannot precede the first.
+ * A booking in the past is allowed: jobs get written up after the fact, and
+ * "we were there the week of the 5th" is worth having on the calendar.
+ */
+export function checkBooking(b: Booking): string | null {
+  if (!isDay(b.bookedOn)) return "Pick the first day on site";
+  const until = (b.bookedUntil ?? "").trim();
+  if (until) {
+    if (!isDay(until)) return "That last day is not a date";
+    if (until < b.bookedOn) return "It cannot end before it starts";
+    if (daysBetween(b.bookedOn, until) > BOOKING_MAX_DAYS) {
+      return `A booking can cover at most ${BOOKING_MAX_DAYS} days - split a longer job up`;
+    }
+  }
+  return null;
+}
+
+/** "Oct 19" or "Oct 19 - Oct 23": the span, for a hero stat or a line. */
+export function bookingSpan(b: Booking): string {
+  const day = (iso: string) => {
+    const [, m, d] = iso.split("-").map(Number);
+    const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${MONTHS[m - 1] ?? "?"} ${d}`;
+  };
+  const until = (b.bookedUntil ?? "").trim();
+  return until && until !== b.bookedOn ? `${day(b.bookedOn)} - ${day(until)}` : day(b.bookedOn);
+}

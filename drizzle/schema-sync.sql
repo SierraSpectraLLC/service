@@ -4430,3 +4430,9 @@ END $$;
 -- record, and a shop that talks elsewhere gets icons and cards it never opens.
 -- Nothing posted is touched - it comes back with the switch. See lib/flags.
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "discussions_enabled" boolean NOT NULL DEFAULT false;
+
+-- A work order booked onto days: first day on site and last. The calendar
+-- draws the span under Booked visits, linked to the job. See the columns in
+-- schema.ts and lib/workOrders.checkBooking for the bound on the span.
+ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "booked_on" text NOT NULL DEFAULT '';
+ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "booked_until" text NOT NULL DEFAULT '';

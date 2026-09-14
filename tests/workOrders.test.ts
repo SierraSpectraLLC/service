@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  ageDays, closeLine, moverOf, nextWoNumber, severityOf, sortWorkOrders, targetDay, woAcceptsWork,
-  woLate, woLine, woLive, woMove, woMoves, woOpen, woSettled, WO_STATES,
+  ageDays, bookingSpan, checkBooking, closeLine, moverOf, nextWoNumber, severityOf, sortWorkOrders, targetDay,
+  woAcceptsWork, woLate, woLine, woLive, woMove, woMoves, woOpen, woSettled, BOOKING_MAX_DAYS, WO_STATES,
 } from "@/lib/workOrders";
 
 const wo = (over: Partial<{
@@ -245,5 +245,30 @@ describe("platform staff are the house everywhere", () => {
 
   it("moves an unstamped one too", () => {
     expect(moverOf(platform, { tenantOrgId: null, orgId: null }, null)).toBe("house");
+  });
+});
+
+describe("booking a job onto days", () => {
+  it("takes a first day alone, or a first and a last", () => {
+    expect(checkBooking({ bookedOn: "2026-10-19" })).toBeNull();
+    expect(checkBooking({ bookedOn: "2026-10-19", bookedUntil: "2026-10-23" })).toBeNull();
+    // A job written up after the fact is still worth having on the calendar.
+    expect(checkBooking({ bookedOn: "2025-01-06", bookedUntil: "2025-01-08" })).toBeNull();
+  });
+  it("refuses no day, a day that does not exist, and a span running backwards", () => {
+    expect(checkBooking({ bookedOn: "" })).toBe("Pick the first day on site");
+    expect(checkBooking({ bookedOn: "2026-02-31" })).toBe("Pick the first day on site");
+    expect(checkBooking({ bookedOn: "2026-10-19", bookedUntil: "2026-10-1" })).toBe("That last day is not a date");
+    expect(checkBooking({ bookedOn: "2026-10-19", bookedUntil: "2026-10-18" })).toBe("It cannot end before it starts");
+  });
+  it("bounds the span, so a typo'd year cannot paint a whole calendar", () => {
+    expect(checkBooking({ bookedOn: "2026-10-19", bookedUntil: "2026-12-18" })).toBeNull();
+    expect(checkBooking({ bookedOn: "2026-10-19", bookedUntil: "2027-10-19" }))
+      .toBe(`A booking can cover at most ${BOOKING_MAX_DAYS} days - split a longer job up`);
+  });
+  it("says the span the way a person would", () => {
+    expect(bookingSpan({ bookedOn: "2026-10-19", bookedUntil: "2026-10-23" })).toBe("Oct 19 - Oct 23");
+    expect(bookingSpan({ bookedOn: "2026-10-19", bookedUntil: "" })).toBe("Oct 19");
+    expect(bookingSpan({ bookedOn: "2026-10-19", bookedUntil: "2026-10-19" })).toBe("Oct 19");
   });
 });

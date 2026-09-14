@@ -231,3 +231,28 @@ describe("the feed", () => {
     ], "Sierra Spectra", "https://x.test")).toContain(uid!);
   });
 });
+
+describe("a booked job", () => {
+  const booking = {
+    id: 42, number: "WO-1042", title: "Quattro rebuild", bookedOn: "2026-10-19", bookedUntil: "2026-10-23",
+    system: "Q-ULT", orgName: "UCSF",
+  };
+  it("is a booked visit on every day of its span, linked to the job", () => {
+    const ev = assembleEvents({ ...base, bookings: [booking] }, "2026-10-01", "2026-10-31", T);
+    expect(ev.map((e) => e.date)).toEqual(["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23"]);
+    expect(ev.every((e) => e.kind === "visit" && e.href === "/work/42")).toBe(true);
+    expect(ev[0].label).toBe("WO-1042 @ Q-ULT - UCSF: Quattro rebuild");
+  });
+  it("is one day when no last day is given, and is never late-toned", () => {
+    const ev = assembleEvents({ ...base, bookings: [{ ...booking, bookedUntil: "", bookedOn: "2026-08-03" }] },
+      "2026-08-01", "2026-08-31", T);
+    expect(ev.map((e) => e.date)).toEqual(["2026-08-03"]);
+    // Behind today, and still calm: a booking that passed happened.
+    expect(ev[0].tone).toBe("info");
+  });
+  it("is clipped to the month being drawn", () => {
+    const ev = assembleEvents({ ...base, bookings: [{ ...booking, bookedOn: "2026-09-29", bookedUntil: "2026-10-02" }] },
+      "2026-10-01", "2026-10-31", T);
+    expect(ev.map((e) => e.date)).toEqual(["2026-10-01", "2026-10-02"]);
+  });
+});
