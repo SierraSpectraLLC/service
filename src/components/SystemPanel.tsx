@@ -51,6 +51,31 @@ function LeadSelect({ instrumentId, lead, people }: { instrumentId: number; lead
   );
 }
 
+/**
+ * The system's type, set from beside its name rather than from inside Edit.
+ *
+ * It decides which section the system lists under and which upkeep and gases
+ * the catalog brings it, so it is the fact most often missing on a record and
+ * the one least worth a dialog. Same shape as the lead: pick, and it is saved.
+ */
+function CategorySelect({ instrumentId, category, categories }: { instrumentId: number; category: string; categories: string[] }) {
+  const [, startTransition] = useTransition();
+  const [value, setOptimistic] = useOptimistic(category, (_cur: string, next: string) => next);
+  const options = [...new Set([...categories, ...(value ? [value] : [])])].filter(Boolean).sort((a, b) => a.localeCompare(b));
+  return (
+    <select value={value} aria-label="System type"
+      onChange={(e) => startTransition(async () => {
+        setOptimistic(e.target.value);
+        const res = await updateInstrument(instrumentId, { category: e.target.value });
+        if (res?.error) toast({ message: res.error });
+      })}
+      className="t-small" style={{ width: "auto", fontWeight: 700, color: value ? "var(--navy)" : "var(--mut)" }}>
+      <option value="">-</option>
+      {options.map((c) => <option key={c} value={c}>{c}</option>)}
+    </select>
+  );
+}
+
 export default function SystemPanel({ instrument, label, clients, categories, stages, stageDefs, gases, knownGases, people, shares, orgOptions, accessRequests, ownerOrgId, canEdit, isStaff, isOwner, canSell, gxpStanding, blockOrgs = [], blockHolder = "" }: {
   // `label` is composed from the system's assets - see lib/systemLabel.ts.
   instrument: Inst; label: string; clients: string[]; categories: string[];
@@ -143,7 +168,9 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                 <div style={{ fontSize: 19, fontWeight: 700, color: "var(--navy)" }}>
                   {label || <span className="mut" style={{ fontWeight: 400, fontSize: 16 }}>No assets listed yet</span>}
                 </div>
-                {instrument.category && (
+                {/* Editors set the type on the line below; the pill is for
+                    readers, who get the fact without the control. */}
+                {instrument.category && !canEdit && (
                   <span className="pill info">{instrument.category}</span>
                 )}
                 {/* The one-glance answer a regulated system owes: qualified or
@@ -160,7 +187,16 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                 )}
               </div>
               {instrument.location && <div className="mut t-small" style={{ marginTop: 2 }}>{instrument.location}</div>}
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                {canEdit && (
+                  <>
+                    <span className="mut t-small">Type:</span>
+                    <CategorySelect instrumentId={instrument.id} category={instrument.category} categories={categories} />
+                    {!instrument.category && (
+                      <span className="mut t-meta">decides which section it lists under, and its upkeep</span>
+                    )}
+                  </>
+                )}
                 <span className="mut t-small">Lead:</span>
                 {canEdit
                   ? <LeadSelect instrumentId={instrument.id} lead={instrument.lead} people={people} />
