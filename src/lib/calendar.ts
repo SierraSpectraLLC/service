@@ -90,6 +90,18 @@ export type CalendarInputs = {
   quotes: { id: number; number: string; title: string; status: string; expiresOn: string }[];
   invoices: { id: number; number: string; status: string; dueOn: string; orgName: string }[];
   agreements: ({ id: number; number: string; title: string; orgId: number; orgName: string } & RecurringTerms)[];
+  /**
+   * Live work orders somebody has put on a day. Drawn as booked visits, one
+   * per day of the span, linked to the job - the request, the block on the
+   * calendar and the work are one record.
+   */
+  bookings?: {
+    id: number; number: string; title: string; bookedOn: string; bookedUntil: string;
+    /** The machine's tag, or "" for a job on nothing in particular. */
+    system: string;
+    /** Whose job, for the shop's calendar - "" on the client's own. */
+    orgName: string;
+  }[];
   /** Written by hand rather than derived - see the header. */
   notes?: {
     id: number; onDate: string; endsOn: string; title: string;
@@ -202,6 +214,22 @@ export function assembleEvents(inp: CalendarInputs, from: string, to: string, to
       out.push({
         date: c.on, kind: "retainer", href: "/money/contracts",
         label: `${label} cycle${a.orgName ? ` - ${a.orgName}` : ""}`, tone: "accent",
+      });
+    }
+  }
+
+  /*
+   * Booked jobs, one event per day of the span, under the same heading as a
+   * booked maintenance visit - to the calendar they are the same fact, an
+   * engineer on site that day. Not late-toned: a booking behind us happened,
+   * and the job's own state says whether it is finished.
+   */
+  for (const b of inp.bookings ?? []) {
+    for (const day of noteDays({ onDate: b.bookedOn, endsOn: b.bookedUntil }, from, to)) {
+      out.push({
+        date: day, kind: "visit", href: `/work/${b.id}`,
+        label: `${b.number}${b.system ? ` @ ${b.system}` : ""}${b.orgName ? ` - ${b.orgName}` : ""}: ${b.title}`,
+        tone: "info",
       });
     }
   }

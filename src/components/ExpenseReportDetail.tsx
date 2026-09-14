@@ -5,13 +5,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
-  amendExpenseReport, approveExpenseAllowance, attachPoolExpenses, deleteExpenseReport,
-  editReportExpense, logMyExpense,
-  nameExpenseReport, payExpenseReport, removeReportExpense, returnExpenseReport, setReportWorkOrder,
-  submitDraftReport, withdrawExpenseReport,
+  amendExpenseReport, approveExpenseAllowance, attachPoolExpenses, deleteExpenseReport, editReportExpense, logMyExpense, nameExpenseReport, payExpenseReport, removeReportExpense, returnExpenseReport, setReportTarget, submitDraftReport, withdrawExpenseReport,
 } from "@/app/actions";
 import {
-  REPORT_LABEL, REPORT_TONE, checkReportTitle, editableReport, reportSpan, reportTotalCents,
+  checkReportTitle, editableReport, NO_JOB, parseReportTarget, REPORT_LABEL, REPORT_TONE, reportSpan, reportTargetValue, reportTotalCents,
 } from "@/lib/expenseReports";
 import {
   isPerDiemKind, perDiemOffer, policyConfigured, type ExpensePolicy,
@@ -58,7 +55,7 @@ export type TripSite = { siteId: number; name: string; miles: number | null; est
  * the same blob store the app's other files use.
  */
 export default function ExpenseReportDetail({
-  report, rows, mayWork, mine, isOwner, adminsPeople, today, categories, workOrders, pool,
+  report, rows, mayWork, mine, isOwner, adminsPeople, today, categories, workOrders, clients = [], pool,
   policy, tripSites, defaultSiteId,
 }: {
   report: {
@@ -69,6 +66,9 @@ export default function ExpenseReportDetail({
     /** The job this claim is for. Null is "no job - overhead", a real answer. */
     workOrderId: number | null;
     workOrderNumber: string;
+    /** The client it is for when it names no job - absorbed on their account. */
+    orgId: number | null;
+    orgName: string;
     /**
      * The other half of a correction, read from either side so neither claim
      * is ever read alone: the settled report this one amends, and the
@@ -99,6 +99,8 @@ export default function ExpenseReportDetail({
   today: string;
   categories: string[];
   workOrders: { id: number; label: string }[];
+  /** Our clients, for a claim with no job that is still somebody's account. */
+  clients?: { id: number; name: string }[];
   /** The claimant's unclaimed expenses, offered for pulling onto an open report. */
   pool: { id: number; kind: string; description: string; amountCents: number; incurredOn: string }[];
   /** The shop's travel rules. All zeros = the rulebook is off and nothing below shows. */
@@ -154,8 +156,9 @@ export default function ExpenseReportDetail({
   /* The job, as the picker holds it: "" is overhead here rather than an
      unanswered field, because the report already HAS an answer - it was made
      to give one at creation - and this control is only ever changing it. */
-  const [job, setJob] = useState(report.workOrderId === null ? "" : String(report.workOrderId));
-  const jobChanged = (report.workOrderId === null ? "" : String(report.workOrderId)) !== job;
+  const filed = reportTargetValue(report);
+  const [job, setJob] = useState(filed);
+  const jobChanged = filed !== job;
 
   /* Greyed on the same rule the action refuses on - a report's name is no
      longer optional, so "save" with it emptied would be a round trip to a
@@ -355,25 +358,39 @@ export default function ExpenseReportDetail({
               </div>
             )}
 
-            <label style={{ marginTop: 8 }}>The job it is for</label>
-            {/* Open or closed alike, and "no job" is a real answer rather than
-                an unset field - the same distinction the create form draws. */}
+            <label style={{ marginTop: 8 }}>What it is for</label>
+            {/* Three answers - a job, a client with no job, or overhead - and
+                the report already has one, so this only ever changes it. Same
+                encoding as the create form: lib/expenseReports.reportTargetValue. */}
             <select value={job} aria-label="Work order" disabled={pending}
               onChange={(e) => setJob(e.target.value)}>
-              <option value="">No job - overhead</option>
-              {workOrders.map((w) => <option key={w.id} value={String(w.id)}>{w.label}</option>)}
+              <option value={NO_JOB}>No job - overhead</option>
+              {workOrders.length > 0 && (
+                <optgroup label="A job">
+                  {workOrders.map((w) => <option key={w.id} value={`wo:${w.id}`}>{w.label}</option>)}
+                </optgroup>
+              )}
+              {clients.length > 0 && (
+                <optgroup label="A client, no job - absorbed on their account">
+                  {clients.map((c) => <option key={c.id} value={`org:${c.id}`}>{c.name}</option>)}
+                </optgroup>
+              )}
             </select>
             {jobChanged && (
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 <button className="btn sm accent" disabled={pending}
-                  onClick={() => act(
-                    () => setReportWorkOrder(report.id, job ? parseInt(job, 10) : null),
-                    job ? "Moved onto that job" : "Filed as overhead - no job",
-                  )}>
-                  Save the job
+                  onClick={() => {
+                    const target = parseReportTarget(job) ?? { workOrderId: null, orgId: null };
+                    act(
+                      () => setReportTarget(report.id, target),
+                      target.workOrderId !== null ? "Moved onto that job"
+                        : target.orgId !== null ? "Filed under that client - no job"
+                        : "Filed as overhead - no job",
+                    );
+                  }}>
+                  Save
                 </button>
-                <button className="btn sm" disabled={pending}
-                  onClick={() => setJob(report.workOrderId === null ? "" : String(report.workOrderId))}>
+                <button className="btn sm" disabled={pending} onClick={() => setJob(filed)}>
                   Discard
                 </button>
               </div>
@@ -385,7 +402,9 @@ export default function ExpenseReportDetail({
             <div className="mut t-small" style={{ marginTop: 4 }}>
               {report.workOrderNumber
                 ? <>Filed against <a href={`/work/${report.workOrderId}`}>{report.workOrderNumber}</a></>
-                : "Overhead - no job caused this"}
+                : report.orgName
+                  ? `For ${report.orgName} - no job; absorbed on their account`
+                  : "Overhead - no job caused this"}
             </div>
           </>
         )}
@@ -632,21 +651,18 @@ export default function ExpenseReportDetail({
         )}
       </div>
 
-      {/* The accountant's copy, under the actions because it is what you do
-          WITH a claim rather than to it. Three formats because they are not a
-          superset of one another: the PDF is what gets attached to an email
-          (the claim, then its receipts on the pages after it), the CSV is what
-          gets imported, and the packet is the CSV plus the receipt files named
-          to match its rows. Plain links - the browser downloads them the way
-          it downloads everything else, and they work on a phone. */}
-      <Panel title="Send it to the bookkeeper"
-        hint="The claim and the paper behind it, in whichever shape your accountant asks for.">
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <a className="btn sm" href={`/api/export/report/${report.id}?format=pdf`}>PDF with receipts</a>
-          <a className="btn sm" href={`/api/export/report/${report.id}?format=csv`}>CSV</a>
-          <a className="btn sm" href={`/api/export/report/${report.id}?format=zip`}>CSV + receipt files</a>
-        </div>
-      </Panel>
+      {/* The accountant's copy, as one quiet line under everything: three
+          formats because they are not a superset of one another - the PDF is
+          what gets attached to an email (the claim, then its receipts), the
+          CSV is what gets imported, the packet is the CSV plus the receipt
+          files named to match its rows. It was a card of its own, and a card
+          for a thing done once per claim, after everything else, is clutter
+          on every visit before that. Plain links, which work on a phone. */}
+      <div className="mut t-meta" style={{ marginTop: 12 }}>
+        Bookkeeper: <a href={`/api/export/report/${report.id}?format=pdf`}>PDF with receipts</a>
+        {" · "}<a href={`/api/export/report/${report.id}?format=csv`}>CSV</a>
+        {" · "}<a href={`/api/export/report/${report.id}?format=zip`}>CSV + receipt files</a>
+      </div>
 
       {editing && (
         <Dialog open onClose={() => setEditing(null)} size="sm"

@@ -13,6 +13,7 @@ import { asStatementRow, billingContext, draftSourceFor, invoiceById, qtyOf } fr
 import { invoiceView, METHOD_LABEL, STANDING_LABEL, STANDING_TONE } from "@/lib/statement";
 import InvoiceActions from "@/components/InvoiceActions";
 import InvoiceLineList from "@/components/InvoiceLineList";
+import InvoiceLetterCard from "@/components/InvoiceLetterCard";
 import InvoiceCollections from "@/components/InvoiceCollections";
 import { Id, Panel, Pill, RecordHero } from "@/components/ui";
 import type { HeroStat } from "@/components/ui";
@@ -95,7 +96,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
       <RecordHero
         eyebrow={<>Invoice · {org?.name ?? "client gone"}</>}
         id={row.number}
-        title={wo ? wo.title : row.note || "Invoice"}
+        title={row.title || (wo ? wo.title : "Invoice")}
         meta={
           <>
             {wo && <><Link href={`/work/${wo.id}`}><Id>{wo.number}</Id></Link> · </>}
@@ -135,6 +136,9 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           <div className="t-body">{warning}</div>
         </div>
       )}
+
+      <InvoiceLetterCard invoiceId={id} status={row.status}
+        letter={{ title: row.title, poNumber: row.poNumber, note: row.note }} />
 
       <InvoiceLineList
         editable={row.status === "draft"}

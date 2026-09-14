@@ -87,6 +87,9 @@ export default async function SystemsPage({ searchParams }: {
   const shown = filterSystems(items, { q, state });
   const countFor = (s: string) => items.filter((i) => i.state === s).length;
   const onRecord = items.filter((i) => i.state !== "archived").length;
+  // Said in the subtitle, because they are on record and not on the page:
+  // a count that quietly excludes seven machines reads as seven machines gone.
+  const former = countFor("former");
 
   // Facet hrefs keep the search and the grouping in place - facet state is the URL.
   const href = (over: { state?: string; group?: string }) => {
@@ -109,7 +112,7 @@ export default async function SystemsPage({ searchParams }: {
       <PageHead
         crumb={<>Operations › <b>Systems</b></>}
         title="Systems"
-        sub={`${onRecord} system${onRecord === 1 ? "" : "s"} on record${countFor("archived") ? `, ${countFor("archived")} archived` : ""}`}
+        sub={`${onRecord} system${onRecord === 1 ? "" : "s"} on record${former ? `, ${former} with former clients` : ""}${countFor("archived") ? `, ${countFor("archived")} archived` : ""}`}
         actions={
           <>
             <a className="btn link" href="/assets">All units</a>

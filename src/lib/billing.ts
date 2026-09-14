@@ -368,3 +368,30 @@ export function jobCost(input: {
     marginPct: billed > 0 ? Math.round((margin / billed) * 100) : 0,
   };
 }
+
+/**
+ * A line's quantity as the paper says it: "1 mo", "4.5 h", "3", or nothing
+ * for one of a thing you count. The unit is the line's own where it has one;
+ * a labor or travel line written before units existed still reads in hours,
+ * which is what it always meant. One function, so the editor, the client's
+ * copy, the print and the portal say the same thing.
+ */
+export function qtyUnitLabel(l: { qty: number; unit?: string; kind?: string }): string {
+  const unit = (l.unit ?? "").trim() || (l.kind === "labor" || l.kind === "travel" ? "h" : "");
+  if (unit) return `${l.qty} ${unit}`;
+  return l.qty === 1 ? "" : `${l.qty}`;
+}
+
+/**
+ * What somebody typed over that label, read back: "1 mo" is a month of it,
+ * "4.5" is four and a half of whatever it was, "2 x mo" is tolerated. Null
+ * for anything that is not a quantity - the editor keeps the old value rather
+ * than guessing, the same posture lib/money.parseMoney takes.
+ */
+export function parseQtyUnit(text: string): { qty: number; unit: string } | null {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(?:[x×]\s*)?([A-Za-z]{0,12})\s*$/.exec(text);
+  if (!m) return null;
+  const qty = Number(m[1]);
+  if (!Number.isFinite(qty) || qty <= 0 || qty > 100000) return null;
+  return { qty, unit: m[2] };
+}

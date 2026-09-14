@@ -2336,6 +2336,17 @@ export const workOrders = pgTable("work_orders", {
   state: text("state").notNull().default("open"),
   assignee: text("assignee").notNull().default(""),
   openedOn: text("opened_on").notNull().default(""),  // YYYY-MM-DD in shop time
+  /**
+   * When the job is BOOKED: the first day on site and the last, YYYY-MM-DD in
+   * shop time, blank when nobody has put it on a day. A client asks for the
+   * week of the 19th and the shop commits to it here; the calendar draws the
+   * span under Booked visits, linked to the job, and the job's own page says
+   * the dates. One record for the request, the block and the work - before
+   * this the only way to hold a week was a calendar note that knew nothing
+   * about the job. Bounded in lib/workOrders.checkBooking.
+   */
+  bookedOn: text("booked_on").notNull().default(""),
+  bookedUntil: text("booked_until").notNull().default(""),
   // '' = raised by hand | 'issue' = the client said something is wrong |
   // 'pm_request' = the client asked for upkeep
   origin: text("origin").notNull().default(""),
@@ -3446,6 +3457,17 @@ export const expenseReports = pgTable("expense_reports", {
    * records which. Set null on delete, because the claim outlives the order.
    */
   workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
+  /**
+   * The client this claim is for when there is NO job - the third answer.
+   *
+   * A shop with an open, month-to-month partnership buys the odd part for
+   * that client and eats it; there is no work order because there is no
+   * formal job, and "overhead" loses the one fact worth keeping, which is
+   * whose account the money went to. Set only while work_order_id is null:
+   * a job already names its client, and one fact stored twice is one fact
+   * that drifts. Set null on delete, as the job is.
+   */
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "set null" }),
   status: text("status").notNull().default("submitted"),
   /**
    * THE REPORT THIS ONE CORRECTS.
@@ -3523,6 +3545,15 @@ export const invoices = pgTable("invoices", {
   issuedOn: text("issued_on").notNull().default(""),   // YYYY-MM-DD, set at send
   dueOn: text("due_on").notNull().default(""),         // issuedOn + the org's terms
   poNumber: text("po_number").notNull().default(""),
+  /**
+   * What this bill is for, in one line - "Onsite engineering, September
+   * 2026". Printed under the number on every copy and used as the record's
+   * own heading. A job's invoice used to borrow the job's title and one
+   * with no job behind it had nothing but its number, which is not how a
+   * client files an invoice.
+   */
+  title: text("title").notNull().default(""),
+  /** The shop's words under the total, on the client's copy. */
   note: text("note").notNull().default(""),
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),

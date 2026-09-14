@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { attachWorkOrderSystem, deleteWorkOrder, resolveWorkOrder, setWorkOrderState, updateWorkOrder } from "@/app/actions";
+import { attachWorkOrderSystem, bookWorkOrder, deleteWorkOrder, resolveWorkOrder, setWorkOrderState, updateWorkOrder } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { useRouter } from "next/navigation";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
-import { WO_LABEL, WO_SEVERITIES, woMoves, type Mover } from "@/lib/workOrders";
+import { WO_LABEL, WO_SEVERITIES, bookingSpan, checkBooking, woLive, woMoves, type Mover } from "@/lib/workOrders";
 
 /**
  * The controls that move a job along, and the edit form behind them.
@@ -24,6 +24,7 @@ import { WO_LABEL, WO_SEVERITIES, woMoves, type Mover } from "@/lib/workOrders";
  */
 export default function WorkOrderControls({
   id, number, state, mover, title, body, severity, assignee, people, systems = [],
+  bookedOn = "", bookedUntil = "",
 }: {
   id: number;
   number: string;
@@ -41,8 +42,12 @@ export default function WorkOrderControls({
    * ordinary case: the job is already on something.
    */
   systems?: { id: number; externalId: string; label: string }[];
+  /** The days it is booked for, blank when it is not on the calendar. */
+  bookedOn?: string;
+  bookedUntil?: string;
 }) {
-  const [mode, setMode] = useState<"" | "resolve" | "edit">("");
+  const [mode, setMode] = useState<"" | "resolve" | "edit" | "book">("");
+  const [booking, setBooking] = useState({ bookedOn, bookedUntil });
   const [systemId, setSystemId] = useState(0);
   const [summary, setSummary] = useState("");
   const [form, setForm] = useState({ title, body, severity, assignee });
@@ -59,6 +64,7 @@ export default function WorkOrderControls({
   // The first unmet requirement per form, live in the dialog footer.
   const resolveProblem = summary.trim().length < 3 ? "say what was done" : null;
   const editProblem = !form.title.trim() ? "say what the job is" : null;
+  const bookProblem = checkBooking(booking);
 
   const run = (fn: () => Promise<{ error?: string } | void>, done?: string) => {
     setError("");
@@ -122,7 +128,17 @@ export default function WorkOrderControls({
           </span>
         )}
         {mover === "house" && (
-          <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            {/* The van and the days, committed. A client asks for the week
+                of the 19th; this is the shop saying yes, and the calendar
+                draws the span linked back here. Only while the job is live -
+                a closed job has nothing left to book. */}
+            {woLive(state) && (
+              <button className="btn sm" disabled={pending}
+                onClick={() => { setBooking({ bookedOn, bookedUntil }); setMode(mode === "book" ? "" : "book"); setError(""); }}>
+                {mode === "book" ? "Cancel" : bookedOn ? `Booked ${bookingSpan({ bookedOn, bookedUntil })}` : "Book it"}
+              </button>
+            )}
             <button className="btn sm" disabled={pending}
               onClick={() => { setMode(mode === "edit" ? "" : "edit"); setError(""); }}>
               {mode === "edit" ? "Cancel" : "Edit"}
@@ -169,6 +185,44 @@ export default function WorkOrderControls({
           <div className="mut t-meta" style={{ marginBottom: 8 }}>
             This is what {number} leaves behind. The tasks, hours and parts on it are counted and
             added for you, and it goes on the system&apos;s discussion where the client will see it.
+          </div>
+        </Dialog>
+      )}
+
+      {mode === "book" && (
+        <Dialog open onClose={() => setMode("")} size="sm" title={bookedOn ? `Change the booking for ${number}` : `Book ${number}`} context={title}
+          footer={
+            <>
+              <DialogStatus error={error} problem={bookProblem}
+                ok={bookProblem ? undefined : `On site ${bookingSpan(booking)}`} />
+              {bookedOn && (
+                <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
+                  onClick={() => run(() => bookWorkOrder(id, { bookedOn: "" }), `${number} is off the calendar`)}>
+                  Take it off the calendar
+                </button>
+              )}
+              <button className="btn" onClick={() => setMode("")} disabled={pending}>Cancel</button>
+              <button className="btn accent" disabled={pending || !!bookProblem}
+                onClick={() => run(() => bookWorkOrder(id, booking), `Booked ${number} for ${bookingSpan(booking)}`)}>
+                {pending ? "Booking..." : bookedOn ? "Save the booking" : "Book it"}
+              </button>
+            </>
+          }>
+          <div className="pf2" style={{ marginBottom: 8 }}>
+            <div>
+              <label>First day on site</label>
+              <input type="date" value={booking.bookedOn} aria-label="First day" autoFocus disabled={pending}
+                onChange={(e) => setBooking({ ...booking, bookedOn: e.target.value })} />
+            </div>
+            <div>
+              <label>Last day (optional)</label>
+              <input type="date" value={booking.bookedUntil} min={booking.bookedOn} aria-label="Last day" disabled={pending}
+                onChange={(e) => setBooking({ ...booking, bookedUntil: e.target.value })} />
+            </div>
+          </div>
+          <div className="mut t-meta">
+            It goes on the calendar under Booked visits, one entry per day, linked back to this job.
+            The client sees it on theirs. Leave the last day blank for a single day.
           </div>
         </Dialog>
       )}

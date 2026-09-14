@@ -226,3 +226,38 @@ export function amendmentTitle(title: string): string {
  * claim for money the first is still open to carry.
  */
 export const settledReport = (status: string): boolean => !editableReport(status);
+
+/**
+ * What a claim is filed under - one of three answers, as the pickers hold it.
+ *
+ * "none" is overhead, an answer rather than a blank; "wo:12" is a job, which
+ * names its own client; "org:7" is a client with no job - the part the shop
+ * bought for a month-to-month partner and absorbed. "" is the field left
+ * unanswered, which the create form refuses. One encoding for both pickers
+ * and the action, so the form and the server read the same string.
+ */
+export const NO_JOB = "none";
+
+export type ReportTarget = { workOrderId: number | null; orgId: number | null };
+
+export function reportTargetValue(t: ReportTarget): string {
+  if (t.workOrderId !== null) return `wo:${t.workOrderId}`;
+  if (t.orgId !== null) return `org:${t.orgId}`;
+  return NO_JOB;
+}
+
+/** The picker's value read back; null when it was never answered. */
+export function parseReportTarget(v: string): ReportTarget | null {
+  if (v === NO_JOB) return { workOrderId: null, orgId: null };
+  const m = /^(wo|org):(\d+)$/.exec(v);
+  if (!m) return null;
+  const id = parseInt(m[2], 10);
+  return m[1] === "wo" ? { workOrderId: id, orgId: null } : { workOrderId: null, orgId: id };
+}
+
+/** "WO-1042", "for LabZen", or "overhead" - the fact a reviewer reaches for first. */
+export function filedUnder(r: { workOrderNumber: string; orgName?: string }): string {
+  if (r.workOrderNumber) return r.workOrderNumber;
+  if (r.orgName) return `for ${r.orgName}`;
+  return "overhead";
+}

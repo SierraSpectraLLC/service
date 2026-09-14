@@ -54,10 +54,7 @@ import {
   serializeKits, shapeOf, type IncludedKit,
 } from "@/lib/agreements";
 import { isOrgStage, stageOf, STAGE_WORD } from "@/lib/orgStage";
-import {
-  closeLine, moverOf, severityOf, woAcceptsWork, woMove, woOpen, WO_LABEL,
-  type Mover,
-} from "@/lib/workOrders";
+import { bookingSpan, checkBooking, closeLine, moverOf, severityOf, type Mover, WO_LABEL, woAcceptsWork, woLive, woMove, woOpen } from "@/lib/workOrders";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import {
   applyProcedures, applySystemProcedures, backfillProcedure, createPmTask, generateDuePmTasks,
@@ -68,7 +65,7 @@ import { cleanItem, parseChecklist, serializeChecklist } from "@/lib/checklist";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { completionBlocked, evaluateResult, needsResult, parseAcceptance, resultIsRecorded, serializeAcceptance, type Acceptance } from "@/lib/testResult";
 import { TIME_CATEGORIES } from "@/lib/rates";
-import { sellPrice, EXPENSE_KINDS, LINE_KINDS, linesTotal, orderOf } from "@/lib/billing";
+import { descriptionLines, EXPENSE_KINDS, LINE_KINDS, linesTotal, orderOf, sellPrice } from "@/lib/billing";
 import {
   INVOICE_OUTCOMES, QUOTE_OUTCOMES, invoiceProblem, openingStatus, quoteProblem,
 } from "@/lib/backfill";
@@ -6838,6 +6835,50 @@ export async function logPastWorkOrder(
 }
 
 /** The ask, the urgency and who has it. The house's to edit - it runs the job. */
+/**
+ * Put a job on the calendar: the first day on site and the last.
+ *
+ * The shop's call, because a booking is a van and an engineer committed to a
+ * day - the same reason naming an assignee is gated. A client asks for a week
+ * through their calendar or a note; this is the shop saying yes to it. The
+ * span lands on the calendar under Booked visits, linked to the job, and on
+ * the job's own page. A blank first day clears the booking.
+ *
+ * Gated on the job's OWN workspace, not only on which side the caller sits:
+ * mover is "house" for staff of any operator, and a job is one company's.
+ */
+export async function bookWorkOrder(
+  woId: number, data: { bookedOn: string; bookedUntil?: string },
+): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const found = await loadWorkOrder(u, woId);
+  if ("error" in found) return found;
+  const { wo, mover } = found;
+  if (mover !== "house" || !houseOf(u, wo.tenantOrgId)) return { error: "That is the service team's to book." };
+  if (!woLive(wo.state)) return { error: `${wo.number} is ${WO_LABEL[wo.state] ?? wo.state} - reopen it to book it.` };
+  const bookedOn = data.bookedOn.trim();
+  const bookedUntil = (data.bookedUntil ?? "").trim();
+  if (bookedOn) {
+    const wrong = checkBooking({ bookedOn, bookedUntil });
+    if (wrong) return { error: wrong };
+  }
+  const next = bookedOn ? { bookedOn, bookedUntil: bookedUntil === bookedOn ? "" : bookedUntil } : { bookedOn: "", bookedUntil: "" };
+  if (next.bookedOn === wo.bookedOn && next.bookedUntil === wo.bookedUntil) return {};
+  await db.update(workOrders).set(next).where(eq(workOrders.id, woId));
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId ?? undefined, assetId: wo.assetId ?? undefined,
+    entityType: "workorder", entityId: wo.number, tenantOrgId: wo.tenantOrgId,
+    action: next.bookedOn
+      ? `booked ${wo.number} for ${bookingSpan(next)}`
+      : `took ${wo.number} off the calendar (was ${bookingSpan(wo)})`,
+    field: "booked", oldValue: wo.bookedOn ? bookingSpan(wo) : "", newValue: next.bookedOn ? bookingSpan(next) : "",
+  });
+  revalidatePath(`/work/${woId}`);
+  revalidatePath("/work");
+  revalidatePath("/calendar");
+  return {};
+}
+
 export async function updateWorkOrder(
   woId: number, data: { title: string; body: string; severity: string; assignee: string },
 ): Promise<{ error?: string }> {
@@ -8996,6 +9037,22 @@ async function reportWorkOrder(
 }
 
 /**
+ * The client a claim is for when it names no job. One of OUR clients, checked
+ * rather than trusted - an id off the wire that belongs to another operator's
+ * client is the leak this whole area keeps refusing. Null is the ordinary
+ * answer: a job names its own client, and overhead has none.
+ */
+async function reportClient(
+  u: SessionUser, want: number | null | undefined,
+): Promise<{ id: number | null } | { error: string }> {
+  if (want === null || want === undefined) return { id: null };
+  const [org] = await db.select().from(orgs)
+    .where(and(eq(orgs.id, want), eq(orgs.kind, "client"), forTenant(orgs.parentOrgId, readTenant(u))));
+  if (!org) return { error: "That is not one of our clients" };
+  return { id: org.id };
+}
+
+/**
  * Open a fresh draft report to fill - the container the receipts land in.
  *
  * THE one way a report comes into existence. It used to be two: this, and a
@@ -9034,6 +9091,11 @@ export async function createExpenseReport(
      * alone, which is refused rather than read as overhead.
      */
     workOrderId?: number | null;
+    /**
+     * The client, when there is no job - spend absorbed on a partner's
+     * account. Ignored when a job is named, since the job names its client.
+     */
+    orgId?: number | null;
     /** Unclaimed rows to seed it with - the pool's "claim these" gesture. */
     expenseIds?: number[];
   } = {},
@@ -9059,6 +9121,8 @@ export async function createExpenseReport(
   if ("error" in named) return named;
   const job = await reportWorkOrder(u, opts.workOrderId);
   if ("error" in job) return job;
+  const forClient = await reportClient(u, job.id === null ? opts.orgId : null);
+  if ("error" in forClient) return forClient;
   const purpose = (opts.purpose ?? "").trim().slice(0, 500);
   const t = readTenant(u);
 
@@ -9084,7 +9148,7 @@ export async function createExpenseReport(
 
   const [report] = await db.insert(expenseReports).values({
     tenantOrgId: t, person, status: "draft", openedBy: u.email,
-    workOrderId: job.id, title: named.title, purpose,
+    workOrderId: job.id, orgId: forClient.id, title: named.title, purpose,
   }).returning();
   if (ids.length) {
     await db.update(expenses).set({ reportId: report.id }).where(inArray(expenses.id, ids));
@@ -9177,24 +9241,39 @@ export async function amendExpenseReport(
 export async function setReportWorkOrder(
   reportId: number, workOrderId: number | null,
 ): Promise<{ error?: string }> {
+  return setReportTarget(reportId, { workOrderId, orgId: null });
+}
+
+/**
+ * The three answers, moved between: a job, a client with no job, or
+ * overhead. A job names its own client, so naming one clears the other.
+ */
+export async function setReportTarget(
+  reportId: number, target: { workOrderId: number | null; orgId: number | null },
+): Promise<{ error?: string }> {
   const u = await requireStaff();
   const report = await workableReport(u, reportId);
   if (!report) return { error: "Not your report" };
   if (!editableReport(report.status)) return { error: `That report is ${report.status} - it is fixed now` };
-  const job = await reportWorkOrder(u, workOrderId);
+  const job = await reportWorkOrder(u, target.workOrderId);
   if ("error" in job) return job;
-  if (job.id === report.workOrderId) return {};
-  await db.update(expenseReports).set({ workOrderId: job.id }).where(eq(expenseReports.id, reportId));
+  const forClient = await reportClient(u, job.id === null ? target.orgId : null);
+  if ("error" in forClient) return forClient;
+  if (job.id === report.workOrderId && forClient.id === report.orgId) return {};
+  await db.update(expenseReports).set({ workOrderId: job.id, orgId: forClient.id }).where(eq(expenseReports.id, reportId));
   // The job IS the distance. Moving it re-judges every per diem on the claim.
   await rerulePerDiems({ ...report, workOrderId: job.id });
+  const [client] = forClient.id === null ? [] : await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, forClient.id));
   await audit({
     actor: u.email, entityType: "expense_report", entityId: reportId, tenantOrgId: report.tenantOrgId,
-    action: job.id === null
-      ? `took ${report.person}'s expense report off its work order - overhead now`
-      : `attached ${report.person}'s expense report to a work order`,
-    field: "work_order_id",
-    oldValue: report.workOrderId === null ? "" : String(report.workOrderId),
-    newValue: job.id === null ? "" : String(job.id),
+    action: job.id !== null
+      ? `attached ${report.person}'s expense report to a work order`
+      : client
+        ? `filed ${report.person}'s expense report under ${client.name} - no job, absorbed`
+        : `took ${report.person}'s expense report off its work order - overhead now`,
+    field: "filed_under",
+    oldValue: report.workOrderId !== null ? `wo:${report.workOrderId}` : report.orgId !== null ? `org:${report.orgId}` : "",
+    newValue: job.id !== null ? `wo:${job.id}` : forClient.id !== null ? `org:${forClient.id}` : "",
   });
   revalidatePath("/money/reimbursements");
   revalidatePath(`/money/reimbursements/${reportId}`);
@@ -15862,21 +15941,35 @@ export async function draftInvoice(workOrderId: number): Promise<{ error?: strin
   throw last;
 }
 
-/** The two fields a draft is edited on before it goes out. */
+/**
+ * The words around the table: what the bill is for, the PO it answers, and
+ * the shop's note under the total.
+ *
+ * The PO may be filled in at any time - a client's purchasing department
+ * sends the number after the invoice, not before, and an invoice that cannot
+ * carry it is one they cannot pay. The title and the note are draft-only,
+ * like the lines: a copy the client is reading stays as read.
+ */
 export async function updateInvoice(
-  id: number, data: { poNumber?: string; note?: string },
+  id: number, data: { poNumber?: string; note?: string; title?: string },
 ): Promise<{ error?: string }> {
   const u = await requireStaff();
   const [inv] = await db.select().from(invoices).where(eq(invoices.id, id));
-  if (!inv) return { error: "Not found" };
+  if (!inv || !houseOf(u, inv.tenantOrgId)) return { error: "Not found" };
   const patch: Partial<typeof invoices.$inferInsert> = { updatedAt: new Date() };
   const changes: string[] = [];
   if (data.poNumber !== undefined && data.poNumber.trim() !== inv.poNumber) {
     patch.poNumber = data.poNumber.trim();
     changes.push(`PO ${patch.poNumber || "cleared"}`);
   }
+  if (data.title !== undefined && data.title.trim().slice(0, 160) !== inv.title) {
+    if (inv.status !== "draft") return { error: `${inv.number} has been sent - it reads as sent.` };
+    patch.title = data.title.trim().slice(0, 160);
+    changes.push(patch.title ? `titled "${patch.title}"` : "title cleared");
+  }
   if (data.note !== undefined && data.note.trim() !== inv.note) {
-    patch.note = data.note.trim();
+    if (inv.status !== "draft") return { error: `${inv.number} has been sent - it reads as sent.` };
+    patch.note = data.note.trim().slice(0, 2000);
     changes.push("note");
   }
   if (!changes.length) return {};
@@ -18040,6 +18133,59 @@ async function setLineDescription(
   return {};
 }
 
+/**
+ * The other three numbers on a draft line: how many, of what, at what price.
+ *
+ * "1 h" on a month of onsite availability was the whole complaint: the unit
+ * came off the catalog or the kind and there was no way to say "mo" without
+ * removing the line and typing it again. Draft only, as the description is -
+ * a line the client is reading stays as read. Zero is a price; a quantity
+ * has to be one of something.
+ */
+async function setLineTerms(
+  target: "quote" | "invoice", lineId: number,
+  terms: { qty: number; unit: string; unitCents: number },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const qty = Number(terms.qty);
+  if (!Number.isFinite(qty) || qty <= 0 || qty > 100000) return { error: "Quantity must be above zero" };
+  const unitCents = Math.round(Number(terms.unitCents));
+  if (!Number.isFinite(unitCents) || unitCents < 0) return { error: "The price cannot be negative" };
+  const unit = (terms.unit ?? "").trim().slice(0, 12);
+  const next = { qty: Math.round(qty * 1000), unit, unitCents };
+  const said = `${qty}${unit ? ` ${unit}` : ""} × ${formatCents(unitCents)}`;
+  if (target === "quote") {
+    const [line] = await db.select().from(quoteLines).where(eq(quoteLines.id, lineId));
+    if (!line) return { error: "Not found" };
+    const [q] = await db.select().from(quotes).where(eq(quotes.id, line.quoteId));
+    if (!q || !houseOf(u, q.tenantOrgId)) return { error: "Not found" };
+    if (q.status !== "draft") return { error: `${q.number} has gone out - the client is reading these lines.` };
+    if (line.qty === next.qty && line.unit === next.unit && line.unitCents === next.unitCents) return {};
+    await db.update(quoteLines).set(next).where(eq(quoteLines.id, lineId));
+    await audit({
+      actor: u.email, entityType: "quote", entityId: q.id, tenantOrgId: q.tenantOrgId,
+      action: `repriced a line on ${q.number}: ${descriptionLines(line.description).head} - ${said}`,
+      field: "terms", oldValue: `${line.qty / 1000}${line.unit ? ` ${line.unit}` : ""} × ${formatCents(line.unitCents)}`, newValue: said,
+    });
+    revQuote(q);
+    return {};
+  }
+  const [line] = await db.select().from(invoiceLines).where(eq(invoiceLines.id, lineId));
+  if (!line) return { error: "Not found" };
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, line.invoiceId));
+  if (!inv || !houseOf(u, inv.tenantOrgId)) return { error: "Not found" };
+  if (inv.status !== "draft") return { error: `${inv.number} has been sent - its lines stay as sent.` };
+  if (line.qty === next.qty && line.unit === next.unit && line.unitCents === next.unitCents) return {};
+  await db.update(invoiceLines).set(next).where(eq(invoiceLines.id, lineId));
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: inv.tenantOrgId,
+    action: `repriced a line on ${inv.number}: ${descriptionLines(line.description).head} - ${said}`,
+    field: "terms", oldValue: `${line.qty / 1000}${line.unit ? ` ${line.unit}` : ""} × ${formatCents(line.unitCents)}`, newValue: said,
+  });
+  revInvoice(inv);
+  return {};
+}
+
 /* Both doors, spelled out as async functions: an exported server action that
    is an arrow returning a promise compiles here and is refused by the bundler,
    which is a build failure nobody sees until deploy. See
@@ -18049,6 +18195,12 @@ export async function setQuoteLineDescription(lineId: number, description: strin
 }
 export async function setInvoiceLineDescription(lineId: number, description: string) {
   return setLineDescription("invoice", lineId, description);
+}
+export async function setQuoteLineTerms(lineId: number, terms: { qty: number; unit: string; unitCents: number }) {
+  return setLineTerms("quote", lineId, terms);
+}
+export async function setInvoiceLineTerms(lineId: number, terms: { qty: number; unit: string; unitCents: number }) {
+  return setLineTerms("invoice", lineId, terms);
 }
 
 // ── The long document ───────────────────────────────────────────────────────

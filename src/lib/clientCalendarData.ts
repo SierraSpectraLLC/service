@@ -12,8 +12,9 @@
 import { and, eq, inArray, ne, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  agreements, assets, calendarNotes, instruments, invoices, pmSchedules, quotes, tasks,
+  agreements, assets, calendarNotes, instruments, invoices, pmSchedules, quotes, tasks, workOrders,
 } from "@/db/schema";
+import { woLive } from "@/lib/workOrders";
 import type { CalendarInputs } from "@/lib/calendar";
 
 export type ClientScope = {
@@ -44,7 +45,7 @@ export async function clientCalendarInputs(scope: ClientScope): Promise<Calendar
     .from(assets).where(inArray(assets.instrumentId, systemIds));
   const assetIds = assetRows.map((a) => a.id);
 
-  const [schedRows, taskRows, quoteRows, invoiceRows, agreementRows, noteRows, instRows] = await Promise.all([
+  const [schedRows, taskRows, quoteRows, invoiceRows, agreementRows, noteRows, instRows, bookedRows] = await Promise.all([
     none ? [] : db.select().from(pmSchedules).where(
       assetIds.length
         ? or(inArray(pmSchedules.instrumentId, systemIds), inArray(pmSchedules.assetId, assetIds))
@@ -66,6 +67,17 @@ export async function clientCalendarInputs(scope: ClientScope): Promise<Calendar
     db.select().from(calendarNotes).where(eq(calendarNotes.orgId, orgId)),
     none ? [] : db.select({ id: instruments.id, externalId: instruments.externalId })
       .from(instruments).where(inArray(instruments.id, systemIds)),
+    /* Their jobs the shop has put on a day - the answer to "when are you
+       coming", which is the first thing a client opens the calendar for. By
+       their organization or on their machines, so a job on nothing in
+       particular still shows. */
+    db.select({
+      id: workOrders.id, number: workOrders.number, title: workOrders.title, state: workOrders.state,
+      bookedOn: workOrders.bookedOn, bookedUntil: workOrders.bookedUntil, instrumentId: workOrders.instrumentId,
+    }).from(workOrders).where(and(
+      ne(workOrders.bookedOn, ""),
+      none ? eq(workOrders.orgId, orgId) : or(eq(workOrders.orgId, orgId), inArray(workOrders.instrumentId, systemIds)),
+    )),
   ]);
 
   const sysLabel = new Map(instRows.map((i) => [i.id, i.externalId]));
@@ -105,6 +117,10 @@ export async function clientCalendarInputs(scope: ClientScope): Promise<Calendar
       billEveryMonths: a.billEveryMonths, billAmountCents: a.billAmountCents,
       billDescription: a.billDescription, billDayOfMonth: a.billDayOfMonth,
       billLeadDays: a.billLeadDays, billNextOn: a.billNextOn, billLastOn: a.billLastOn,
+    })),
+    bookings: bookedRows.filter((w) => woLive(w.state)).map((w) => ({
+      id: w.id, number: w.number, title: w.title, bookedOn: w.bookedOn, bookedUntil: w.bookedUntil,
+      system: w.instrumentId === null ? "" : (sysLabel.get(w.instrumentId) ?? ""), orgName: "",
     })),
     notes: noteRows.map((n) => ({
       id: n.id, onDate: n.onDate, endsOn: n.endsOn, title: n.title, orgName: "",

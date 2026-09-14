@@ -13,7 +13,7 @@
 
 import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { db } from "@/db";
-import { expenseReports, expenses, houseMembers, orgSites, workOrders } from "@/db/schema";
+import { expenseReports, expenses, houseMembers, orgSites, orgs, workOrders } from "@/db/schema";
 import type { SessionUser } from "@/lib/authz";
 import { houseOf } from "@/lib/authz";
 import { mayAdminPeople } from "@/lib/hr";
@@ -37,6 +37,11 @@ async function shape(
     ...rows.map((r) => r.workOrderId), ...expenseRows.map((e) => e.workOrderId),
   ].filter((x): x is number => x !== null))];
   const siteIds = [...new Set(expenseRows.map((e) => e.siteId).filter((x): x is number => x !== null))];
+  const orgIds = [...new Set(rows.map((r) => r.orgId).filter((x): x is number => x !== null))];
+  const clients = orgIds.length
+    ? await db.select({ id: orgs.id, name: orgs.name }).from(orgs).where(inArray(orgs.id, orgIds))
+    : [];
+  const clientName = (id: number | null) => (id === null ? "" : clients.find((o) => o.id === id)?.name ?? "");
   const [wos, sites] = await Promise.all([
     woIds.length
       ? db.select({ id: workOrders.id, number: workOrders.number }).from(workOrders).where(inArray(workOrders.id, woIds))
@@ -67,6 +72,7 @@ async function shape(
       purpose: r.purpose,
       status: r.status,
       workOrderNumber: woNumber(r.workOrderId),
+      clientName: clientName(r.orgId),
       openedBy: who(r.openedBy),
       submittedOn: r.submittedAt.toISOString().slice(0, 10),
       paidOn: r.paidOn,

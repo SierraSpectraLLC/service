@@ -2,10 +2,10 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { appSettings, expenseCategories, expenseReports, expenses, houseMembers, workOrders } from "@/db/schema";
+import { appSettings, expenseCategories, expenseReports, expenses, houseMembers, orgs, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
-import { forTenant, readTenant } from "@/lib/tenancy";
+import { forTenant, readTenant, visibleOrgs } from "@/lib/tenancy";
 import {
   REPORT_LABEL, mayWorkReport, reimbursementPool, reportSpan, reportTitle, reportTotalCents,
 } from "@/lib/expenseReports";
@@ -86,6 +86,12 @@ export default async function ExpenseReportPage({ params }: { params: Promise<{ 
   const pickable = [...missing, ...allWos];
   const reportWoNumber = report.workOrderId === null ? ""
     : (pickable.find((w) => w.id === report.workOrderId)?.number ?? "");
+  /* The third answer: a client with no job. Our clients for the picker, and
+     this claim's own by name. */
+  const clientRows = (await visibleOrgs(user)).filter((o) => o.kind === "client");
+  const reportOrgName = report.orgId === null ? ""
+    : (clientRows.find((o) => o.id === report.orgId)?.name
+      ?? (await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, report.orgId)))[0]?.name ?? "");
   const openedByName = report.openedBy.trim()
     ? (roster.find((m) => m.email.trim().toLowerCase() === report.openedBy.trim().toLowerCase())?.name ?? "")
     : "";
@@ -128,7 +134,7 @@ export default async function ExpenseReportPage({ params }: { params: Promise<{ 
            page and the desk that links here cannot call a claim two things. */
         title={reportTitle(report, rows)}
         sub={(report.title ? `${report.person} · ${reportSpan(rows) || "no dated rows"} · ` : "")
-          + `${reportWoNumber || "overhead"} · `
+          + `${reportWoNumber || (reportOrgName ? `for ${reportOrgName}` : "overhead")} · `
           + `${REPORT_LABEL[report.status] ?? report.status}${total ? ` · ${formatCents(total)}` : ""}${report.status === "paid" ? ` · paid ${report.paidOn}${report.paidRef ? ` (${report.paidRef})` : ""}` : ""}`}
       />
       <ExpenseReportDetail
@@ -136,6 +142,7 @@ export default async function ExpenseReportPage({ params }: { params: Promise<{ 
           id: report.id, person: report.person, status: report.status,
           title: report.title, purpose: report.purpose,
           workOrderId: report.workOrderId, workOrderNumber: reportWoNumber,
+          orgId: report.orgId, orgName: reportOrgName,
           openedByName,
           amends: amends ? { ...amends, title: amends.title || `Report #${amends.id}` } : null,
           amendedBy: amendedBy.map((a) => ({
@@ -171,6 +178,7 @@ export default async function ExpenseReportPage({ params }: { params: Promise<{ 
           label: `${w.number} - ${w.title}`.slice(0, 70)
             + (["closed", "resolved", "cancelled"].includes(w.state) ? ` (${WO_LABEL[w.state] ?? w.state})` : ""),
         }))}
+        clients={clientRows.map((o) => ({ id: o.id, name: o.name }))}
         pool={pool.map((p) => ({
           id: p.id, kind: p.kind, description: p.description,
           amountCents: p.amountCents, incurredOn: p.incurredOn,

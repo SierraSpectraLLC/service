@@ -7,12 +7,12 @@ import { toast } from "@/components/ui/Toast";
 import {
   addInvoiceLine, addQuoteLine, removeInvoiceLine, removeQuoteLine,
   reorderInvoiceLines, reorderQuoteLines,
-  setInvoiceLineDescription, setQuoteLineDescription,
+  setInvoiceLineDescription, setInvoiceLineTerms, setQuoteLineDescription, setQuoteLineTerms,
 } from "@/app/actions";
-import { descriptionLines } from "@/lib/billing";
-import { formatCents } from "@/lib/money";
+import { descriptionLines, parseQtyUnit, qtyUnitLabel } from "@/lib/billing";
+import { centsToInput, formatCents, parseMoney } from "@/lib/money";
 import {
-  CATALOG_KINDS, lineKindFor, quotedUnitCents, unitFor,
+  CATALOG_KINDS, UNIT_SUGGESTIONS, lineKindFor, quotedUnitCents, unitFor,
 } from "@/lib/partCatalog";
 import PartNumberField, { type LookupPart } from "@/components/PartNumberField";
 import NewPartButton from "@/components/NewPartButton";
@@ -39,18 +39,14 @@ const KIND_LABEL: Record<string, string> = {
 /** The kinds somebody may type in by hand; tax and fee rows come from the system. */
 const MANUAL_KINDS = ["part", "labor", "travel", "expense"] as const;
 
-/**
- * Hours read as hours; a count of things reads as a count.
- *
- * The line's own unit wins where it has one. Reading it off the KIND alone is
- * what had a flat travel charge - a zone-3 overnight, quoted per trip - print
- * as "1 h", because every travel line was assumed to be a drive. Lines written
- * before units existed have none, and read exactly as they always did.
- */
-const qtyLabel = (l: Line) => {
+// Hours read as hours; a count of things reads as a count - lib/billing
+// .qtyUnitLabel, which every copy of the paper reads through.
+const qtyLabel = (l: Line) => qtyUnitLabel(l);
+
+/** What the quantity field shows while it is being edited: always the unit, so "mo" can be typed over "h". */
+const qtyInput = (l: Line) => {
   const unit = (l.unit ?? "").trim() || (l.kind === "labor" || l.kind === "travel" ? "h" : "");
-  if (unit) return `${l.qty} ${unit}`;
-  return l.qty === 1 ? "" : `${l.qty}`;
+  return unit ? `${l.qty} ${unit}` : `${l.qty}`;
 };
 
 const emptyDraft = {
@@ -108,6 +104,28 @@ export default function InvoiceLineList({
       if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
       router.refresh();
     });
+  };
+
+  /** How many, of what, at what: typed over the figures where they stand. */
+  const reterm = (l: Line, terms: { qty: number; unit: string; unitCents: number }) => {
+    if (!target) return;
+    startTransition(async () => {
+      const res = target.kind === "invoice"
+        ? await setInvoiceLineTerms(l.id, terms)
+        : await setQuoteLineTerms(l.id, terms);
+      if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
+      router.refresh();
+    });
+  };
+  const requantify = (l: Line, text: string) => {
+    const parsed = parseQtyUnit(text);
+    if (!parsed) { toast({ message: `"${text}" is not a quantity - try "1 mo" or "4.5 h"`, tone: "bad" }); return; }
+    reterm(l, { qty: parsed.qty, unit: parsed.unit, unitCents: l.unitCents });
+  };
+  const reprice = (l: Line, text: string) => {
+    const cents = parseMoney(text);
+    if (cents === null) { toast({ message: `"${text}" is not a price - try 20000 or 95.50`, tone: "bad" }); return; }
+    reterm(l, { qty: l.qty, unit: (l.unit ?? "").trim(), unitCents: cents });
   };
 
   /*
@@ -313,8 +331,27 @@ export default function InvoiceLineList({
                   </span>
                 )}
               </span>
-              {qtyLabel(l) && <span className="mut t-small">{qtyLabel(l)}</span>}
-              <span className="mut t-small">{formatCents(l.unitCents)}</span>
+              {/* The figures, editable where they stand on a draft: "1 h" typed
+                  over as "1 mo" is the whole way a unit changes. A count of
+                  one with no unit reads as nothing on the paper, but is still
+                  a field here, or there would be nothing to click. */}
+              {canEdit && !l.covered ? (
+                <>
+                  <span className="mut t-small">
+                    <InlineEdit value={qtyInput(l)} label={`quantity of ${descriptionLines(l.description).head}`}
+                      placeholder="1" onSave={(next) => requantify(l, next)} />
+                  </span>
+                  <span className="mut t-small">
+                    <InlineEdit mono value={centsToInput(l.unitCents)} label={`unit price of ${descriptionLines(l.description).head}`}
+                      onSave={(next) => reprice(l, next)} />
+                  </span>
+                </>
+              ) : (
+                <>
+                  {qtyLabel(l) && <span className="mut t-small">{qtyLabel(l)}</span>}
+                  <span className="mut t-small">{formatCents(l.unitCents)}</span>
+                </>
+              )}
               <b className="t-body" style={{ width: 90, textAlign: "right" }}>
                 {l.covered ? formatCents(0) : formatCents(Math.round(l.qty * l.unitCents))}
               </b>
@@ -394,6 +431,12 @@ export default function InvoiceLineList({
             <input className="t-body" value={draft.qty} inputMode="decimal" placeholder="Qty"
               onChange={(e) => setDraft({ ...draft, qty: e.target.value })}
               aria-label="Quantity" style={{ flex: "0 1 70px" }} />
+            {/* What one of it is. Suggested, never enforced: a shop that bills
+                a month, a week or a leg is not wrong. */}
+            <input className="t-body" value={draft.unit} list="line-units" placeholder="unit"
+              onChange={(e) => setDraft({ ...draft, unit: e.target.value })}
+              aria-label="Unit" style={{ flex: "0 1 70px" }} />
+            <datalist id="line-units">{UNIT_SUGGESTIONS.map((u) => <option key={u} value={u} />)}</datalist>
             <input className="t-body" value={draft.price} inputMode="decimal" placeholder="$ each"
               onChange={(e) => setDraft({ ...draft, price: e.target.value })}
               onKeyDown={(e) => { if (e.key === "Enter") add(); }}
@@ -417,7 +460,8 @@ export default function InvoiceLineList({
               onSaved={(partNumber) => setDraft((d) => ({ ...d, partNumber }))} />
             <span className="mut t-meta">
               Not in the book? Catalog it here and it is on the next quote too.
-              {" "}Click a description to give it more lines.
+              {" "}Click a description to edit it - every line after the first prints as a detail under it.
+              {" "}Click a quantity to change how many or the unit (&quot;1 mo&quot;), or a price to reprice it.
             </span>
           </div>
           {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}

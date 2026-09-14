@@ -4430,3 +4430,23 @@ END $$;
 -- record, and a shop that talks elsewhere gets icons and cards it never opens.
 -- Nothing posted is touched - it comes back with the switch. See lib/flags.
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "discussions_enabled" boolean NOT NULL DEFAULT false;
+
+-- A work order booked onto days: first day on site and last. The calendar
+-- draws the span under Booked visits, linked to the job. See the columns in
+-- schema.ts and lib/workOrders.checkBooking for the bound on the span.
+ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "booked_on" text NOT NULL DEFAULT '';
+ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "booked_until" text NOT NULL DEFAULT '';
+
+-- What an invoice is for, in one line, printed under its number on every copy.
+ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "title" text NOT NULL DEFAULT '';
+
+-- The client an expense report is for when there is no job: spend the shop
+-- absorbs on a partner's account. See the column in schema.ts.
+ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "org_id" integer;
+CREATE INDEX IF NOT EXISTS "expense_reports_org_idx" ON "expense_reports" ("org_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expense_reports_org_id_orgs_id_fk') THEN
+    ALTER TABLE "expense_reports" ADD CONSTRAINT "expense_reports_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

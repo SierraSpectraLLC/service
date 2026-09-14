@@ -21,9 +21,7 @@ import { PO_LABEL, PO_TONE, poTotals } from "@/lib/po";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { storeQuota } from "@/lib/storeUsage";
 import { getSystemLabels, systemLabel } from "@/lib/systemLabel";
-import {
-  moverOf, severityOf, targetDay, woAcceptsWork, woLate, WO_LABEL, WO_TONE,
-} from "@/lib/workOrders";
+import { bookingSpan, moverOf, severityOf, targetDay, WO_LABEL, WO_TONE, woAcceptsWork, woLate, woLive } from "@/lib/workOrders";
 import ActivityFeed from "@/components/ActivityFeed";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import HoursPanel from "@/components/HoursPanel";
@@ -359,6 +357,9 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     { value: WO_LABEL[wo.state] ?? wo.state, label: "", tone: tone === "neutral" ? undefined : tone },
     { value: sev.label, label: "" },
     ...(woLate(wo, today) ? [{ value: `wanted by ${targetDay(wo.severity, wo.openedOn)}`, label: "", tone: "bad" as const }] : []),
+    // The days committed, beside the state: "when are you coming" is the
+    // question the job's page gets asked, by the client and by the shop.
+    ...(wo.bookedOn && woLive(wo.state) ? [{ value: bookingSpan(wo), label: "on site", tone: "info" as const }] : []),
     ...(openTasksH ? [{ value: openTasksH, label: `open task${openTasksH === 1 ? "" : "s"}` }] : []),
     ...(minutes ? [{ value: formatHours(minutes), label: "logged" }] : []),
   ];
@@ -467,6 +468,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           title={wo.title} body={wo.body} severity={wo.severity} assignee={wo.assignee}
           people={directoryNames(people)}
           systems={adoptable}
+          bookedOn={wo.bookedOn} bookedUntil={wo.bookedUntil}
         />
       </div>
           ) },
