@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/authz";
 import { forTenant, viewTenant, visibleAssetIds, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { ownerChoices } from "@/lib/owner";
 import { ASSET_TONE, ASSET_STATES } from "@/lib/stages";
+import { unitShown, unitStage } from "@/lib/assetRegistry";
 import AssetRegistryFilter from "@/components/AssetRegistryFilter";
 import NewAssetForm from "@/components/NewAssetForm";
 import AssetGridToggle from "@/components/AssetGridToggle";
@@ -16,11 +17,14 @@ import { FacetStrip, Legend, PageHead, Toolbar } from "@/components/ui";
 export const dynamic = "force-dynamic";
 
 export default async function AssetsPage({ searchParams }: {
-  searchParams: Promise<{ q?: string; kind?: string; status?: string; owner?: string; group?: string }>;
+  searchParams: Promise<{ q?: string; kind?: string; status?: string; owner?: string; group?: string; held?: string }>;
 }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
-  const { q = "", kind = "", status = "", owner = "", group = "" } = await searchParams;
+  const { q = "", kind = "", status = "", owner = "", group = "", held: heldParam = "" } = await searchParams;
+  // "former" shows a former client's units and nothing else; anything else
+  // is the default reading, which hides them. See lib/assetRegistry.
+  const held = heldParam === "former" ? "former" : "";
   // Sectioned by type unless asked for owners; anything else is the default.
   const groupBy = group === "owner" ? "owner" : "kind";
 
@@ -31,7 +35,7 @@ export default async function AssetsPage({ searchParams }: {
     db.select().from(assets)
       .where(seeAssets === null ? undefined : seeAssets.length ? inArray(assets.id, seeAssets) : sql`false`)
       .orderBy(asc(assets.kind), asc(assets.model), asc(assets.id)),
-    db.select({ id: instruments.id, externalId: instruments.externalId, client: instruments.client }).from(instruments)
+    db.select({ id: instruments.id, externalId: instruments.externalId, client: instruments.client, ownerOrgId: instruments.ownerOrgId }).from(instruments)
       .where(seeSystems === null ? undefined : seeSystems.length ? inArray(instruments.id, seeSystems) : sql`false`),
     db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, await viewTenant(user))),
     // The organization list is the operator's book of business, so only staff
@@ -39,6 +43,15 @@ export default async function AssetsPage({ searchParams }: {
     isStaff ? visibleOrgs(user) : Promise.resolve([]),
   ]);
   const home = new Map(insts.map((i) => [i.id, i]));
+  // Where each unit's owner stands - a former client's units are held off the
+  // default reading as their systems are. The system decides for a unit
+  // installed in one; only staff hold the organization list, and a reader
+  // without it sees every unit as a client's, which is the safe direction.
+  const stageOfOrg = new Map(orgRows.map((o) => [o.id, o.stage]));
+  const stage = new Map(rows.map((a) => [a.id, unitStage(a,
+    (instrumentId) => home.get(instrumentId)?.ownerOrgId,
+    (orgId) => stageOfOrg.get(orgId))]));
+  const formerCount = rows.filter((a) => stage.get(a.id) === "former").length;
   // The FILTER offers every owner that exists on a row, because filtering must
   // reach everything - including names from before there were organizations.
   const owners = [...new Set([...rows.map((a) => a.owner), ...insts.map((i) => i.client)].filter(Boolean))].sort();
@@ -61,6 +74,7 @@ export default async function AssetsPage({ searchParams }: {
 
   const needle = q.trim().toLowerCase();
   const filtered = rows.filter((a) => {
+    if (!unitShown(stage.get(a.id) ?? "client", held)) return false;
     if (kind && a.kind !== kind) return false;
     if (status && a.status !== status) return false;
     if (owner && a.owner !== owner) return false;
@@ -73,14 +87,15 @@ export default async function AssetsPage({ searchParams }: {
   // Deleting records is staff work, so only staff get the checkboxes.
 
   // Facet and toggle hrefs keep every other filter in place - facet state is the URL.
-  const href = (over: { status?: string; group?: string }) => {
+  const href = (over: { status?: string; group?: string; held?: string }) => {
     const p = new URLSearchParams();
-    const m = { status, group: groupBy === "owner" ? "owner" : "", ...over };
+    const m = { status, group: groupBy === "owner" ? "owner" : "", held, ...over };
     if (needle) p.set("q", needle);
     if (kind) p.set("kind", kind);
     if (m.status) p.set("status", m.status);
     if (owner) p.set("owner", owner);
     if (m.group) p.set("group", m.group);
+    if (m.held) p.set("held", m.held);
     return `/assets${p.size ? `?${p}` : ""}`;
   };
   const statusHref = (s: string) => href({ status: s && s !== status ? s : "" });
@@ -105,18 +120,28 @@ export default async function AssetsPage({ searchParams }: {
             {status && <input type="hidden" name="status" value={status} />}
             {owner && <input type="hidden" name="owner" value={owner} />}
             {groupBy === "owner" && <input type="hidden" name="group" value="owner" />}
+            {held && <input type="hidden" name="held" value={held} />}
             <input name="q" defaultValue={q} placeholder="Serial, model, owner, system..." aria-label="Search assets" />
           </form>
         }
         facets={
-          <FacetStrip facets={ASSET_STATES.map((s) => ({
-            key: s, label: s, count: countFor(s) || undefined, on: status === s, href: statusHref(s),
-          }))} />
+          <FacetStrip facets={[
+            ...ASSET_STATES.map((s) => ({
+              key: s, label: s, count: countFor(s) || undefined, on: status === s, href: statusHref(s),
+            })),
+            // The one facet on the other axis: whose the units are. Hidden
+            // from the default reading, as the systems registry hides theirs,
+            // and a click away - the same place it is on that page.
+            {
+              key: "former", label: "Former client", count: formerCount || undefined,
+              on: held === "former", href: href({ held: held === "former" ? "" : "former" }),
+            },
+          ]} />
         }
         actions={
           <>
             <AssetRegistryFilter q={q} kind={kind} status={status} owner={owner} group={groupBy === "owner" ? "owner" : ""}
-              kinds={filterKinds} owners={owners} />
+              held={held} kinds={filterKinds} owners={owners} />
             <GroupToggle value={groupBy} choices={[
               { key: "kind", label: "By type", href: href({ group: "" }) },
               { key: "owner", label: "By owner", href: href({ group: "owner" }) },

@@ -7,10 +7,12 @@ import { useRouter } from "next/navigation";
  * beside this (URL-state, real counts); these two have too many values for
  * facets, so they stay selects - but they write the same URL.
  */
-export default function AssetRegistryFilter({ q, kind, status, owner, group = "", kinds, owners }: {
+export default function AssetRegistryFilter({ q, kind, status, owner, group = "", held = "", kinds, owners }: {
   q: string; kind: string; status: string; owner: string;
   /** "owner" when the list is sectioned by owner - carried through, not decided here. */
   group?: string;
+  /** "former" when the reading is a former client's units - carried through likewise. */
+  held?: string;
   kinds: string[]; owners: string[];
 }) {
   const router = useRouter();
@@ -22,6 +24,7 @@ export default function AssetRegistryFilter({ q, kind, status, owner, group = ""
     if (merged.status) p.set("status", merged.status);
     if (merged.owner) p.set("owner", merged.owner);
     if (group) p.set("group", group);
+    if (held) p.set("held", held);
     router.push(`/assets${p.size ? `?${p}` : ""}`);
   };
   return (

@@ -55,15 +55,19 @@ export type RegistryRow = {
 
 /**
  * Which rows a reading keeps. No state named means everything on record but
- * the archive - what a person means by "all systems" is the machines that
- * still exist to them, and the archive is its own facet a click away. The
- * search is one needle over every word a person might remember a system by.
+ * the archive and a former client's - what a person means by "all systems" is
+ * the machines of the companies they still work for or are selling to, and
+ * each of the other two is its own facet a click away. A prospect's stay,
+ * marked: they are the machines being quoted this week. The search is one
+ * needle over every word a person might remember a system by.
  */
+export const HIDDEN_BY_DEFAULT: SystemState[] = ["archived", "former"];
+
 export function filterSystems<T extends RegistryRow>(rows: T[], f: { q?: string; state?: string }): T[] {
   const needle = (f.q ?? "").trim().toLowerCase();
   const state = f.state ?? "";
   return rows.filter((r) => {
-    if (state ? r.state !== state : r.state === "archived") return false;
+    if (state ? r.state !== state : HIDDEN_BY_DEFAULT.includes(r.state)) return false;
     if (!needle) return true;
     return [r.externalId, r.label, r.client, r.owner, r.model, r.serial, r.location, r.lead, r.category]
       .join(" ").toLowerCase().includes(needle);

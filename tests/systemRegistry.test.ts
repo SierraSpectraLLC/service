@@ -59,16 +59,19 @@ describe("filterSystems", () => {
     // client. The search finds it by either name.
     row({ externalId: "SS-5", client: "Utah", owner: "Sierra Spectra" }),
   ];
-  it("shows everything on record but the archive when no state is named", () => {
-    expect(filterSystems(rows, {}).map((r) => r.externalId)).toEqual(["SS-1", "SS-2", "SS-3", "SS-5"]);
+  it("shows everything on record but the archive and a former client's when no state is named", () => {
+    // A prospect's stays, marked - it is being quoted this week. A former
+    // client's is held back like the archive: on record, its own facet away.
+    expect(filterSystems(rows, {}).map((r) => r.externalId)).toEqual(["SS-1", "SS-2", "SS-5"]);
   });
   it("narrows to one state, the archive included, when one is named", () => {
     expect(filterSystems(rows, { state: "archived" }).map((r) => r.externalId)).toEqual(["SS-4"]);
     expect(filterSystems(rows, { state: "prospect" }).map((r) => r.externalId)).toEqual(["SS-2"]);
+    expect(filterSystems(rows, { state: "former" }).map((r) => r.externalId)).toEqual(["SS-3"]);
   });
   it("searches every word a person remembers a system by", () => {
     expect(filterSystems(rows, { q: "acme" }).map((r) => r.externalId)).toEqual(["SS-2"]);
-    expect(filterSystems(rows, { q: "sg1234" })).toHaveLength(4);
+    expect(filterSystems(rows, { q: "sg1234" })).toHaveLength(3);
     expect(filterSystems(rows, { q: "sierra" }).map((r) => r.externalId)).toEqual(["SS-5"]);
     expect(filterSystems(rows, { q: "utah" }).map((r) => r.externalId)).toEqual(["SS-5"]);
     expect(filterSystems(rows, { q: "bldg 2", state: "former" }).map((r) => r.externalId)).toEqual(["SS-3"]);
