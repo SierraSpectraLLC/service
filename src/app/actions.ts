@@ -622,13 +622,16 @@ export async function updateInstrumentNotes(instrumentId: number, notes: string)
 
 export async function updateInstrument(
   instrumentId: number,
-  data: { externalId?: string; client: string; category?: string; priority: number; location?: string; name?: string; gxp?: boolean },
+  // Every field is optional: the record's own page changes one fact at a time
+  // - the type, from beside the name - and must not have to restate the rest
+  // to do it. Omitted means unchanged.
+  data: { externalId?: string; client?: string; category?: string; priority?: number; location?: string; name?: string; gxp?: boolean },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
   await assertSystemEditable(u, instrumentId);
-  const client = data.client.trim();
+  const client = (data.client ?? inst.client).trim();
   const externalId = (data.externalId ?? inst.externalId).trim();
   if (!externalId) return { error: "System ID required" };
   if (externalId.length > 40) return { error: "System ID must be 40 characters or fewer" };
