@@ -716,22 +716,40 @@ export async function addInstrumentNote(target: WorkTarget, text: string): Promi
  * follow-through when a type changes. A system that refuses is reported by
  * id rather than aborting the rest; the others are done, and the person is
  * told which were not. Nothing here decides who may edit what.
+ *
+ * OWNERSHIP is the one field here that changes who can SEE a record, so it
+ * keeps setSystemOwner's own rules rather than riding on the editor gate:
+ * staff only, the record's workspace checked per system, a share guaranteed
+ * to the new owner, and the client label following where it was tracking
+ * ownership. Thirty-six systems for one client is exactly the case the
+ * one-at-a-time rule made tedious; the screen asks a second time before it
+ * runs, because the consequence is that an organization can now open them.
  */
 export async function updateSystems(
   ids: number[],
-  patch: { client?: string; category?: string; lead?: string; archived?: boolean },
+  patch: { client?: string; category?: string; lead?: string; archived?: boolean; ownerOrgId?: number | null },
 ): Promise<{ error?: string; done?: number; failures?: { id: number; error: string }[] }> {
   await requireEditor();
+  // The stricter gate, once and up front: a non-staff caller asking to move
+  // ownership should be refused as such, not thirty-six times over.
+  if (patch.ownerOrgId !== undefined) await requireStaff();
   const targets = [...new Set(ids)];
   if (!targets.length) return { error: "Nothing selected" };
   if (targets.length > 200) return { error: "Change 200 systems at a time" };
-  if (patch.client === undefined && patch.category === undefined && patch.lead === undefined && patch.archived === undefined) {
+  if (patch.client === undefined && patch.category === undefined && patch.lead === undefined
+      && patch.archived === undefined && patch.ownerOrgId === undefined) {
     return { error: "Nothing to change" };
   }
   const failures: { id: number; error: string }[] = [];
   let done = 0;
   for (const id of targets) {
     try {
+      // Ownership first: it may rewrite the client label (lib/owner), and a
+      // label the same call also set by hand should be the one that stands.
+      if (patch.ownerOrgId !== undefined) {
+        const res = await setSystemOwner(id, patch.ownerOrgId);
+        if (res.error) { failures.push({ id, error: res.error }); continue; }
+      }
       if (patch.client !== undefined || patch.category !== undefined) {
         const res = await updateInstrument(id, { client: patch.client, category: patch.category });
         if (res.error) { failures.push({ id, error: res.error }); continue; }
@@ -13727,6 +13745,9 @@ export async function setCatalogPhotoFraming(termId: number, framing: string): P
     .set({ photoFraming: serializeFrame(parseFrame(framing)) })
     .where(eq(vocabTerms.id, termId));
   revalidatePath("/settings/catalog");
+  // The model's own page shows the same photo, framed the same way, and is
+  // now where the framing is usually set.
+  revalidatePath(`/catalog/${termId}`);
   rev();
   return {};
 }

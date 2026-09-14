@@ -11,6 +11,7 @@ import Dialog from "@/components/ui/Dialog";
 import { DataTable, FacetStrip, Id, PageHead, Pill, TokenPicker, Toolbar } from "@/components/ui";
 import type { DataRow } from "@/components/ui/DataTable";
 import { toast } from "@/components/ui/Toast";
+import { makerLookup } from "@/lib/makerLookup";
 import { formatCents } from "@/lib/money";
 import { isStalePrice } from "@/lib/sourcing";
 import {
@@ -135,6 +136,13 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
     key: r.id,
     actions: [
       { label: "Edit", onClick: () => openEdit(r) },
+      // Third, so it lives in the kebab rather than crowding the two inline
+      // links: "mass-search Waters for parts to add based off parts I have
+      // already" is this, one row at a time, for every maker in lib/makerLookup.
+      ...(() => {
+        const hit = makerLookup(r);
+        return hit ? [{ label: `Look up at ${hit.maker}`, onClick: () => window.open(hit.url, "_blank", "noopener") }] : [];
+      })(),
       {
         label: r.archived ? "Restore" : "Retire",
         tone: r.archived ? undefined : "bad",

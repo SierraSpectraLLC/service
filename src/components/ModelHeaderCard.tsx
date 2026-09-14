@@ -3,9 +3,11 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
-import { setCatalogPhoto, setVocabManufacturer } from "@/app/actions";
+import { setCatalogPhoto, setCatalogPhotoFraming, setVocabManufacturer } from "@/app/actions";
 import { inputDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
+import PhotoFramer from "@/components/PhotoFramer";
+import PhotoThumb from "@/components/PhotoThumb";
 import { stockSrc } from "@/lib/photos";
 import { fmtBytes } from "@/lib/storage";
 
@@ -13,17 +15,26 @@ import { fmtBytes } from "@/lib/storage";
  * The model's stock photo - the same one every unit of the model falls back
  * to - so adding it here is adding it everywhere, exactly like the photos card
  * in Settings does. Identity lives in the RecordHero above; this card only
- * holds the photo and its upload affordance.
+ * holds the photo and what can be done to it.
+ *
+ * Framed here as well as uploaded, for the same reason: this is the model's
+ * page, and sending somebody to Settings to turn a sideways photo upright is
+ * sending them away from the record the photo is of. The tile shows the
+ * framing rather than a raw crop, so what is adjusted is what every unit of
+ * this model will show (lib/photoFrame).
  */
-export default function ModelHeaderCard({ termId, name, hasPhoto, manufacturer }: {
+export default function ModelHeaderCard({ termId, name, hasPhoto, photoFraming = "", manufacturer }: {
   termId: number;
   name: string;
   hasPhoto: boolean;
+  /** How the stock photo sits in its tile - "rot,zoom,x,y,aspect". See lib/photoFrame. */
+  photoFraming?: string;
   manufacturer: string;
 }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState("");
+  const [framing, setFraming] = useState(false);
   const [error, setError] = useState("");
 
   const send = async (file: File | undefined) => {
@@ -48,9 +59,11 @@ export default function ModelHeaderCard({ termId, name, hasPhoto, manufacturer }
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div style={{ flexShrink: 0 }}>
           {hasPhoto ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={stockSrc(termId)} alt={name}
-              style={{ width: 132, height: 132, objectFit: "cover", borderRadius: 10, border: "1px solid var(--line)", background: "#F7F9FC" }} />
+            /* Through PhotoThumb, so this tile is the tile: a photo framed
+               here looks the same here, on every unit of the model, and in
+               the gallery. It used to be a raw cover crop, which showed
+               something the framing said it should not. */
+            <PhotoThumb src={stockSrc(termId)} framing={photoFraming} alt={name} width={132} height={132} />
           ) : (
             <button onClick={() => input.current?.click()} disabled={!!busy}
               className="t-small"
@@ -86,13 +99,27 @@ export default function ModelHeaderCard({ termId, name, hasPhoto, manufacturer }
             The catalog&apos;s stock photo for {name}: it shows on every unit that has no photo of its own.
           </div>
           {hasPhoto && (
-            <button className="btn link" style={{ marginTop: 8 }} onClick={() => input.current?.click()} disabled={!!busy}>
-              {busy ? "Uploading..." : "replace photo"}
-            </button>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
+              <button className="btn link" onClick={() => input.current?.click()} disabled={!!busy}>
+                {busy ? "Uploading..." : "replace photo"}
+              </button>
+              <button className="btn link" onClick={() => setFraming(true)} disabled={!!busy}>
+                adjust the frame
+              </button>
+            </div>
           )}
           {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
         </div>
       </div>
+
+      {/* The same editor the catalog's photo card opens, saving to the same
+          column: turn it upright, zoom, nudge. The file is never rewritten -
+          only the four numbers beside it. */}
+      {framing && (
+        <PhotoFramer src={stockSrc(termId)} framing={photoFraming} alt={name}
+          save={(f) => setCatalogPhotoFraming(termId, f)}
+          onDone={() => { setFraming(false); router.refresh(); }} />
+      )}
     </div>
   );
 }

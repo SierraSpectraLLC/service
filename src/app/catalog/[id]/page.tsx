@@ -176,7 +176,8 @@ export default async function ModelPage({ params, searchParams }: {
       <Tabs items={tabs} active={tab} ariaLabel="Model sections" />
 
       {tab === "overview" && <>
-      <ModelHeaderCard termId={term.id} name={term.name} hasPhoto={!!term.photoUrl} manufacturer={term.manufacturer} />
+      <ModelHeaderCard termId={term.id} name={term.name} hasPhoto={!!term.photoUrl}
+        photoFraming={term.photoFraming} manufacturer={term.manufacturer} />
 
       <ModelSpecsCard
         termId={term.id} modelName={term.name}

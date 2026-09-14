@@ -69,6 +69,9 @@ export default async function SystemsPage({ searchParams }: {
     categories: [...new Set([...vocab.filter((v) => v.kind === "category").map((v) => v.name), ...rows.map((r) => r.category)])]
       .filter(Boolean).sort((a, b) => a.localeCompare(b)),
     people: directoryNames(people),
+    // Any organization may own equipment - a service company owns its own
+    // stock - which is the list the record's own Sharing section offers.
+    owners: orgRows.map((o) => ({ id: o.id, name: o.name, kind: o.kind })),
   };
   const labels = await getSystemLabels(rows);
   const stageOfOrg = new Map(orgRows.map((o) => [o.id, o.stage]));

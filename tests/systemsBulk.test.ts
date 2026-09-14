@@ -28,7 +28,7 @@ vi.mock("next/headers", () => ({
   headers: async () => new Map(),
 }));
 
-const SIERRA = 3;
+const SIERRA = 3, LABZEN = 7;
 const STAFF: Who = {
   email: "bill@sierra.test", name: "Bill Reyes", role: "staff",
   orgId: null, operatorOrgId: SIERRA, rootOperatorOrgId: SIERRA,
@@ -37,7 +37,9 @@ const STAFF: Who = {
 beforeAll(async () => {
   await client.exec(readFileSync("drizzle/schema-sync.sql", "utf8"));
   await client.exec(`
-    INSERT INTO orgs (id, name, kind, is_operator) VALUES (${SIERRA}, 'Sierra Spectra', 'provider', true);
+    INSERT INTO orgs (id, name, kind, is_operator, parent_org_id) VALUES
+      (${SIERRA}, 'Sierra Spectra', 'provider', true, NULL),
+      (${LABZEN}, 'LabZen', 'client', false, ${SIERRA});
     SELECT setval('orgs_id_seq', 100);
     INSERT INTO house_members (email, org_id, role, name) VALUES ('bill@sierra.test', ${SIERRA}, 'staff', 'Bill Reyes');
   `);
@@ -46,7 +48,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   who = STAFF;
   await client.exec(`
-    DELETE FROM audit_log; DELETE FROM instruments;
+    DELETE FROM audit_log; DELETE FROM system_shares; DELETE FROM instruments;
     INSERT INTO instruments (id, tenant_org_id, external_id, client, model, category) VALUES
       (21, ${SIERRA}, 'G-010', 'GMI', '', ''),
       (22, ${SIERRA}, 'G-011', 'GMI', '', ''),
@@ -75,6 +77,20 @@ describe("changing several systems at once", () => {
     expect((await systems()).map((s) => s.client)).toEqual(["GMI", "LabZen", "LabZen"]);
   }, SLOW);
 
+  it("takes several fields in one call - what one Apply sends", async () => {
+    const { updateSystems } = await import("@/app/actions");
+    const res = await updateSystems([21, 22], {
+      client: "LabZen", category: "LC-MS", lead: "Bill Reyes", ownerOrgId: LABZEN,
+    });
+    expect(res).toEqual({ done: 2, failures: [] });
+    const after = await systems();
+    expect(after.slice(0, 2).map((s) => [s.client, s.category, s.lead, s.ownerOrgId]))
+      .toEqual([["LabZen", "LC-MS", "Bill Reyes", LABZEN], ["LabZen", "LC-MS", "Bill Reyes", LABZEN]]);
+    // The client typed alongside the handover is the one that stands: owner
+    // goes first precisely so its label follow-through cannot overwrite it.
+    expect(after[2].client).toBe("");
+  }, SLOW);
+
   it("archives a batch, and clears a value with an empty string", async () => {
     const { updateSystems } = await import("@/app/actions");
     expect((await updateSystems([21, 22], { archived: true })).done).toBe(2);
@@ -91,6 +107,30 @@ describe("changing several systems at once", () => {
     expect(res.done).toBe(0);
     expect(res.failures?.map((f) => f.id).sort()).toEqual([21, 999]);
     expect(res.failures?.every((f) => f.error)).toBe(true);
+  }, SLOW);
+
+  it("hands a batch to an organization, sharing it and following the label", async () => {
+    const { updateSystems } = await import("@/app/actions");
+    // G-010 and G-011 are labelled "GMI", set by hand, so that label stands;
+    // G-012's is blank, which was tracking ownership, so it follows.
+    const res = await updateSystems([21, 22, 23], { ownerOrgId: LABZEN });
+    expect(res).toEqual({ done: 3, failures: [] });
+    const after = await systems();
+    expect(after.map((s) => s.ownerOrgId)).toEqual([LABZEN, LABZEN, LABZEN]);
+    expect(after.map((s) => s.client)).toEqual(["GMI", "GMI", "LabZen"]);
+    // An owner who cannot see what they own helps nobody.
+    const shares = await testDb.select().from(schema.systemShares);
+    expect(shares.filter((s) => s.orgId === LABZEN).map((s) => s.instrumentId).sort()).toEqual([21, 22, 23]);
+    expect((await testDb.select().from(schema.auditLog)).filter((l) => l.field === "owner")).toHaveLength(3);
+  }, SLOW);
+
+  it("returns a batch to house stewardship, and reports a system that is not there", async () => {
+    const { updateSystems } = await import("@/app/actions");
+    await updateSystems([21, 22], { ownerOrgId: LABZEN });
+    const res = await updateSystems([21, 22, 999], { ownerOrgId: null });
+    expect(res.done).toBe(2);
+    expect(res.failures).toEqual([{ id: 999, error: "Not found" }]);
+    expect((await systems()).map((s) => s.ownerOrgId)).toEqual([null, null, null]);
   }, SLOW);
 
   it("refuses an empty selection and an empty change", async () => {
