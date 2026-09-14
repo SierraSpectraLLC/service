@@ -166,3 +166,33 @@ describe("the several-at-once grid", () => {
     expect((screen.getByRole("button", { name: /^File/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
+
+describe("looking the part up on the maker's site", () => {
+  // "If when we add the part number into the form and choose a manufacturer
+  // we can have a 'lookup part' button appear for manufacturers with a proven
+  // lookup method (like Waters)." The button is that, and only that.
+  it("appears once the maker is one we can search and there is a number", async () => {
+    await open();
+    expect(screen.queryByRole("link", { name: /Look up part/ })).toBeNull();
+    fireEvent.change(screen.getByLabelText(/Your number/i), { target: { value: "700000341" } });
+    expect(screen.queryByRole("link", { name: /Look up part/ })).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText("Agilent"), { target: { value: "Waters" } });
+    const link = screen.getByRole("link", { name: "Look up part at Waters ↗" }) as HTMLAnchorElement;
+    expect(link.href).toContain("waters.com/nextgen/us/en/search.html");
+    expect(link.href).toContain("keyword=700000341");
+    expect(link.target).toBe("_blank");
+  });
+
+  it("searches their number rather than ours when both are typed", async () => {
+    await open({ partNumber: "AGI-7167-PMK", manufacturer: "Agilent" });
+    fireEvent.change(screen.getByPlaceholderText("G4521-67001"), { target: { value: "G4521-67001" } });
+    const link = screen.getByRole("link", { name: "Look up part at Agilent ↗" }) as HTMLAnchorElement;
+    expect(link.href).toContain("G4521-67001");
+    expect(link.href).not.toContain("AGI-7167");
+  });
+
+  it("says nothing for a maker nobody has a search for", async () => {
+    await open({ partNumber: "FSC-LC10-UNL", manufacturer: "Sierra Spectra" });
+    expect(screen.queryByRole("link", { name: /Look up part/ })).toBeNull();
+  });
+});

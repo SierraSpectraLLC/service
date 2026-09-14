@@ -11,6 +11,7 @@ import Dialog from "@/components/ui/Dialog";
 import { TokenPicker } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { formatCents } from "@/lib/money";
+import { makerLookup } from "@/lib/makerLookup";
 import { isStalePrice } from "@/lib/sourcing";
 import {
   ALIAS_KIND_LABEL, ALIAS_KINDS, catalogLabel, CATALOG_KINDS, isService, isSuperseded,
@@ -159,6 +160,22 @@ export default function PartDialog({
               placeholder="G4521-67001" />
           </div>
         </div>
+
+        {/* The maker's own search on this number, for the makers whose site
+            takes one in a URL - see lib/makerLookup. It appears only once
+            both halves are typed, and says nothing for a maker we cannot
+            search: a button that opens a dead page is worse than none. */}
+        {(() => {
+          const hit = makerLookup(draft);
+          if (!hit) return null;
+          return (
+            <div style={{ marginBottom: 8, marginTop: -2 }}>
+              <a className="btn sm" href={hit.url} target="_blank" rel="noreferrer">
+                Look up part at {hit.maker} ↗
+              </a>
+            </div>
+          );
+        })()}
 
         {/* Every OTHER number the same part answers to. The pair above is
             the display identity - what the row is called and what every
