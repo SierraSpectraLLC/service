@@ -67,7 +67,7 @@ export const lineKindFor = (kind: string): string => (isService(kind) ? kind : "
  * the day, the mile or the leg is not wrong, and refusing the word it uses
  * would only push it back into the description.
  */
-export const UNIT_SUGGESTIONS = ["h", "trip", "day", "mile", "ea"] as const;
+export const UNIT_SUGGESTIONS = ["h", "day", "wk", "mo", "yr", "trip", "mile", "ea"] as const;
 
 /** The unit a code bills in, falling back to the one its kind usually uses. */
 export const unitFor = (e: { kind: string; unit?: string }): string =>

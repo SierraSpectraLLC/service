@@ -3534,6 +3534,15 @@ export const invoices = pgTable("invoices", {
   issuedOn: text("issued_on").notNull().default(""),   // YYYY-MM-DD, set at send
   dueOn: text("due_on").notNull().default(""),         // issuedOn + the org's terms
   poNumber: text("po_number").notNull().default(""),
+  /**
+   * What this bill is for, in one line - "Onsite engineering, September
+   * 2026". Printed under the number on every copy and used as the record's
+   * own heading. A job's invoice used to borrow the job's title and one
+   * with no job behind it had nothing but its number, which is not how a
+   * client files an invoice.
+   */
+  title: text("title").notNull().default(""),
+  /** The shop's words under the total, on the client's copy. */
   note: text("note").notNull().default(""),
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),

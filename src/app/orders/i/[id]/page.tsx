@@ -6,7 +6,7 @@ import { orgs, shareLinks } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { maySeeOrgMoney } from "@/lib/tenancy";
 import { isStaffRole } from "@/lib/tenants";
-import { descriptionLines } from "@/lib/billing";
+import { descriptionLines, qtyUnitLabel } from "@/lib/billing";
 import { formatCents } from "@/lib/money";
 import { shopMonthDay, shopToday } from "@/lib/shopday";
 import { asStatementRow, invoiceForOrg, qtyOf } from "@/lib/invoiceData";
@@ -82,7 +82,9 @@ export default async function ClientOrderPage({ params }: { params: Promise<{ id
               ))}
               {l.detail && <span className="mut t-meta" style={{ display: "block" }}>{l.detail}</span>}
             </span>
-            {qtyOf(l) !== 1 && <span className="mut t-small">× {qtyOf(l)}</span>}
+            {qtyUnitLabel({ qty: qtyOf(l), unit: l.unit, kind: l.kind }) && (
+              <span className="mut t-small">{qtyUnitLabel({ qty: qtyOf(l), unit: l.unit, kind: l.kind })} × {formatCents(l.unitCents)}</span>
+            )}
             {/* Says what is true rather than showing a zero: the line was
                 done and the agreement paid for it, which is the whole value
                 of having one. */}

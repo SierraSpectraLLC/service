@@ -5,7 +5,7 @@ import { orgs, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { brandForTenant } from "@/lib/brand";
-import { descriptionLines } from "@/lib/billing";
+import { descriptionLines, qtyUnitLabel } from "@/lib/billing";
 import { formatCents } from "@/lib/money";
 import { shopMonthDay, shopToday } from "@/lib/shopday";
 import { feeClause } from "@/lib/billingPolicy";
@@ -51,7 +51,7 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
       <PrintHeader
         logoUrl={brand.operatorLogoUrl}
         operator={brand.operatorName || brand.name}
-        title={wo ? `Invoice · ${wo.title}` : "Invoice"}
+        title={row.title ? `Invoice · ${row.title}` : wo ? `Invoice · ${wo.title}` : "Invoice"}
         date={row.issuedOn || shopMonthDay(row.createdAt)}
         docId={row.number}
       />
@@ -101,7 +101,7 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
                 )}
               </td>
               <td className="t-body" style={{ textAlign: "right", padding: "6px 8px", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" }}>
-                {qtyOf(l) === 1 ? "" : qtyOf(l)}
+                {qtyUnitLabel({ qty: qtyOf(l), unit: l.unit, kind: l.kind })}
               </td>
               <td className="t-body" style={{ textAlign: "right", padding: "6px 8px", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" }}>
                 {formatCents(l.unitCents)}

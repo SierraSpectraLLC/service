@@ -3,8 +3,7 @@
 // contract" bills, what gets taxed, and the fact that no total is ever stored.
 import { describe, expect, it } from "vitest";
 import {
-  NO_COVERAGE, buildInvoiceLines, coveredValue, invoiceBalance, jobCost, lineAmount,
-  linesTotal, payableNow, poCheck, type CoverageAnswer, type PartRow,
+  buildInvoiceLines, coveredValue, invoiceBalance, jobCost, lineAmount, linesTotal, NO_COVERAGE, parseQtyUnit, payableNow, poCheck, qtyUnitLabel, type CoverageAnswer, type PartRow,
 } from "@/lib/billing";
 import { FALLBACK_RATE, type RateCard } from "@/lib/rates";
 
@@ -173,5 +172,27 @@ describe("job cost", () => {
   it("reports no margin rather than dividing by zero on a covered job", () => {
     const c = jobCost({ lines: [], partsCostCents: 0, billedMinutes: 0, loadedLaborCents: 9500, expensesCents: 0 });
     expect(c.marginPct).toBe(0);
+  });
+});
+
+describe("the quantity, as the paper says it", () => {
+  it("names the unit where the line has one, and hours where a labor line has none", () => {
+    expect(qtyUnitLabel({ qty: 1, unit: "mo", kind: "labor" })).toBe("1 mo");
+    expect(qtyUnitLabel({ qty: 4.5, unit: "", kind: "labor" })).toBe("4.5 h");
+    expect(qtyUnitLabel({ qty: 2, unit: "trip", kind: "travel" })).toBe("2 trip");
+  });
+  it("says nothing for one of a thing you count, and the count otherwise", () => {
+    expect(qtyUnitLabel({ qty: 1, unit: "", kind: "part" })).toBe("");
+    expect(qtyUnitLabel({ qty: 3, unit: "", kind: "part" })).toBe("3");
+  });
+  it("reads a quantity typed over the label, and refuses what is not one", () => {
+    expect(parseQtyUnit("1 mo")).toEqual({ qty: 1, unit: "mo" });
+    expect(parseQtyUnit("4.5h")).toEqual({ qty: 4.5, unit: "h" });
+    expect(parseQtyUnit(" 3 ")).toEqual({ qty: 3, unit: "" });
+    expect(parseQtyUnit("2 x mo")).toEqual({ qty: 2, unit: "mo" });
+    expect(parseQtyUnit("mo")).toBeNull();
+    expect(parseQtyUnit("0 h")).toBeNull();
+    expect(parseQtyUnit("-1")).toBeNull();
+    expect(parseQtyUnit("1 month of it")).toBeNull();
   });
 });

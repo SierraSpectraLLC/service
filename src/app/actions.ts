@@ -65,7 +65,7 @@ import { cleanItem, parseChecklist, serializeChecklist } from "@/lib/checklist";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { completionBlocked, evaluateResult, needsResult, parseAcceptance, resultIsRecorded, serializeAcceptance, type Acceptance } from "@/lib/testResult";
 import { TIME_CATEGORIES } from "@/lib/rates";
-import { sellPrice, EXPENSE_KINDS, LINE_KINDS, linesTotal, orderOf } from "@/lib/billing";
+import { descriptionLines, EXPENSE_KINDS, LINE_KINDS, linesTotal, orderOf, sellPrice } from "@/lib/billing";
 import {
   INVOICE_OUTCOMES, QUOTE_OUTCOMES, invoiceProblem, openingStatus, quoteProblem,
 } from "@/lib/backfill";
@@ -15903,21 +15903,35 @@ export async function draftInvoice(workOrderId: number): Promise<{ error?: strin
   throw last;
 }
 
-/** The two fields a draft is edited on before it goes out. */
+/**
+ * The words around the table: what the bill is for, the PO it answers, and
+ * the shop's note under the total.
+ *
+ * The PO may be filled in at any time - a client's purchasing department
+ * sends the number after the invoice, not before, and an invoice that cannot
+ * carry it is one they cannot pay. The title and the note are draft-only,
+ * like the lines: a copy the client is reading stays as read.
+ */
 export async function updateInvoice(
-  id: number, data: { poNumber?: string; note?: string },
+  id: number, data: { poNumber?: string; note?: string; title?: string },
 ): Promise<{ error?: string }> {
   const u = await requireStaff();
   const [inv] = await db.select().from(invoices).where(eq(invoices.id, id));
-  if (!inv) return { error: "Not found" };
+  if (!inv || !houseOf(u, inv.tenantOrgId)) return { error: "Not found" };
   const patch: Partial<typeof invoices.$inferInsert> = { updatedAt: new Date() };
   const changes: string[] = [];
   if (data.poNumber !== undefined && data.poNumber.trim() !== inv.poNumber) {
     patch.poNumber = data.poNumber.trim();
     changes.push(`PO ${patch.poNumber || "cleared"}`);
   }
+  if (data.title !== undefined && data.title.trim().slice(0, 160) !== inv.title) {
+    if (inv.status !== "draft") return { error: `${inv.number} has been sent - it reads as sent.` };
+    patch.title = data.title.trim().slice(0, 160);
+    changes.push(patch.title ? `titled "${patch.title}"` : "title cleared");
+  }
   if (data.note !== undefined && data.note.trim() !== inv.note) {
-    patch.note = data.note.trim();
+    if (inv.status !== "draft") return { error: `${inv.number} has been sent - it reads as sent.` };
+    patch.note = data.note.trim().slice(0, 2000);
     changes.push("note");
   }
   if (!changes.length) return {};
@@ -18081,6 +18095,59 @@ async function setLineDescription(
   return {};
 }
 
+/**
+ * The other three numbers on a draft line: how many, of what, at what price.
+ *
+ * "1 h" on a month of onsite availability was the whole complaint: the unit
+ * came off the catalog or the kind and there was no way to say "mo" without
+ * removing the line and typing it again. Draft only, as the description is -
+ * a line the client is reading stays as read. Zero is a price; a quantity
+ * has to be one of something.
+ */
+async function setLineTerms(
+  target: "quote" | "invoice", lineId: number,
+  terms: { qty: number; unit: string; unitCents: number },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const qty = Number(terms.qty);
+  if (!Number.isFinite(qty) || qty <= 0 || qty > 100000) return { error: "Quantity must be above zero" };
+  const unitCents = Math.round(Number(terms.unitCents));
+  if (!Number.isFinite(unitCents) || unitCents < 0) return { error: "The price cannot be negative" };
+  const unit = (terms.unit ?? "").trim().slice(0, 12);
+  const next = { qty: Math.round(qty * 1000), unit, unitCents };
+  const said = `${qty}${unit ? ` ${unit}` : ""} × ${formatCents(unitCents)}`;
+  if (target === "quote") {
+    const [line] = await db.select().from(quoteLines).where(eq(quoteLines.id, lineId));
+    if (!line) return { error: "Not found" };
+    const [q] = await db.select().from(quotes).where(eq(quotes.id, line.quoteId));
+    if (!q || !houseOf(u, q.tenantOrgId)) return { error: "Not found" };
+    if (q.status !== "draft") return { error: `${q.number} has gone out - the client is reading these lines.` };
+    if (line.qty === next.qty && line.unit === next.unit && line.unitCents === next.unitCents) return {};
+    await db.update(quoteLines).set(next).where(eq(quoteLines.id, lineId));
+    await audit({
+      actor: u.email, entityType: "quote", entityId: q.id, tenantOrgId: q.tenantOrgId,
+      action: `repriced a line on ${q.number}: ${descriptionLines(line.description).head} - ${said}`,
+      field: "terms", oldValue: `${line.qty / 1000}${line.unit ? ` ${line.unit}` : ""} × ${formatCents(line.unitCents)}`, newValue: said,
+    });
+    revQuote(q);
+    return {};
+  }
+  const [line] = await db.select().from(invoiceLines).where(eq(invoiceLines.id, lineId));
+  if (!line) return { error: "Not found" };
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, line.invoiceId));
+  if (!inv || !houseOf(u, inv.tenantOrgId)) return { error: "Not found" };
+  if (inv.status !== "draft") return { error: `${inv.number} has been sent - its lines stay as sent.` };
+  if (line.qty === next.qty && line.unit === next.unit && line.unitCents === next.unitCents) return {};
+  await db.update(invoiceLines).set(next).where(eq(invoiceLines.id, lineId));
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: inv.tenantOrgId,
+    action: `repriced a line on ${inv.number}: ${descriptionLines(line.description).head} - ${said}`,
+    field: "terms", oldValue: `${line.qty / 1000}${line.unit ? ` ${line.unit}` : ""} × ${formatCents(line.unitCents)}`, newValue: said,
+  });
+  revInvoice(inv);
+  return {};
+}
+
 /* Both doors, spelled out as async functions: an exported server action that
    is an arrow returning a promise compiles here and is refused by the bundler,
    which is a build failure nobody sees until deploy. See
@@ -18090,6 +18157,12 @@ export async function setQuoteLineDescription(lineId: number, description: strin
 }
 export async function setInvoiceLineDescription(lineId: number, description: string) {
   return setLineDescription("invoice", lineId, description);
+}
+export async function setQuoteLineTerms(lineId: number, terms: { qty: number; unit: string; unitCents: number }) {
+  return setLineTerms("quote", lineId, terms);
+}
+export async function setInvoiceLineTerms(lineId: number, terms: { qty: number; unit: string; unitCents: number }) {
+  return setLineTerms("invoice", lineId, terms);
 }
 
 // ── The long document ───────────────────────────────────────────────────────

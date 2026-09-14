@@ -151,9 +151,9 @@ async function InvoiceShare({ link }: { link: typeof shareLinks.$inferSelect }) 
         apEmail={org?.apEmail ?? ""}
         invoice={{
           id: full.row.id, number: full.row.number, issuedOn: full.row.issuedOn,
-          dueOn: full.row.dueOn, poNumber: full.row.poNumber, note: full.row.note,
+          dueOn: full.row.dueOn, poNumber: full.row.poNumber, note: full.row.note, title: full.row.title,
           lines: full.lines.map((l) => ({
-            id: l.id, kind: l.kind, description: l.description, detail: l.detail,
+            id: l.id, kind: l.kind, description: l.description, detail: l.detail, unit: l.unit,
             qty: l.qty / 1000, unitCents: l.unitCents, covered: l.covered, coveredBy: l.coveredBy,
           })),
           paidCents: full.payments.reduce((n, p) => n + p.amountCents, 0),

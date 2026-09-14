@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { startPayment } from "@/app/actions";
-import { descriptionLines } from "@/lib/billing";
+import { descriptionLines, qtyUnitLabel } from "@/lib/billing";
 import { formatCents } from "@/lib/money";
 import { payAmount } from "@/lib/stripe";
 import { Id, Tabs } from "@/components/ui";
@@ -10,6 +10,8 @@ import { Id, Tabs } from "@/components/ui";
 export type ClientLine = {
   id: number; kind: string; description: string; detail: string;
   qty: number; unitCents: number; covered: boolean; coveredBy: string;
+  /** What one of it is - "h", "mo". Blank reads off the kind. */
+  unit?: string;
 };
 
 /**
@@ -42,6 +44,8 @@ export default function ClientInvoice({ brandName, orgName, apEmail, invoice, st
   invoice: {
     id: number; number: string; issuedOn: string; dueOn: string;
     poNumber: string; note: string; lines: ClientLine[]; paidCents: number;
+    /** What the bill is for, in one line. */
+    title?: string;
   };
   statement: {
     openCents: number; payableCents: number; count: number;
@@ -83,6 +87,7 @@ export default function ClientInvoice({ brandName, orgName, apEmail, invoice, st
         <div className="card">
           <div className="eyebrow">{brandName} · for {orgName}</div>
           <h2 className="t-page" style={{ margin: "2px 0 2px" }}>Invoice <Id>{invoice.number}</Id></h2>
+          {invoice.title && <div className="t-body" style={{ fontWeight: 600 }}>{invoice.title}</div>}
           <div className="mut t-small" style={{ marginBottom: 10 }}>
             {invoice.issuedOn ? `issued ${invoice.issuedOn}` : ""}
             {invoice.dueOn ? ` · due ${invoice.dueOn}` : ""}
@@ -104,6 +109,12 @@ export default function ClientInvoice({ brandName, orgName, apEmail, invoice, st
                   </span>
                 )}
               </span>
+              {/* How the amount was arrived at - "1 mo × $20,000.00" - so a
+                  line is checkable rather than merely stated. Nothing for a
+                  single unpriced-by-unit item, whose amount is its price. */}
+              {qtyUnitLabel(l) && (
+                <span className="mut t-small" style={{ whiteSpace: "nowrap" }}>{qtyUnitLabel(l)} × {formatCents(l.unitCents)}</span>
+              )}
               <b className="t-body">
                 {l.covered ? formatCents(0) : formatCents(Math.round(l.qty * l.unitCents))}
               </b>
@@ -122,7 +133,7 @@ export default function ClientInvoice({ brandName, orgName, apEmail, invoice, st
               {formatCents(covered)} covered by your agreement.
             </div>
           )}
-          {invoice.note && <div className="t-small" style={{ marginTop: 8 }}>{invoice.note}</div>}
+          {invoice.note && <div className="t-small" style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{invoice.note}</div>}
 
           {due > 0 && (
             <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
