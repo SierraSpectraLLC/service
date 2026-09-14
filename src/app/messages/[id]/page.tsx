@@ -4,6 +4,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { messageThreads, threadMembers, messages } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { getModules } from "@/lib/flags";
 import { visibleDirectory } from "@/lib/directory";
 import { messageableFrom, threadTitle } from "@/lib/messages";
 import ThreadPanel from "@/components/ThreadPanel";
@@ -14,6 +15,8 @@ export const dynamic = "force-dynamic";
 export default async function ThreadPage({ params }: { params: Promise<{ id: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
+  // A module that is off has no pages, the same as the others in lib/flags.
+  if (!(await getModules()).discussions) redirect("/");
   const { id } = await params;
   const threadId = parseInt(id);
   if (isNaN(threadId)) notFound();

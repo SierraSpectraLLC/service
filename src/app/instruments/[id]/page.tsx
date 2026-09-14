@@ -78,7 +78,7 @@ import SystemCoverage from "@/components/SystemCoverage";
 import CoverageRecorder from "@/components/CoverageRecorder";
 import { HeroKebab, Pill, RecordHero, type HeroStat } from "@/components/ui";
 import { getUiLayout } from "@/app/actions";
-import { canKick, daysSince, queueView, settledWait } from "@/lib/queue";
+import { canKick, daysSince, queueApplies, queueView, settledWait } from "@/lib/queue";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
 import { expiryAttention, packageComplete, packageForSystem, qualsOf, qualStanding } from "@/lib/gxp";
 import ValidationPanel from "@/components/ValidationPanel";
@@ -501,6 +501,19 @@ export default async function InstrumentPage({ params, searchParams }: {
   });
   const queueMine = queueView(user, inst) === "mine";
   const queueDays = daysSince(inst.queueSince ?? inst.createdAt, new Date());
+  /* Whether whose-move-is-it is a question this record can be asked at all.
+     A lab client's own instrument has no queue to move between and nobody to
+     hand it to, so the standing line and the Custody card come off entirely
+     rather than announcing a wait nobody is waiting out. See queueApplies. */
+  const queueOn = queueApplies(inst.ownerOrgId === null ? null : orgRows.find((o) => o.id === inst.ownerOrgId));
+  /* Panels this record does not get, whatever the layout or the allow-list
+     says: Custody when there is no queue to show, Discussion when the talk
+     module is off. Filtered out of the groups and the panel list both, so no
+     rail button leads to nothing. */
+  const hiddenPanels = new Set<string>([
+    ...(queueOn ? [] : ["custody"]),
+    ...(modules.discussions ? [] : ["discussion"]),
+  ]);
   /* Whether holding this is actually a chore, for the standing line's client
      voice. queueView() is already viewer-relative - "mine" means the client on
      a client's screen - but possession is a POSITION, not an obligation: a
@@ -630,7 +643,7 @@ export default async function InstrumentPage({ params, searchParams }: {
        for the pane's rack rail to read it, and the standing line and the
        panels are siblings. One attribute, one source of tone. */
     <div className="container split"
-      data-tone={standingTone({ isMine: queueMine, overdue: overdueTasks > 0, settled })}>
+      data-tone={standingTone({ isMine: queueOn ? queueMine : true, overdue: overdueTasks > 0, settled })}>
       <div className="crumb">
         <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>Instruments</Link> › <b>{inst.externalId}</b>
       </div>
@@ -689,7 +702,7 @@ export default async function InstrumentPage({ params, searchParams }: {
           same amber banner until settledWait(). Its tone drives the rack
           spine down the working pane, so the standing stays in view however
           far you scroll. */}
-      {!(handback && inst.queueAckAt) && !settled && (
+      {queueOn && !(handback && inst.queueAckAt) && !settled && (
       <StandingLine
         instrumentId={inst.id}
         holderName={inst.queueOrgId === null ? brand.operatorName : orgName.get(inst.queueOrgId) ?? "another organization"}
@@ -716,7 +729,7 @@ export default async function InstrumentPage({ params, searchParams }: {
         saved={panelLayout}
         // Balanced per TAB, not per page: each tab splits its own panels
         // across the two columns.
-        defaultRight={["workorders", "parts", "site", "custody", "photos", "reference", "hours", "update"]}
+        defaultRight={["workorders", "parts", "site", "custody", "photos", "reference", "hours", "update"].filter((k) => !hiddenPanels.has(k))}
         // The identity card stays on screen; the other fourteen panels were
         // three screens of scroll, so they group into working contexts. Badges
         // are each tab's reason to be visited now, so flipping is navigation
@@ -738,12 +751,12 @@ export default async function InstrumentPage({ params, searchParams }: {
            changes, so both sides of a conversation are looking at the same
            shape of page. */
         groups={groupsFor(isStaff, [
-          { key: "now", label: "Now", keys: ["coverage", "custody"],
+          { key: "now", label: "Now", keys: ["coverage", "custody"].filter((k) => !hiddenPanels.has(k)),
             // Same rule as the hero stat and the standing line: a wait nobody
             // owes a move on is not a reason to visit the tab.
-            badge: !queueMine && !settled ? `${queueDays}d` : undefined, badgeTone: "warn" },
+            badge: queueOn && !queueMine && !settled ? `${queueDays}d` : undefined, badgeTone: "warn" },
           { key: "work", label: "Work",
-            keys: ["workorders", "tasks", "hours", "parts", "discussion"],
+            keys: ["workorders", "tasks", "hours", "parts", "discussion"].filter((k) => !hiddenPanels.has(k)),
             badge: openTasks.length || undefined,
             badgeTone: overdueTasks ? "bad" : "info" },
           { key: "maintenance", label: "Maintenance", keys: ["maintenance"],
@@ -755,6 +768,7 @@ export default async function InstrumentPage({ params, searchParams }: {
           { key: "history", label: "History",
             keys: ["activity", "update"],
             badge: (() => {
+              if (!modules.discussions) return undefined;
               const seen = readRows[0]?.lastSeenAt;
               return visiblePosts.filter((x) => x.authorEmail !== user.email && (!seen || x.createdAt > seen)).length || undefined;
             })() },
@@ -1140,7 +1154,7 @@ export default async function InstrumentPage({ params, searchParams }: {
               }))} />
             </div>
           ) },
-        ])}
+        ]).filter((pnl) => !hiddenPanels.has(pnl.key))}
       />
     </div>
   );

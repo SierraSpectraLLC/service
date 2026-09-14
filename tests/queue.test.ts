@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canKick, daysSince, parkedDaysBefore, queueView } from "@/lib/queue";
+import { canKick, daysSince, parkedDaysBefore, queueApplies, queueView } from "@/lib/queue";
 
 const d = (iso: string) => new Date(iso);
 const HOUSE = null;
@@ -88,5 +88,22 @@ describe("parkedDaysBefore", () => {
   it("is zero for a system that never left our queue", () => {
     expect(parkedDaysBefore([], d("2026-08-15T00:00:00Z"))).toBe(0);
     expect(parkedDaysBefore([{ toOrgId: HOUSE, at: d("2026-08-01T00:00:00Z") }], d("2026-08-15T00:00:00Z"))).toBe(0);
+  });
+});
+
+describe("queueApplies", () => {
+  // The queue is for machines that move. A lab client's own instrument sits in
+  // their lab and is serviced through work orders: there is no second queue to
+  // move it into and nobody to hand it to.
+  it("is not a fact about a lab client's own machine", () => {
+    expect(queueApplies({ kind: "client", resaleEnabled: false })).toBe(false);
+  });
+  it("applies to house stock, a provider's inventory and a reseller's", () => {
+    expect(queueApplies(null)).toBe(true);
+    expect(queueApplies({ kind: "provider", resaleEnabled: false })).toBe(true);
+    expect(queueApplies({ kind: "client", resaleEnabled: true })).toBe(true);
+  });
+  it("shows the control when the owner cannot be resolved - the smaller mistake", () => {
+    expect(queueApplies(undefined)).toBe(true);
   });
 });

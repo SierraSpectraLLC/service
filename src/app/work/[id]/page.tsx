@@ -8,6 +8,7 @@ import {
   rateCards, quotes,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { getModules } from "@/lib/flags";
 import { assetAccess, assertSystemVisible, canEditSystem, forTenant, isHouse, readTenant } from "@/lib/tenancy";
 import { brandForTenant } from "@/lib/brand";
 import { visitFlag } from "@/lib/entitlementFlags";
@@ -70,6 +71,7 @@ export const dynamic = "force-dynamic";
 export default async function WorkOrderPage({ params }: { params: Promise<{ id: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
+  const modules = await getModules();
   const { id } = await params;
   const woId = parseInt(id);
   if (isNaN(woId)) notFound();
@@ -430,7 +432,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         defaultRight={[]}
         pinned={["job"]}
         groups={[
-          { key: "work", label: "Work", keys: ["notes", "tasks", "parts", "hours"],
+          { key: "work", label: "Work", keys: [...(modules.discussions ? ["notes"] : []), "tasks", "parts", "hours"],
             badge: openTasksH || undefined,
             badgeTone: taskRows.some((t) => t.state !== "Done" && t.dueDate && t.dueDate < today) ? "bad" : "info" },
           { key: "files", label: "Files", keys: ["files", "photos"] },
@@ -468,14 +470,16 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         />
       </div>
           ) },
-          { key: "notes", label: "Notes", node: (
+          // The Comments card goes with the talk module (lib/flags). What was
+          // posted stays on file and comes back with the switch.
+          ...(modules.discussions ? [{ key: "notes", label: "Notes", node: (
       <WorkOrderNotes workOrderId={wo.id} canPost={canEdit} people={mentionable}
         me={{ email: user.email, name: user.name, isHouse: staff }}
         notes={noteRows.map((n) => ({
           id: n.id, author: n.author, authorEmail: n.authorEmail, text: n.text,
           createdAt: n.createdAt.toISOString(), editedAt: n.editedAt?.toISOString() ?? null,
         }))} />
-          ) },
+          ) }] : []),
           { key: "tasks", label: "Tasks", node: (
       <TasksPanel target={target} tasks={fullTasks} people={directoryNames(people)} mentionable={mentionable}
         systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} - ${a.model || a.serial || "?"}` }))}

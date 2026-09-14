@@ -3,6 +3,7 @@ import { and, asc, desc, eq, isNull, isNotNull, inArray, lte, sql } from "drizzl
 import { db } from "@/db";
 import { discussionPosts, instruments, discussionReads, orgs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { getModules } from "@/lib/flags";
 import { forTenant, readTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { canSeePost, roomThreadId, type Audience } from "@/lib/discussionScope";
 import { brandForTenant } from "@/lib/brand";
@@ -26,6 +27,8 @@ export const dynamic = "force-dynamic";
 export default async function DiscussionsPage({ searchParams }: { searchParams: Promise<{ room?: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
+  // A module that is off has no pages, the same as the others in lib/flags.
+  if (!(await getModules()).discussions) redirect("/");
   const canEdit = user.role !== "client_viewer";
   const isHouseUser = user.role === "owner" || user.role === "staff";
   // Which house, not just "a house": two service companies on one instance are

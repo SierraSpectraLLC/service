@@ -4116,6 +4116,14 @@ export const appSettings = pgTable("app_settings", {
    * a disclosure attached to it, not a default. See lib/trail.
    */
   trailEnabled: boolean("trail_enabled").notNull().default(false),
+  /**
+   * Discussions, work-order comments and messages. Off by default: the talk
+   * surfaces were one operator's way of keeping the conversation on the
+   * record, and a shop that talks elsewhere gets two icons and two cards it
+   * never opens. Off hides the pages and the panels; what was posted stays
+   * on file and comes back with the switch. See lib/flags.
+   */
+  discussionsEnabled: boolean("discussions_enabled").notNull().default(false),
   // Billing. The prefix is what invoice numbers are built on; the number
   // itself is allocated by scanning the highest one in use, the same
   // read-max-and-retry the work order numbers have always used.
