@@ -13745,6 +13745,9 @@ export async function setCatalogPhotoFraming(termId: number, framing: string): P
     .set({ photoFraming: serializeFrame(parseFrame(framing)) })
     .where(eq(vocabTerms.id, termId));
   revalidatePath("/settings/catalog");
+  // The model's own page shows the same photo, framed the same way, and is
+  // now where the framing is usually set.
+  revalidatePath(`/catalog/${termId}`);
   rev();
   return {};
 }
