@@ -35,6 +35,8 @@ export type BulkOptions = {
   clients: string[];
   categories: string[];
   people: string[];
+  /** Organizations a batch may be handed to. Empty hides the owner picker. */
+  owners: { id: number; name: string; kind: string }[];
 };
 
 const COLUMNS = ["System", "ID", "Model", "Location", "Lead", "Stage"];
@@ -56,11 +58,17 @@ const COLUMNS = ["System", "ID", "Model", "Location", "Lead", "Stage"];
  *
  * Checkboxes, as the asset registry has them, for the changes that are made
  * to a batch rather than to a system: the client the work is for, the type,
- * the lead, the archive. Twenty systems typed in one afternoon get their
- * category in one pick rather than twenty visits. Every change goes through
- * updateSystems, which runs each system through its own single-record action
- * - same check of who may edit it, same audit line. Ownership is deliberately
- * not here: it grants sight of the record, and that is decided one at a time.
+ * the lead, the owner, the archive. Twenty systems typed in one afternoon get
+ * their category in one pick rather than twenty visits. Every change goes
+ * through updateSystems, which runs each system through its own single-record
+ * action - same check of who may edit it, same audit line.
+ *
+ * Owner asks twice. Every other picker here changes what a record SAYS and is
+ * undone by picking again; ownership changes who can OPEN it, and thirty-six
+ * systems handed to the wrong organization is thirty-six records read by
+ * people who should not have seen them. So the second dialog names the
+ * organization, the count, and the consequence in those words before
+ * anything runs.
  *
  * The dot carries the system's state and the page renders the Legend for it;
  * the row's one pill is its stage.
@@ -159,6 +167,33 @@ export default function SystemRegistryList({ rows, empty, groupBy = "category", 
             {options.people.map((p) => <option key={p} value={p}>{p}</option>)}
             <option value="-">(unassigned)</option>
           </select>
+          {options.owners.length > 0 && (
+            <select value="" aria-label="Set the owner" disabled={pending} className="t-small" style={pickerStyle}
+              onChange={async (e) => {
+                const v = e.target.value;
+                // Reset the picker first: the confirm is a round trip, and a
+                // cancelled one must not leave the box reading like a state.
+                e.target.value = "";
+                if (v === "") return;
+                const org = v === "-" ? null : options.owners.find((o) => String(o.id) === v) ?? null;
+                const n = picked.size;
+                const many = `${n} system${n === 1 ? "" : "s"}`;
+                if (!(await confirmDialog({
+                  title: org ? `Make ${org.name} the owner of ${many}?` : `Return ${many} to house stewardship?`,
+                  body: org
+                    ? `${org.name} will be able to open all ${n} - the record, its history and its files - and their editors decide who else gets access. Where a system's client label was naming the previous owner it follows to ${org.name}; a label somebody set by hand stays as it is. Each change is on the record's audit trail.`
+                    : `Ownership goes back to the house. The organizations that hold a share keep it - this changes who OWNS the ${many}, not who has been given access.`,
+                  action: org ? `Hand over ${many}` : `Return ${many}`,
+                }))) return;
+                apply({ ownerOrgId: org?.id ?? null }, org ? `Made ${org.name} the owner` : "Returned to house stewardship");
+              }}>
+              <option value="">Set owner...</option>
+              {options.owners.map((o) => (
+                <option key={o.id} value={o.id}>{o.name}{o.kind === "provider" ? " (provider)" : ""}</option>
+              ))}
+              <option value="-">(house-stewarded)</option>
+            </select>
+          )}
           <button className="btn sm" style={{ marginLeft: "auto" }} disabled={pending}
             onClick={async () => {
               if (!(await confirmDialog({
