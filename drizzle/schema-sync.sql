@@ -4439,3 +4439,14 @@ ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "booked_until" text NOT NULL 
 
 -- What an invoice is for, in one line, printed under its number on every copy.
 ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "title" text NOT NULL DEFAULT '';
+
+-- The client an expense report is for when there is no job: spend the shop
+-- absorbs on a partner's account. See the column in schema.ts.
+ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "org_id" integer;
+CREATE INDEX IF NOT EXISTS "expense_reports_org_idx" ON "expense_reports" ("org_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expense_reports_org_id_orgs_id_fk') THEN
+    ALTER TABLE "expense_reports" ADD CONSTRAINT "expense_reports_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

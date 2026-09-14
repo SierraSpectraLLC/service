@@ -9037,6 +9037,22 @@ async function reportWorkOrder(
 }
 
 /**
+ * The client a claim is for when it names no job. One of OUR clients, checked
+ * rather than trusted - an id off the wire that belongs to another operator's
+ * client is the leak this whole area keeps refusing. Null is the ordinary
+ * answer: a job names its own client, and overhead has none.
+ */
+async function reportClient(
+  u: SessionUser, want: number | null | undefined,
+): Promise<{ id: number | null } | { error: string }> {
+  if (want === null || want === undefined) return { id: null };
+  const [org] = await db.select().from(orgs)
+    .where(and(eq(orgs.id, want), eq(orgs.kind, "client"), forTenant(orgs.parentOrgId, readTenant(u))));
+  if (!org) return { error: "That is not one of our clients" };
+  return { id: org.id };
+}
+
+/**
  * Open a fresh draft report to fill - the container the receipts land in.
  *
  * THE one way a report comes into existence. It used to be two: this, and a
@@ -9075,6 +9091,11 @@ export async function createExpenseReport(
      * alone, which is refused rather than read as overhead.
      */
     workOrderId?: number | null;
+    /**
+     * The client, when there is no job - spend absorbed on a partner's
+     * account. Ignored when a job is named, since the job names its client.
+     */
+    orgId?: number | null;
     /** Unclaimed rows to seed it with - the pool's "claim these" gesture. */
     expenseIds?: number[];
   } = {},
@@ -9100,6 +9121,8 @@ export async function createExpenseReport(
   if ("error" in named) return named;
   const job = await reportWorkOrder(u, opts.workOrderId);
   if ("error" in job) return job;
+  const forClient = await reportClient(u, job.id === null ? opts.orgId : null);
+  if ("error" in forClient) return forClient;
   const purpose = (opts.purpose ?? "").trim().slice(0, 500);
   const t = readTenant(u);
 
@@ -9125,7 +9148,7 @@ export async function createExpenseReport(
 
   const [report] = await db.insert(expenseReports).values({
     tenantOrgId: t, person, status: "draft", openedBy: u.email,
-    workOrderId: job.id, title: named.title, purpose,
+    workOrderId: job.id, orgId: forClient.id, title: named.title, purpose,
   }).returning();
   if (ids.length) {
     await db.update(expenses).set({ reportId: report.id }).where(inArray(expenses.id, ids));
@@ -9218,24 +9241,39 @@ export async function amendExpenseReport(
 export async function setReportWorkOrder(
   reportId: number, workOrderId: number | null,
 ): Promise<{ error?: string }> {
+  return setReportTarget(reportId, { workOrderId, orgId: null });
+}
+
+/**
+ * The three answers, moved between: a job, a client with no job, or
+ * overhead. A job names its own client, so naming one clears the other.
+ */
+export async function setReportTarget(
+  reportId: number, target: { workOrderId: number | null; orgId: number | null },
+): Promise<{ error?: string }> {
   const u = await requireStaff();
   const report = await workableReport(u, reportId);
   if (!report) return { error: "Not your report" };
   if (!editableReport(report.status)) return { error: `That report is ${report.status} - it is fixed now` };
-  const job = await reportWorkOrder(u, workOrderId);
+  const job = await reportWorkOrder(u, target.workOrderId);
   if ("error" in job) return job;
-  if (job.id === report.workOrderId) return {};
-  await db.update(expenseReports).set({ workOrderId: job.id }).where(eq(expenseReports.id, reportId));
+  const forClient = await reportClient(u, job.id === null ? target.orgId : null);
+  if ("error" in forClient) return forClient;
+  if (job.id === report.workOrderId && forClient.id === report.orgId) return {};
+  await db.update(expenseReports).set({ workOrderId: job.id, orgId: forClient.id }).where(eq(expenseReports.id, reportId));
   // The job IS the distance. Moving it re-judges every per diem on the claim.
   await rerulePerDiems({ ...report, workOrderId: job.id });
+  const [client] = forClient.id === null ? [] : await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, forClient.id));
   await audit({
     actor: u.email, entityType: "expense_report", entityId: reportId, tenantOrgId: report.tenantOrgId,
-    action: job.id === null
-      ? `took ${report.person}'s expense report off its work order - overhead now`
-      : `attached ${report.person}'s expense report to a work order`,
-    field: "work_order_id",
-    oldValue: report.workOrderId === null ? "" : String(report.workOrderId),
-    newValue: job.id === null ? "" : String(job.id),
+    action: job.id !== null
+      ? `attached ${report.person}'s expense report to a work order`
+      : client
+        ? `filed ${report.person}'s expense report under ${client.name} - no job, absorbed`
+        : `took ${report.person}'s expense report off its work order - overhead now`,
+    field: "filed_under",
+    oldValue: report.workOrderId !== null ? `wo:${report.workOrderId}` : report.orgId !== null ? `org:${report.orgId}` : "",
+    newValue: job.id !== null ? `wo:${job.id}` : forClient.id !== null ? `org:${forClient.id}` : "",
   });
   revalidatePath("/money/reimbursements");
   revalidatePath(`/money/reimbursements/${reportId}`);

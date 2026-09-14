@@ -8,8 +8,7 @@ import {
   withdrawExpenseReport,
 } from "@/app/actions";
 import {
-  REPORT_LABEL, REPORT_TONE, checkReportTitle, deskReports, reportPeople, reportSpan,
-  reportTitle, reportTotalCents,
+  checkReportTitle, deskReports, filedUnder, NO_JOB, parseReportTarget, REPORT_LABEL, REPORT_TONE, reportPeople, reportSpan, reportTitle, reportTotalCents,
 } from "@/lib/expenseReports";
 import { formatCents } from "@/lib/money";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
@@ -28,6 +27,8 @@ export type ReportRow = {
   /** The job it is filed against, or "" for an overhead claim. */
   workOrderNumber: string;
   workOrderId: number | null;
+  /** The client it is for when it names no job - "" otherwise. */
+  orgName: string;
   /** Who filed it, when that is not whose money it is. */
   openedByName: string;
   paidOn: string; paidRef: string; returnedReason: string; note: string;
@@ -41,7 +42,6 @@ export type ReportRow = {
 };
 
 /** The work-order picker's unanswered state, kept distinct from "overhead". */
-const NO_JOB = "none";
 
 /**
  * The reimbursement desk, both sides of it.
@@ -63,7 +63,7 @@ const NO_JOB = "none";
  */
 export default function ExpenseReportsPanel({
   pool, mine, queue, adminsPeople, isOwner, subjects, me, openFor, today, paidMonths,
-  categories, workOrders,
+  categories, workOrders, clients = [],
 }: {
   pool: PoolRow[];
   mine: ReportRow[];
@@ -97,6 +97,8 @@ export default function ExpenseReportsPanel({
   categories: string[];
   /** Every work order, open or closed - a receipt often surfaces after the job wraps. */
   workOrders: { id: number; label: string }[];
+  /** Our clients, for a claim with no job that is still somebody's account. */
+  clients?: { id: number; name: string }[];
 }) {
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [paying, setPaying] = useState<ReportRow | null>(null);
@@ -154,7 +156,9 @@ export default function ExpenseReportsPanel({
               showing nothing and reading as a gap. */}
           {r.workOrderNumber
             ? <span className="mut t-meta mono">{r.workOrderNumber}</span>
-            : <span className="pill faint">overhead</span>}
+            : r.orgName
+              ? <span className="pill neutral">{filedUnder(r)}</span>
+              : <span className="pill faint">overhead</span>}
           <span className="t-body">
             {reportSpan(r.expenses) || "no dated rows"} · {r.expenses.length} expense{r.expenses.length === 1 ? "" : "s"}
           </span>
@@ -278,21 +282,18 @@ export default function ExpenseReportsPanel({
         </>
       )}
 
+      {/* Kept, and kept out of the way: a month of PAID claims as one sheet
+          for the accountant, dated by the payout rather than by submission -
+          a claim submitted in July and paid in August belongs in August's
+          file. It was a card of its own at the top; the desk is for filing
+          and paying claims, and the export is a thing done once a month. */}
       {adminsPeople && paidMonths.length > 0 && (
-        /* What actually gets sent to an accountant: a month of PAID claims as
-           one sheet. Dated by the PAYOUT rather than by submission, because a
-           reimbursement hits the books when the shop paid it - a claim
-           submitted in July and paid in August belongs in August's file, and
-           getting that backwards is how the same money gets accrued twice.
-           Single reports carry their own receipts; this is the ledger. */
-        <Panel title="For the bookkeeper"
-          hint="A month of paid claims as one sheet. Individual reports download with their receipts from the report itself.">
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {paidMonths.map((m) => (
-              <a key={m} className="btn sm" href={`/api/export/reimbursements?month=${m}`}>{m}</a>
-            ))}
-          </div>
-        </Panel>
+        <div className="mut t-meta" style={{ marginBottom: 8 }}>
+          Bookkeeper: a month of paid claims as one sheet -{" "}
+          {paidMonths.map((m, i) => (
+            <span key={m}>{i > 0 && " · "}<a href={`/api/export/reimbursements?month=${m}`}>{m}</a></span>
+          ))}
+        </div>
       )}
 
       <Panel title="Start here"
@@ -360,6 +361,7 @@ export default function ExpenseReportsPanel({
               <button className="btn" onClick={() => setOpening(false)} disabled={pending}>Cancel</button>
               <button className="btn accent" disabled={pending || newProblem !== null}
                 onClick={() => startTransition(async () => {
+                  const target = parseReportTarget(newDraft.workOrderId);
                   const res = await createExpenseReport({
                     onBehalfOf: newDraft.forWhom || undefined,
                     title: newDraft.title,
@@ -367,7 +369,7 @@ export default function ExpenseReportsPanel({
                     // The picker's own empty string never reaches here - the
                     // button is disabled until it is answered - so this is
                     // "overhead" or an id, never "the field was skipped".
-                    workOrderId: newDraft.workOrderId === NO_JOB ? null : parseInt(newDraft.workOrderId, 10),
+                    workOrderId: target?.workOrderId ?? null, orgId: target?.orgId ?? null,
                     expenseIds: [...picked],
                   });
                   if (res?.error || !res.id) { setOpenErr(res.error ?? "That didn't save"); return; }
@@ -411,16 +413,30 @@ export default function ExpenseReportsPanel({
           {/* The job. Open or closed alike - a receipt surfaces long after the
               order it belongs to wraps - and "no job" is a deliberate answer
               rather than a skipped field, which is why it starts unset. */}
-          <label style={{ marginTop: 8 }}>The job it is for</label>
+          <label style={{ marginTop: 8 }}>What it is for</label>
+          {/* Three answers: a job, a client with no job, or overhead. The
+              second is the part bought for a month-to-month partner and
+              absorbed - real spend on a real account with no order behind
+              it, which "overhead" lost. See lib/expenseReports.reportTargetValue. */}
           <select value={newDraft.workOrderId} aria-label="Work order"
             onChange={(e) => setNewDraft({ ...newDraft, workOrderId: e.target.value })}>
-            <option value="">Pick the job...</option>
+            <option value="">Pick what it is for...</option>
             <option value={NO_JOB}>No job - overhead</option>
-            {workOrders.map((w) => <option key={w.id} value={String(w.id)}>{w.label}</option>)}
+            {workOrders.length > 0 && (
+              <optgroup label="A job">
+                {workOrders.map((w) => <option key={w.id} value={`wo:${w.id}`}>{w.label}</option>)}
+              </optgroup>
+            )}
+            {clients.length > 0 && (
+              <optgroup label="A client, no job - absorbed on their account">
+                {clients.map((c) => <option key={c.id} value={`org:${c.id}`}>{c.name}</option>)}
+              </optgroup>
+            )}
           </select>
           <div className="field-hint">
-            Open or closed - the receipts usually turn up after the job does. Pick overhead for
-            spend no job caused, the way the internet bill is.
+            A job, open or closed - the receipts usually turn up after it does. A client with no
+            job for spend you eat on their account. Overhead for spend nobody caused, the way the
+            internet bill is.
           </div>
           <label style={{ marginTop: 8 }}>What it was for</label>
           <input value={newDraft.purpose} aria-label="Purpose"

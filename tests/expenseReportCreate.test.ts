@@ -69,6 +69,12 @@ beforeAll(async () => {
       ('Ridgeline', 'provider', true),
       ('Sierra Spectra', 'provider', true),
       ('Cascade Instrument', 'provider', true);
+    -- A client of each operator: the month-to-month partner a shop eats the
+    -- odd part for, and the one next door that must never be pickable here.
+    INSERT INTO orgs (id, name, kind, is_operator, parent_org_id) VALUES
+      (41, 'LabZen', 'client', false, ${SIERRA}),
+      (42, 'Rival Labs', 'client', false, ${CASCADE});
+    SELECT setval('orgs_id_seq', 100);
     INSERT INTO app_settings (id, operator_org_id) VALUES (1, ${ROOT});
 
     -- A Steve Jones at each company: the collision that makes every
@@ -157,6 +163,41 @@ describe("the three answers a new report is opened with", () => {
     const res = await createExpenseReport({ title: "Nice try", workOrderId: CASCADE_WO });
     expect(res.error).toBeTruthy();
     expect(await reports()).toEqual([]);
+  });
+});
+
+describe("the third answer - a client, no job", () => {
+  it("files a claim under one of our clients, absorbed on their account", async () => {
+    const { createExpenseReport } = await import("@/app/actions");
+    const res = await createExpenseReport({ title: "Plug for the SQD wall outlet", workOrderId: null, orgId: 41 });
+    expect(res.error).toBeUndefined();
+    const [r] = await reports();
+    expect([r.workOrderId, r.orgId]).toEqual([null, 41]);
+  });
+
+  it("refuses the company next door's client, and the job wins over a client", async () => {
+    const { createExpenseReport } = await import("@/app/actions");
+    expect((await createExpenseReport({ title: "Nice try", workOrderId: null, orgId: 42 })).error)
+      .toBe("That is not one of our clients");
+    expect(await reports()).toHaveLength(0);
+    // A job names its own client: the org is dropped, not stored twice.
+    expect((await createExpenseReport({ title: "Reno install", workOrderId: SIERRA_WO, orgId: 41 })).error).toBeUndefined();
+    const [r] = await reports();
+    expect([r.workOrderId, r.orgId]).toEqual([SIERRA_WO, null]);
+  });
+
+  it("moves between the three answers on a draft", async () => {
+    const { createExpenseReport, setReportTarget, setReportWorkOrder } = await import("@/app/actions");
+    const made = await createExpenseReport({ title: "Odds and ends", workOrderId: null });
+    const id = made.id!;
+    expect(await setReportTarget(id, { workOrderId: null, orgId: 41 })).toEqual({});
+    expect((await reports())[0].orgId).toBe(41);
+    expect(await setReportTarget(id, { workOrderId: SIERRA_WO, orgId: null })).toEqual({});
+    expect([(await reports())[0].workOrderId, (await reports())[0].orgId]).toEqual([SIERRA_WO, null]);
+    // The old door still works, and clears the client as a job does.
+    expect(await setReportWorkOrder(id, null)).toEqual({});
+    expect([(await reports())[0].workOrderId, (await reports())[0].orgId]).toEqual([null, null]);
+    expect((await setReportTarget(id, { workOrderId: null, orgId: 42 })).error).toBe("That is not one of our clients");
   });
 });
 

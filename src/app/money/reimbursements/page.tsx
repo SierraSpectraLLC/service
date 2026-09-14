@@ -2,10 +2,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { and, asc, desc, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { expenseCategories, expenseReports, expenses, houseMembers, workOrders } from "@/db/schema";
+import { expenseCategories, expenseReports, expenses, houseMembers, orgs, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
-import { forTenant, readTenant } from "@/lib/tenancy";
+import { forTenant, readTenant, visibleOrgs } from "@/lib/tenancy";
 import { reimbursementPool } from "@/lib/expenseReports";
 import { needsApproval } from "@/lib/expensePolicy";
 import { paidMonths } from "@/lib/reportExportData";
@@ -77,6 +77,13 @@ export default async function ExpensesPage({ searchParams }: {
     : [];
   const woNumber = new Map(wos.map((w) => [w.id, w.number]));
   const nameOf = new Map(roster.map((m) => [m.email.trim().toLowerCase(), m.name]));
+  /* Our clients, for a claim with no job that is still somebody's account -
+     and the names for the claims already filed that way. */
+  const clientRows = (await visibleOrgs(user)).filter((o) => o.kind === "client");
+  const orgIds = [...new Set(reportRows.map((r) => r.orgId).filter((x): x is number => x !== null))];
+  const orgNames = new Map((orgIds.length
+    ? await db.select({ id: orgs.id, name: orgs.name }).from(orgs).where(inArray(orgs.id, orgIds))
+    : []).map((o) => [o.id, o.name]));
 
   // Empty for anybody who is not HR - the action refuses on the same rule, so
   // this only decides whether the control is drawn.
@@ -96,6 +103,7 @@ export default async function ExpensesPage({ searchParams }: {
     id: r.id, person: r.person, title: r.title, status: r.status,
     workOrderId: r.workOrderId,
     workOrderNumber: r.workOrderId !== null ? (woNumber.get(r.workOrderId) ?? "") : "",
+    orgName: r.orgId !== null ? (orgNames.get(r.orgId) ?? "") : "",
     openedByName: nameOf.get(r.openedBy.trim().toLowerCase()) ?? "",
     submittedAt: r.submittedAt.toISOString().slice(0, 10),
     paidOn: r.paidOn, paidRef: r.paidRef, returnedReason: r.returnedReason, note: r.note,
@@ -140,6 +148,7 @@ export default async function ExpensesPage({ searchParams }: {
           label: `${w.number} - ${w.title}`.slice(0, 70)
             + (["closed", "resolved", "cancelled"].includes(w.state) ? ` (${WO_LABEL[w.state] ?? w.state})` : ""),
         }))}
+        clients={clientRows.map((o) => ({ id: o.id, name: o.name }))}
       />
     </FinanceShell>
   );

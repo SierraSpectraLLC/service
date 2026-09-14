@@ -32,7 +32,7 @@ const expense = (over: Partial<ExportExpense> = {}): ExportExpense => ({
 const report = (over: Partial<ExportReport> = {}): ExportReport => ({
   id: 14, title: "Astoria commissioning, week of the 8th", person: "Tess Nakamura",
   purpose: "Two nights on site bringing the Pier Road LC-MS up.",
-  status: "paid", workOrderNumber: "WO-2045", openedBy: "Tess Nakamura",
+  status: "paid", workOrderNumber: "WO-2045", clientName: "", openedBy: "Tess Nakamura",
   submittedOn: "2026-08-10", paidOn: "2026-08-15", paidRef: "check 1044",
   expenses: [expense()], ...over,
 });

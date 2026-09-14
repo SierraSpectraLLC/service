@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  checkReportTitle, deskReports, editableReport, reimbursementPool, reportPeople, reportSpan,
-  reportTitle, reportTotalCents, unsubmittedReport, type PoolExpense,
+  checkReportTitle, deskReports, editableReport, filedUnder, NO_JOB, parseReportTarget, reimbursementPool, reportPeople, reportSpan, reportTargetValue, reportTitle, reportTotalCents, type PoolExpense, unsubmittedReport,
 } from "@/lib/expenseReports";
 
 /**
@@ -139,5 +138,28 @@ describe("what a claim is called", () => {
     expect(reportTitle({ person: "Steve Jones", title: "" }, rows)).toBe("Steve Jones - Jul 12 - Aug 3");
     expect(reportTitle({ person: "Steve Jones", title: "" }, [])).toBe("Steve Jones - expense report");
     expect(reportTitle({ person: "Steve Jones", title: "Reno install" }, rows)).toBe("Reno install");
+  });
+});
+
+describe("what a claim is filed under", () => {
+  it("is one of three answers, read back exactly", () => {
+    expect(reportTargetValue({ workOrderId: null, orgId: null })).toBe(NO_JOB);
+    expect(reportTargetValue({ workOrderId: 12, orgId: null })).toBe("wo:12");
+    expect(reportTargetValue({ workOrderId: null, orgId: 7 })).toBe("org:7");
+    // A job names its own client, so the job wins when both are somehow set.
+    expect(reportTargetValue({ workOrderId: 12, orgId: 7 })).toBe("wo:12");
+    for (const t of [{ workOrderId: null, orgId: null }, { workOrderId: 12, orgId: null }, { workOrderId: null, orgId: 7 }]) {
+      expect(parseReportTarget(reportTargetValue(t))).toEqual(t);
+    }
+  });
+  it("reads an unanswered picker as nothing, not as overhead", () => {
+    expect(parseReportTarget("")).toBeNull();
+    expect(parseReportTarget("12")).toBeNull();
+    expect(parseReportTarget("wo:x")).toBeNull();
+  });
+  it("says the fact a reviewer reaches for first", () => {
+    expect(filedUnder({ workOrderNumber: "WO-1042", orgName: "LabZen" })).toBe("WO-1042");
+    expect(filedUnder({ workOrderNumber: "", orgName: "LabZen" })).toBe("for LabZen");
+    expect(filedUnder({ workOrderNumber: "", orgName: "" })).toBe("overhead");
   });
 });

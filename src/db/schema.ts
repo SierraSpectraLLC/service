@@ -3457,6 +3457,17 @@ export const expenseReports = pgTable("expense_reports", {
    * records which. Set null on delete, because the claim outlives the order.
    */
   workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
+  /**
+   * The client this claim is for when there is NO job - the third answer.
+   *
+   * A shop with an open, month-to-month partnership buys the odd part for
+   * that client and eats it; there is no work order because there is no
+   * formal job, and "overhead" loses the one fact worth keeping, which is
+   * whose account the money went to. Set only while work_order_id is null:
+   * a job already names its client, and one fact stored twice is one fact
+   * that drifts. Set null on delete, as the job is.
+   */
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "set null" }),
   status: text("status").notNull().default("submitted"),
   /**
    * THE REPORT THIS ONE CORRECTS.

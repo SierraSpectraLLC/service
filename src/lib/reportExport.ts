@@ -39,6 +39,8 @@ export type ExportReport = {
   purpose: string;
   status: string;
   workOrderNumber: string;
+  /** The client the claim is for when it names no job - absorbed spend. */
+  clientName: string;
   openedBy: string;
   submittedOn: string;
   paidOn: string;
@@ -47,7 +49,7 @@ export type ExportReport = {
 };
 
 const HEADERS = [
-  "Report", "Report ID", "Person", "Status", "Job", "Purpose",
+  "Report", "Report ID", "Person", "Status", "Job", "Client", "Purpose",
   "Opened by", "Submitted on", "Paid on", "Paid reference",
   "Expense date", "Category", "Description", "Amount", "Rebillable",
   "Expense job", "Site", "Receipt file", "Policy", "Policy note", "Approved by",
@@ -79,7 +81,7 @@ export function reportRows(reports: ExportReport[]): (string | number)[][] {
     const list: (ExportExpense | null)[] = r.expenses.length ? r.expenses : [null];
     for (const e of list) {
       rows.push([
-        r.title, r.id, r.person, r.status, r.workOrderNumber, r.purpose,
+        r.title, r.id, r.person, r.status, r.workOrderNumber, r.clientName, r.purpose,
         r.openedBy, r.submittedOn, r.paidOn, r.paidRef,
         e?.incurredOn ?? "", e?.kind ?? "", e?.description ?? "",
         e ? dollars(e.amountCents) : "",
