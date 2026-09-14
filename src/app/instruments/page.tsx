@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation";
 import { asc, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments } from "@/db/schema";
+import { instruments, vocabTerms } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
-import { viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { clientOptions } from "@/lib/clientNames";
+import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { getStageDefs } from "@/lib/stageDefs";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { SYSTEM_STATES, filterSystems, systemOwnerName, systemState } from "@/lib/systemRegistry";
@@ -46,13 +48,28 @@ export default async function SystemsPage({ searchParams }: {
   const groupBy = group === "owner" ? "owner" : "category";
 
   const visible = await visibleSystemIds(user);
-  const [rows, orgRows, defs] = await Promise.all([
+  const tenant = await viewTenant(user);
+  const [rows, orgRows, defs, vocab, people] = await Promise.all([
     db.select().from(instruments)
       .where(visible === null ? undefined : visible.length ? inArray(instruments.id, visible) : sql`false`)
       .orderBy(asc(instruments.externalId)),
     visibleOrgs(user),
-    getStageDefs(await viewTenant(user)),
+    getStageDefs(tenant),
+    // The catalog's system categories, for the selection bar's type picker -
+    // the same list the record's own picker offers.
+    db.select({ kind: vocabTerms.kind, name: vocabTerms.name }).from(vocabTerms)
+      .where(forTenant(vocabTerms.tenantOrgId, tenant)),
+    visibleDirectory(user),
   ]);
+  // What the checkboxes may set at once. Clients are the organizations we
+  // work with plus whatever is already typed on a system; types the catalog's
+  // plus those in use; leads the people this reader may assign.
+  const bulk = {
+    clients: clientOptions(orgRows.filter((o) => o.kind === "client").map((o) => o.name), rows.map((r) => r.client)),
+    categories: [...new Set([...vocab.filter((v) => v.kind === "category").map((v) => v.name), ...rows.map((r) => r.category)])]
+      .filter(Boolean).sort((a, b) => a.localeCompare(b)),
+    people: directoryNames(people),
+  };
   const labels = await getSystemLabels(rows);
   const stageOfOrg = new Map(orgRows.map((o) => [o.id, o.stage]));
   const items = rows.map((i) => ({
@@ -118,6 +135,8 @@ export default async function SystemsPage({ searchParams }: {
       <div className="card">
         <SystemRegistryList
           groupBy={groupBy}
+          canSelect
+          options={bulk}
           rows={shown.map((i) => {
             const first = i.stages[0] ? stageDef(i.stages[0]) : null;
             return {
