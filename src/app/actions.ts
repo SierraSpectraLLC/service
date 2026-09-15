@@ -16177,15 +16177,18 @@ export async function removeInvoiceLine(lineId: number, reason: string): Promise
 }
 
 /**
- * Issue it: stamp the date, apply the client's terms, open a share link and
- * mail it.
+ * Mark it sent: stamp the date, apply the client's terms, open the client's
+ * link.
  *
- * The link is how the client reads the bill, and its open event is the Viewed
- * signal on the timeline - there is no second tracker, because a second
- * tracker is a second answer to "did they see it". Mail failing does not
- * un-issue the invoice; the link exists either way and the error says so.
+ * NOTHING IS EMAILED. This used to mail the client a link in the same breath,
+ * and the shop sends its invoices itself - the Excel off the template, or the
+ * PDF - so a button that also fired an email was a button nobody could press
+ * without sending the bill twice. What the app records is the fact: issued
+ * today, due per the client's terms, from a draft to a bill the ledger
+ * counts. The link still opens, because the client's portal reads the invoice
+ * through it and its open event is the Viewed line on the timeline.
  */
-export async function sendInvoice(id: number): Promise<{ error?: string; token?: string; warning?: string }> {
+export async function markInvoiceSent(id: number): Promise<{ error?: string; token?: string }> {
   const u = await requireStaff();
   const [inv] = await db.select().from(invoices).where(eq(invoices.id, id));
   if (!inv) return { error: "Not found" };
@@ -16216,49 +16219,10 @@ export async function sendInvoice(id: number): Promise<{ error?: string; token?:
   })));
   await audit({
     actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: inv.tenantOrgId,
-    action: `sent ${inv.number} to ${org?.name ?? "the client"}: ${formatCents(total)}, due ${dueOn}`,
+    action: `marked ${inv.number} sent to ${org?.name ?? "the client"}: ${formatCents(total)}, due ${dueOn}`,
   });
-
-  const warning = await mailInvoice({ inv, org: org ?? null, token, total, dueOn })
-    .then(() => "")
-    .catch(() => "The invoice is issued and the link works, but the email did not go out.");
   revInvoice(inv);
-  return { token, ...(warning ? { warning } : {}) };
-}
-
-/**
- * The email itself. Threaded per client through lib/emailThread, so this
- * month's invoice and last month's are one conversation rather than twelve
- * lookalike messages, and addressed to the AP contact when there is one -
- * reminders go to the desk that pays, not the lab that ordered.
- */
-async function mailInvoice(opts: {
-  inv: typeof invoices.$inferSelect;
-  org: typeof orgs.$inferSelect | null;
-  token: string; total: number; dueOn: string;
-}): Promise<void> {
-  const { inv, org } = opts;
-  const to = [org?.apEmail?.trim(), ...(await orgRecipients(inv.orgId))].filter(Boolean) as string[];
-  if (!to.length) return;
-  const base = appUrl();
-  if (!base) return;
-  const brand = await brandForTenant(inv.tenantOrgId);
-  const href = `${base}/share/${opts.token}`;
-  const html = emailShell({
-    brand: brand.operatorName || brand.name,
-    logoUrl: brand.operatorLogoUrl || undefined,
-    tagline: brand.tagline || undefined,
-    preheader: `Invoice ${inv.number} - ${formatCents(opts.total)}, due ${opts.dueOn}`,
-    body: `<p style="margin:0 0 12px;"><strong>Invoice ${esc(inv.number)}</strong></p>`
-      + `<p style="margin:0 0 16px;">${esc(formatCents(opts.total))}, due ${esc(opts.dueOn)}.</p>`
-      + btn(href, "View the invoice"),
-    footer: `Questions about a line? Reply to this message and we will pause that line while the rest stays due.`,
-  });
-  const root = threadRootId(`invoice-org-${inv.orgId}`, mailHost(process.env.EMAIL_FROM));
-  await sendEmail([...new Set(to)], `${brand.name}: invoice ${inv.number}`, html, {
-    headers: threadHeaders(root),
-    text: `Invoice ${inv.number} - ${formatCents(opts.total)}, due ${opts.dueOn}.\n${href}`,
-  });
+  return { token };
 }
 
 /**
