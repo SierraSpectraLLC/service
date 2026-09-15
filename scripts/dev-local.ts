@@ -1034,9 +1034,27 @@ async function seed() {
   await pg.close();
 }
 
+/**
+ * The ledger, derived from the fixture through lib/ledger/postings - the
+ * same functions every money action calls - so the seed never hand-writes a
+ * journal row and the local books read the way production's will after
+ * scripts/backfill-ledger runs there. In a child process, because src/db
+ * decides Neon-or-PGlite at import time.
+ */
+function backfillLedger(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("npx", ["tsx", "scripts/backfill-ledger.ts"], {
+      stdio: "inherit",
+      env: { ...process.env, NODE_ENV: "development", LOCAL_DB: "1", PGLITE_DIR: DATA_DIR },
+    });
+    child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`backfill exited ${code}`))));
+  });
+}
+
 async function main() {
   console.log(`[dev:local] database: ${DATA_DIR}`);
   await seed();
+  await backfillLedger();
   console.log(`[dev:local] session cookie: authjs.session-token=devtoken (owner ${OWNER})`);
   console.log("[dev:local] ... stafftoken (Bill Reyes, staff at Sierra Spectra - not the owner)");
   console.log("[dev:local] ... freetoken (Cass Ibarra, a shop on the free tier - see lib/plan)");

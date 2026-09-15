@@ -300,6 +300,7 @@ exports[`buildNav, per persona > builds one tree for a staff owner 1`] = `
         "Remote support → /remote",
         "Metrics → /metrics",
         "Sheet parity [3] → /parity",
+        "Ledger parity → /parity/ledger",
         "Archived → /archive",
       ],
     },

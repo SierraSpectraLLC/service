@@ -350,6 +350,10 @@ function staffSections(ctx: NavContext): NavSection[] {
       ...(ctx.modules.sheetSync
         ? [{ href: "/parity", label: "Sheet parity", badge: ctx.openDiffs, tone: "warn" as const }]
         : []),
+      /* The dual-write period's record: the money computed the old way beside
+         the ledger's. A books reader's page, next to Sheet parity because it
+         is the same kind of page - see lib/ledger/parity. */
+      ...(ctx.seesBooks ? [{ href: "/parity/ledger", label: "Ledger parity" }] : []),
       { href: "/archive", label: "Archived" },
     ],
   });

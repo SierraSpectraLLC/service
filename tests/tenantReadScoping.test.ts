@@ -69,6 +69,18 @@ const ALLOWED: Record<string, string> = {
     "never rows. Making the constraint per-tenant is the real fix and is a " +
     "migration; until then this read is load-bearing. It moved here from " +
     "app/actions when every document number came under one door.",
+  "src/lib/ledger/backfill.ts::invoices":
+    "The ledger backfill - a command-line script's engine, and the seed's - " +
+    "sweeps every workspace's history because deriving the whole journal is the " +
+    "job, the same shape as billRun. Every entry it posts carries ITS OWN row's " +
+    "stamp (an unstamped row takes the instance operator's, which is whose it " +
+    "was), and --tenant narrows it. Nothing is rendered to a person; " +
+    "tests/ledgerBackfill holds the two-workspace case down.",
+  "src/lib/ledger/backfill.ts::payments": "Same sweep, same stamp rule: each payment posts under its invoice's tenant.",
+  "src/lib/ledger/backfill.ts::expenses": "Same sweep: each row posts under its own stamp, or a bill's.",
+  "src/lib/ledger/backfill.ts::bills": "Same sweep: a bill's cycles post under the bill's stamp.",
+  "src/lib/ledger/backfill.ts::workOrders": "Only id and org_id, to name the client on a report's or expense's entry; never rendered.",
+  "src/lib/ledger/backfill.ts::purchaseOrders": "Same sweep: a received line posts under its order's stamp.",
   "src/lib/eodEmail.ts::instruments":
     "Selects tenant_org_id explicitly and filters in JS: see mine() a few lines " +
     "down, applied to all three row sets before anything is grouped or sent.",
