@@ -677,6 +677,7 @@ async function main(): Promise<void> {
     // less than the supported alternative: the portal tells the client how to
     // send a check. Pass --stripe-account=acct_... (test mode) for the rest.
     stripeAccountId: STRIPE_ACCOUNT, stripeReady: STRIPE_ACCOUNT !== "",
+    stripeStatus: STRIPE_ACCOUNT ? "connected" : "",
     createdAt: at(-410),
   }).returning();
   const T = op.id;                       // the tenant stamp, on every row below

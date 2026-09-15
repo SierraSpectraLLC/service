@@ -82,3 +82,27 @@ export function payAmount(input: {
 /** The platform's cut, in cents. Zero unless somebody set the bps. */
 export const platformFee = (amountCents: number, bps: number): number =>
   bps <= 0 ? 0 : Math.round((amountCents * bps) / 10000);
+
+/**
+ * Which origins Stripe may send somebody back to.
+ *
+ * The apex and the www host are both live and both registered with Stripe as
+ * redirect URIs, and the person should land on whichever one they left from -
+ * a hop across hosts drops the session cookie, which is the one thing the
+ * callback needs. So the requested origin (the browser's, or the request's own
+ * host) is honoured when it is APP_URL's host or its www twin, and anything
+ * else falls back to APP_URL. Local development is let through as itself.
+ */
+export function connectOrigin(requested: string, appUrl = process.env.APP_URL ?? ""): string {
+  const base = appUrl.replace(/\/+$/, "");
+  let want: URL;
+  try { want = new URL(requested); } catch { return base; }
+  const host = want.host.toLowerCase();
+  if (want.protocol === "http:" && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) return `${want.protocol}//${host}`;
+  if (want.protocol !== "https:") return base;
+  let baseHost = "";
+  try { baseHost = new URL(base).host.toLowerCase(); } catch { return base; }
+  const twin = baseHost.startsWith("www.") ? baseHost.slice(4) : `www.${baseHost}`;
+  if (host === baseHost || host === twin) return `https://${host}`;
+  return base;
+}

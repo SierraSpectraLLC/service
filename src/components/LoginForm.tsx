@@ -15,13 +15,15 @@ import { CODE_DIGITS, CODE_TTL_MINUTES, isCodeShaped, normalizeCode } from "@/li
  * email" screen: leaving the page loses the address they just typed, and coming
  * back to type a code is a worse trip than staying put.
  */
-export default function LoginForm({ send, withPassword, smsOffered = false }: {
+export default function LoginForm({ send, withPassword, smsOffered = false, next = "" }: {
   /** Server action: sends the code by the channel asked for. */
   send: (email: string, channel?: "email" | "sms") => Promise<{ error?: string } | void>;
   /** Whether this instance can text at all - hides a button that would do nothing. */
   smsOffered?: boolean;
   /** Server action: signs in with a password, and says where to go next. */
   withPassword: (email: string, password: string) => Promise<{ error?: string; to?: string }>;
+  /** A path on this site to land on afterwards, already checked by the page. */
+  next?: string;
 }) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -56,7 +58,7 @@ export default function LoginForm({ send, withPassword, smsOffered = false }: {
     // a code was whatever that fallback happened to be, not the dashboard.
     const url = `/api/auth/callback/resend?token=${clean}`
       + `&email=${encodeURIComponent(email.trim().toLowerCase())}`
-      + `&callbackUrl=${encodeURIComponent("/")}`;
+      + `&callbackUrl=${encodeURIComponent(next || "/")}`;
     window.location.href = url;
   };
 

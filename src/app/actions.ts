@@ -97,8 +97,8 @@ import { brandForTenant } from "@/lib/brand";
 import { btn, EMAIL, emailShell, esc } from "@/lib/emailTheme";
 import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
 import { appUrl } from "@/lib/appUrl";
-import { payAmount, stripeConfigured, stripeMode } from "@/lib/stripe";
-import { accountReady, checkoutSession, createConnectAccount, onboardingLink } from "@/lib/stripeApi";
+import { connectOrigin, payAmount, stripeConfigured, stripeMode } from "@/lib/stripe";
+import { accountReady, checkoutSession, connectAuthorizeUrl, signConnectState, stripeClientId } from "@/lib/stripeApi";
 import { cleanBody, messageableFrom } from "@/lib/messages";
 import { QUALIFICATIONS, DOC_TYPES, SIG_ROLES, canApprove, canDelete, canExecute, canRevokeApproval, isProtocol } from "@/lib/gxp";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
@@ -16858,35 +16858,45 @@ export async function saveOrgBilling(orgId: number, data: {
 }
 
 /**
- * Start Stripe Connect onboarding for this workspace.
+ * Send the owner to Stripe to authorize this platform on their account.
  *
- * Express, so Stripe does the identity checks on the operator rather than this
- * platform collecting bank details it has no business holding. The account is
- * THEIRS: money moves bank to bank and Ridgeline never holds funds.
+ * Connect OAuth: the account is THEIRS - an existing Stripe account or one
+ * they make on the spot - and what comes back is its id, nothing more. Money
+ * moves bank to bank and Ridgeline never holds funds. `origin` is the host
+ * the owner is on (apex or www), so Stripe returns them to the same one and
+ * the session cookie is still there when it does; anything unexpected falls
+ * back to APP_URL (lib/stripe.connectOrigin).
+ *
+ * Nothing is written here. The account id lands on the org row when the
+ * callback (api/stripe/oauth/callback) has exchanged the code, because until
+ * then there is nothing true to write.
  */
-export async function connectStripe(returnUrl: string): Promise<{ error?: string; url?: string }> {
+export async function connectStripe(origin: string): Promise<{ error?: string; url?: string }> {
   const u = await requireOwner();
   if (!stripeConfigured()) {
     return { error: "This instance has no Stripe keys set. Add STRIPE_SECRET_KEY and try again." };
   }
+  if (!stripeClientId()) {
+    return { error: "This instance has no Stripe Connect client id set. Add STRIPE_CLIENT_ID and try again." };
+  }
   const orgId = myTenantOrgId(u);
   if (orgId === null) return { error: "This workspace has no organization to connect an account to." };
-  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  const [org] = await db.select({ stripeAccountId: orgs.stripeAccountId }).from(orgs).where(eq(orgs.id, orgId));
   if (!org) return { error: "Not found" };
 
-  try {
-    const accountId = org.stripeAccountId || await createConnectAccount(u.email);
-    if (!org.stripeAccountId) {
-      await db.update(orgs).set({ stripeAccountId: accountId }).where(eq(orgs.id, orgId));
-      await audit({
-        actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: orgId,
-        action: `started Stripe Connect onboarding (${stripeMode()} mode)`,
-      });
-    }
-    return { url: await onboardingLink(accountId, returnUrl) };
-  } catch (e) {
-    return { error: (e as Error).message };
-  }
+  const back = connectOrigin(origin);
+  if (!back) return { error: "APP_URL is not set, so there is nowhere for Stripe to send you back to." };
+  await audit({
+    actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: orgId,
+    action: `${org.stripeAccountId ? "re-started" : "started"} connecting a Stripe account (${stripeMode()} mode)`,
+  });
+  return {
+    url: connectAuthorizeUrl({
+      redirectUri: `${back}/api/stripe/oauth/callback`,
+      state: signConnectState(orgId),
+      email: u.email,
+    }),
+  };
 }
 
 /** Ask Stripe whether the account may actually be paid into yet. */

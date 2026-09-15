@@ -12,11 +12,13 @@ import { CODE_DIGITS, sendCodeFailure } from "@/lib/loginCode";
 import { smsConfigured } from "@/lib/sms";
 import LoginForm from "@/components/LoginForm";
 import { PublicShell } from "@/components/ui";
+import { safeNext } from "@/lib/loginNext";
 
 export default async function LoginPage({ searchParams }: {
-  searchParams: Promise<{ sent?: string; locked?: string; error?: string }>;
+  searchParams: Promise<{ sent?: string; locked?: string; error?: string; next?: string }>;
 }) {
-  const [{ locked, error }, brand] = await Promise.all([searchParams, getBrand()]);
+  const [{ locked, error, next: rawNext }, brand] = await Promise.all([searchParams, getBrand()]);
+  const next = safeNext(rawNext);
 
   /**
    * Send the code. Returns the failure rather than throwing it: a thrown server
@@ -97,7 +99,11 @@ export default async function LoginPage({ searchParams }: {
     // login page bouncing straight back. The form does a full load instead.
     const [me] = await db.select({ onboardedAt: users.onboardedAt })
       .from(users).where(eq(users.id, found.userId)).catch(() => []);
-    return { to: landingFor(me?.onboardedAt ?? null) };
+    // Somebody who arrived with somewhere to be goes there; the welcome gate
+    // still holds for a first sign-in, because /welcome is where they learn
+    // what the page they were headed to is.
+    const landing = landingFor(me?.onboardedAt ?? null);
+    return { to: next && landing === "/" ? next : landing };
   }
 
   return (
@@ -118,7 +124,7 @@ export default async function LoginPage({ searchParams }: {
                 That code didn&apos;t work. It may have expired or already been used - ask for a new one.
               </p>
             )}
-            <LoginForm send={send} withPassword={withPassword} smsOffered={smsConfigured()} />
+            <LoginForm send={send} withPassword={withPassword} smsOffered={smsConfigured()} next={next} />
           </>
         )}
       </div>
