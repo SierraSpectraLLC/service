@@ -12,6 +12,8 @@ import { Field, Panel } from "@/components/ui";
 export type OverheadRow = {
   id: number; kind: string; description: string; amountCents: number;
   incurredOn: string; person: string;
+  /** Posted by a standing bill rather than logged by hand - see lib/billRun. */
+  standing?: boolean;
 };
 
 const mdy = (iso: string) => {
@@ -163,6 +165,11 @@ export default function OverheadPanel({
               <span className="mut t-small">{mdy(r.incurredOn)}</span>
               <span className="t-small" style={{ flex: 1, minWidth: 0 }}>{r.description}</span>
               {r.person && <span className="mut t-small">reimburses {r.person}</span>}
+              {r.standing && (
+                <Link href="/money/bills" className="mut t-meta" style={{ textDecoration: "none" }}>
+                  standing bill
+                </Link>
+              )}
               <button className="btn link t-meta" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
                 onClick={async () => {
                   const why = await confirmReason({

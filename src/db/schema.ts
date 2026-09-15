@@ -3312,6 +3312,73 @@ export const stipends = pgTable("stipends", {
   index("stipends_person_idx").on(t.person),
 ]);
 
+/**
+ * A standing overhead bill: the liability policy, the health plan, the
+ * payroll service, the phone line, the van lease, a software seat.
+ *
+ * WHAT IT IS. Overhead has always been a ledger of receipts logged after the
+ * fact, and most of what it costs to exist is not a receipt somebody
+ * remembers to log - it is the same amount leaving on the same day every
+ * month, half of it on autopay nobody looks at. A bill is that fact recorded
+ * once: what, to whom, how much, on what cycle, and where you go to pay it.
+ *
+ * WHAT IT DOES. Each cycle the pass (lib/billRun) writes an overhead expense
+ * for it - the same row "Log an overhead expense" writes by hand, dated the
+ * cycle day, carrying bill_id - so the ledger, the rail and costing see the
+ * month's running costs without anybody logging them. It posts on the day
+ * WHETHER OR NOT anybody has marked it paid, by the owner's decision: half of
+ * these come out automatically, and a ledger that waited for a click would
+ * read low every month by exactly the bills nobody clicked.
+ *
+ * WHAT IT IS NOT. Not a stipend: a stipend pays a PERSON back and lands on
+ * their claim; a bill pays a VENDOR and lands on the ledger. Not a purchase
+ * order: a PO is one order for parts, this is a standing obligation. Not
+ * payroll's burden percentage: that is an estimate of employer costs for
+ * costing, this is the actual invoice from the carrier.
+ *
+ * `person` is for a benefit that belongs to somebody - their health plan,
+ * their phone - so the People desk can show what each person costs beyond
+ * their wage. Blank means the company's. Same key the stipends table uses:
+ * the roster name.
+ *
+ * The schedule columns are the stipends table's, byte for byte, so
+ * lib/stipends' date arithmetic runs both without a copy.
+ */
+export const bills = pgTable("bills", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  name: text("name").notNull().default(""),
+  /** Who gets paid. Free text: "The Hartford", "Kaiser", "Verizon". */
+  payee: text("payee").notNull().default(""),
+  /** The overhead category it posts under - the workspace's own vocabulary. */
+  kind: text("kind").notNull().default("Other"),
+  amountCents: integer("amount_cents").notNull().default(0),
+  cadence: text("cadence").notNull().default("months"),
+  everyMonths: integer("every_months").notNull().default(1),
+  dayOfMonth: integer("day_of_month").notNull().default(1),
+  everyWeeks: integer("every_weeks").notNull().default(1),
+  weekday: integer("weekday").notNull().default(1),
+  startsOn: text("starts_on").notNull().default(""),      // YYYY-MM-DD
+  endsOn: text("ends_on").notNull().default(""),
+  active: boolean("active").notNull().default(true),
+  /** The last cycle actually posted - the never-post-twice cursor. See stipends.last_on. */
+  lastOn: text("last_on").notNull().default(""),
+  /** Where you go to pay it or read the statement - the one-click. */
+  portalUrl: text("portal_url").notNull().default(""),
+  /** Policy number, account number - what the payee's site asks for. */
+  accountRef: text("account_ref").notNull().default(""),
+  /** Whose benefit it is, by roster name. Blank = the company's. */
+  person: text("person").notNull().default(""),
+  /** Comes out of the account by itself - nothing to do on the day but check. */
+  autopay: boolean("autopay").notNull().default(false),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("bills_tenant_idx").on(t.tenantOrgId),
+  index("bills_person_idx").on(t.person),
+]);
+
 export const expenseCategories = pgTable("expense_categories", {
   id: serial("id").primaryKey(),
   tenantOrgId: tenantStamp(),
@@ -3403,12 +3470,20 @@ export const expenses = pgTable("expenses", {
    * one month's date. Set null on delete: the payment outlives the arrangement.
    */
   stipendId: integer("stipend_id").references((): AnyPgColumn => stipends.id, { onDelete: "set null" }),
+  /**
+   * The standing bill a cycle of which this row is. Provenance, the way
+   * stipend_id is: it says which bill and which cycle a ledger row came from,
+   * so the ledger can say "standing" beside it and the bill can show what it
+   * has posted. Set null on delete: the cost outlives the arrangement.
+   */
+  billId: integer("bill_id").references((): AnyPgColumn => bills.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("expenses_wo_idx").on(t.workOrderId),
   index("expenses_report_idx").on(t.reportId),
   index("expenses_allowance_idx").on(t.allowanceState),
   index("expenses_stipend_idx").on(t.stipendId),
+  index("expenses_bill_idx").on(t.billId),
 ]);
 
 /**

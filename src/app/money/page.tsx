@@ -8,6 +8,7 @@ import { brandForTenant } from "@/lib/brand";
 import { costingBoard } from "@/lib/invoiceData";
 import { booksContext } from "@/lib/financeData";
 import { periodDays, periodSpan } from "@/lib/finance";
+import { DUE_SOON_DAYS } from "@/lib/bills";
 import FinanceShell from "@/components/FinanceShell";
 import PositionLine from "@/components/PositionLine";
 import DraftInvoiceButton from "@/components/DraftInvoiceButton";
@@ -134,6 +135,14 @@ export default async function MoneyPage({ searchParams }: {
             {mOut.overheadCents !== null && (
               <Row label="Overhead" sub="runs whether or not anyone works" cents={mOut.overheadCents} />
             )}
+            {/* Forward-looking, alone in this lane: the standing bills landing
+                in the next two weeks, so the dashboard says what is about to
+                leave as well as what has. They post to Overhead on their day
+                by themselves; this row is the heads-up, and Bills is where
+                the pay links are. */}
+            <Row label="Bills coming due"
+              sub={`next ${DUE_SOON_DAYS} days · ${mOut.billsSoonCount} bill${mOut.billsSoonCount === 1 ? "" : "s"} - pay them at Bills`}
+              cents={mOut.billsSoonCents} />
             {/* Reimbursements, as the two figures they actually are - the flaw
                 the shop called out was one row wearing the other's name. Money
                 OUT is what left the account: reports PAID in the period, cash

@@ -8,7 +8,7 @@ import { setHouseHr } from "@/app/actions";
 import { formatCents } from "@/lib/money";
 import { DataTable, Panel, Pill } from "@/components/ui";
 import PersonFile, {
-  type KitRow, type OwnSite, type PaperRow, type PersonProfile, type StipendLine,
+  type KitRow, type OwnSite, type PaperRow, type PersonProfile, type StipendLine, type BenefitLine,
 } from "@/components/PersonFile";
 import AddPersonDialog from "@/components/AddPersonDialog";
 import type { PayRow } from "@/lib/payroll";
@@ -32,6 +32,8 @@ export type RosterRow = {
   papers: PaperRow[];
   /** Their standing reimbursements, by the roster's own card. */
   stipends: StipendLine[];
+  /** The standing bills that are theirs - health plan, phone. Empty when the reader may not see pay. */
+  benefits: BenefitLine[];
   /** Whether they have a name at all - see the page, and the note on the row. */
   nameable: boolean;
   unclaimedCents: number;
@@ -113,7 +115,7 @@ export default function PeopleDesk({ roster, isOwner, seesPay, orgId, today, per
           email={openRow.email} name={openRow.name} role={openRow.role}
           profile={openRow.profile} pay={openRow.pay} perks={openRow.perks} kits={openRow.kits}
           seesPay={seesPay} orgId={orgId} today={today} sites={sites} ownSites={ownSites}
-          papers={openRow.papers} stipends={openRow.stipends} categories={categories}
+          papers={openRow.papers} stipends={openRow.stipends} benefits={openRow.benefits} categories={categories}
           canManage={isOwner} isMe={openRow.email.toLowerCase() === myEmail.toLowerCase()}
           onClose={() => setOpen(null)} />
       )}

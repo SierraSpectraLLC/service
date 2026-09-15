@@ -33,6 +33,12 @@ const ALLOWED: Record<string, string> = {
   "src/lib/recurringRun.ts::agreements":
     "Same: the recurring-billing cron, behind CRON_SECRET. Each cycle is raised " +
     "against its own agreement, which carries the stamp the invoice inherits.",
+  "src/lib/billRun.ts::bills":
+    "The bills cron, behind CRON_SECRET, and the stipend pass's shape exactly: " +
+    "it sweeps every workspace's standing bills because that is the job, and " +
+    "each overhead row it posts inherits ITS OWN bill's stamp - the expense is " +
+    "written with b.tenantOrgId. tests/billRun holds that down with two shops. " +
+    "Nothing here is rendered to a person.",
   "src/lib/stipendRun.ts::stipends":
     "The stipend cron, behind CRON_SECRET, and the same shape as recurringRun " +
     "above: it sweeps every workspace's standing reimbursements because that is " +

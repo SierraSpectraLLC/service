@@ -76,6 +76,7 @@ export default async function OverheadExpensesPage({ searchParams }: {
         rows={rows.map((r) => ({
           id: r.id, kind: r.kind, description: r.description,
           amountCents: r.amountCents, incurredOn: r.incurredOn, person: r.person,
+          standing: r.billId !== null,
         }))} />
     </FinanceShell>
   );

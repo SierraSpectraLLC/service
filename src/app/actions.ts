@@ -19,7 +19,7 @@ import {
   leads, leadOffers, calendarNotes,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
-  driveCache, expenses, expenseReports, expenseCategories, stipends, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
+  driveCache, expenses, expenseReports, expenseCategories, bills, stipends, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
   dunningEvents, creditOverrides, quotes, quoteLines, payroll, perks, bugReports,
   proposals, proposalSections, proposalSystems, proposalTiers,
   restorationProjects, restorationConfirms, componentConditions, findings,
@@ -81,6 +81,8 @@ import {
   reportTotalCents, settledReport,
 } from "@/lib/expenseReports";
 import { cadenceOf, checkStipend, stipendCadenceLabel } from "@/lib/stipends";
+import { billCadence, checkBill } from "@/lib/bills";
+import { postBill, type BillResult } from "@/lib/billRun";
 import { poProblem, usablePoLines } from "@/lib/backfill";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
@@ -9489,6 +9491,172 @@ export async function updateStipend(
     actor: u.email, entityType: "stipend", entityId: id, tenantOrgId: row.tenantOrgId,
     action: `changed ${row.person}'s ${row.label}: ${said.join(", ") || "note"}`,
   });
+  revalidatePath("/people");
+  return {};
+}
+
+// ---------------- Bills ----------------
+// Standing overhead - the liability policy, the health plan, the phone line.
+// See the note on the `bills` table for what one is and is not, lib/bills for
+// when one falls due, and lib/billRun for what a due cycle turns into.
+
+/**
+ * Set up a standing bill.
+ *
+ * OWNER ONLY, for the stipend's reason: it is a standing commitment of
+ * company money into the future, posted every cycle without anybody looking
+ * at it again, and the person who decides that is the person who signs the
+ * cheques.
+ *
+ * A person on it is checked against the roster rather than trusted, as a
+ * stipend's is: a benefit cannot belong to somebody who does not work here.
+ *
+ * It POSTS WHAT IS ALREADY DUE in the same action. "Starting this month" set
+ * up on the 20th should read on the ledger now, not at one o'clock tomorrow
+ * when the pass next runs - the owner set it up to see the month's costs,
+ * and a ledger that answered "check back tomorrow" is the friction the
+ * feature exists to remove.
+ */
+export async function createBill(data: {
+  name: string; payee: string; amount: string; kind: string;
+  cadence?: string; everyMonths: number; dayOfMonth: number;
+  everyWeeks?: number; weekday?: number;
+  startsOn: string; endsOn: string;
+  portalUrl: string; accountRef: string; person: string; autopay: boolean; note: string;
+}): Promise<{ error?: string; id?: number; posted?: number }> {
+  const u = await requireOwner();
+  const t = readTenant(u);
+  const cents = parseMoney(data.amount) ?? 0;
+  const draft = {
+    name: data.name.trim(), amountCents: cents,
+    cadence: cadenceOf(data.cadence),
+    everyMonths: Math.round(data.everyMonths), dayOfMonth: Math.round(data.dayOfMonth),
+    everyWeeks: Math.round(data.everyWeeks ?? 1), weekday: Math.round(data.weekday ?? 1),
+    startsOn: data.startsOn.trim(), endsOn: data.endsOn.trim(),
+    portalUrl: data.portalUrl.trim(),
+  };
+  const problem = checkBill(draft);
+  if (problem) return { error: problem };
+
+  const person = data.person.trim();
+  if (person) {
+    const [member] = await db.select().from(houseMembers).where(and(
+      eq(houseMembers.name, person),
+      forTenant(houseMembers.orgId, t),
+      ne(houseMembers.role, "none"),
+    ));
+    if (!member) return { error: "That is not somebody on your roster" };
+  }
+
+  const [row] = await db.insert(bills).values({
+    tenantOrgId: t, name: draft.name.slice(0, 80), payee: data.payee.trim().slice(0, 80),
+    amountCents: cents, kind: await cleanKind(data.kind, t),
+    cadence: draft.cadence,
+    everyMonths: draft.everyMonths, dayOfMonth: draft.dayOfMonth,
+    everyWeeks: draft.everyWeeks, weekday: draft.weekday,
+    startsOn: draft.startsOn, endsOn: draft.endsOn,
+    portalUrl: draft.portalUrl.slice(0, 500), accountRef: data.accountRef.trim().slice(0, 120),
+    person, autopay: Boolean(data.autopay),
+    note: data.note.trim().slice(0, 300), createdBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "bill", entityId: row.id, tenantOrgId: t,
+    action: `set up a ${formatCents(cents)} bill for ${draft.name}`
+      + (row.payee ? ` to ${row.payee}` : "")
+      + `, ${billCadence(draft)} from ${draft.startsOn}`
+      + (draft.endsOn ? ` until ${draft.endsOn}` : "")
+      + (person ? ` - ${person}'s` : "")
+      + (row.autopay ? ", autopay" : ""),
+  });
+
+  const result: BillResult = { posted: [], failed: [], quiet: 0 };
+  await postBill(row, shopToday(), result);
+  revalidatePath("/money/bills");
+  revalidatePath("/money/expenses");
+  revalidatePath("/money");
+  revalidatePath("/people");
+  return { id: row.id, posted: result.posted.length };
+}
+
+/**
+ * Change, pause or restart a standing bill.
+ *
+ * Pausing is how one ends, and deleting is not offered, for the stipend's
+ * reason: the rows it has posted are what the months really cost, and
+ * removing the bill would orphan the reason they exist. A paused bill keeps
+ * its lastOn, so restarting it does not back-post the gap - "we let the
+ * policy lapse for a while" is what that reads as, and it is true.
+ *
+ * Re-pricing does not touch what has posted. Last month's premium was last
+ * month's.
+ */
+export async function updateBill(
+  id: number,
+  data: {
+    amount?: string; endsOn?: string; active?: boolean; note?: string; name?: string;
+    payee?: string; portalUrl?: string; accountRef?: string; autopay?: boolean;
+  },
+): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const [row] = await db.select().from(bills).where(eq(bills.id, id));
+  // bills is one instance-wide table; without this an owner could re-price
+  // another company's policy. The same wall updateStipend has.
+  if (!row || !houseOf(u, row.tenantOrgId)) return { error: "Not found" };
+
+  const set: Partial<typeof bills.$inferInsert> = {};
+  const said: string[] = [];
+  if (data.amount !== undefined) {
+    const cents = parseMoney(data.amount);
+    if (cents === null || cents <= 0) return { error: "Enter an amount like 412.00" };
+    if (cents !== row.amountCents) {
+      set.amountCents = cents;
+      said.push(`${formatCents(row.amountCents)} to ${formatCents(cents)}`);
+    }
+  }
+  if (data.name !== undefined && data.name.trim() && data.name.trim() !== row.name) {
+    set.name = data.name.trim().slice(0, 80);
+    said.push(`renamed to "${set.name}"`);
+  }
+  if (data.payee !== undefined && data.payee.trim() !== row.payee) {
+    set.payee = data.payee.trim().slice(0, 80);
+    said.push(set.payee ? `paid to ${set.payee}` : "payee cleared");
+  }
+  if (data.portalUrl !== undefined) {
+    const url = data.portalUrl.trim();
+    if (url && !/^https?:\/\//i.test(url)) return { error: "The portal link needs to start with https://" };
+    if (url !== row.portalUrl) { set.portalUrl = url.slice(0, 500); said.push(url ? "portal link changed" : "portal link removed"); }
+  }
+  if (data.accountRef !== undefined && data.accountRef.trim() !== row.accountRef) {
+    set.accountRef = data.accountRef.trim().slice(0, 120);
+    said.push("account reference changed");
+  }
+  if (data.autopay !== undefined && data.autopay !== row.autopay) {
+    set.autopay = data.autopay;
+    said.push(data.autopay ? "now autopay" : "no longer autopay");
+  }
+  if (data.endsOn !== undefined) {
+    const ends = data.endsOn.trim();
+    if (ends && !isIsoDay(ends)) return { error: "That end date is not a date" };
+    if (ends && ends < row.startsOn) return { error: "It cannot end before it starts" };
+    if (ends !== row.endsOn) {
+      set.endsOn = ends;
+      said.push(ends ? `ending ${ends}` : "no longer has an end date");
+    }
+  }
+  if (data.active !== undefined && data.active !== row.active) {
+    set.active = data.active;
+    said.push(data.active ? "restarted" : "paused");
+  }
+  if (data.note !== undefined) set.note = data.note.trim().slice(0, 300);
+  if (!Object.keys(set).length) return {};
+
+  await db.update(bills).set(set).where(eq(bills.id, id));
+  await audit({
+    actor: u.email, entityType: "bill", entityId: id, tenantOrgId: row.tenantOrgId,
+    action: `changed the ${row.name} bill: ${said.join(", ") || "note"}`,
+  });
+  revalidatePath("/money/bills");
+  revalidatePath("/money");
   revalidatePath("/people");
   return {};
 }
