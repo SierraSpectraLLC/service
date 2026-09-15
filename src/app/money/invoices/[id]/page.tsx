@@ -110,13 +110,14 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           <InvoiceActions
             id={id} number={row.number} status={row.status}
             balanceCents={v.balanceCents} today={today} poWarning={warning}
-            canDelete={user.role === "owner"}
+            canDelete={user.role === "owner"} absorbCardFee={row.absorbCardFee}
           />
         }
       />
 
       <div className="row-2" style={{ marginBottom: 10 }}>
         <Pill tone={STANDING_TONE[v.standing]}>{STANDING_LABEL[v.standing]}</Pill>
+        {row.absorbCardFee && <Pill tone="warn">Card at face value - fee absorbed</Pill>}
         <Link className="btn sm" href={`/money/invoices/${id}/print`} style={{ textDecoration: "none" }}>
           Preview PDF
         </Link>

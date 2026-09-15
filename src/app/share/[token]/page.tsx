@@ -161,9 +161,11 @@ async function InvoiceShare({ link }: { link: typeof shareLinks.$inferSelect }) 
         pay={{
           token: link.token,
           enabled: canPay,
-          cardsEnabled: ctx.policy.cardsEnabled,
-          cardSurchargeBps: ctx.policy.cardSurchargeBps,
-          cardSurchargeFlatCents: ctx.policy.cardSurchargeFlatCents,
+          // The same rule startPayment applies: a card at face value on this
+          // one invoice is offered whatever the policy says, with no surcharge.
+          cardsEnabled: ctx.policy.cardsEnabled || full.row.absorbCardFee,
+          cardSurchargeBps: full.row.absorbCardFee ? 0 : ctx.policy.cardSurchargeBps,
+          cardSurchargeFlatCents: full.row.absorbCardFee ? 0 : ctx.policy.cardSurchargeFlatCents,
           testMode: canPay && mode === "test",
           checkTo: name,
         }}
