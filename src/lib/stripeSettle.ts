@@ -19,14 +19,14 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { invoices, payments, referralFees } from "@/db/schema";
+import { invoices, orgs, payments, referralFees } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { formatCents } from "@/lib/money";
 import { shopToday } from "@/lib/shopday";
 import { asStatementRow, creditFor, invoiceById } from "@/lib/invoiceData";
 import { invoiceView } from "@/lib/statement";
 import { accruedCents } from "@/lib/referral";
-import { postInvoicePayment, postProcessingFee, postReferralPaid } from "@/lib/ledger/postings";
+import { postInvoicePayment, postPayout, postProcessingFee, postReferralPaid } from "@/lib/ledger/postings";
 
 /** Both surfaces an invoice shows up on. Mirrors app/actions' revInvoice. */
 const revInvoice = (inv: { id: number; orgId: number }) => {
@@ -123,4 +123,35 @@ export async function recordReferralPayment(input: {
     action: `referral fee payment of ${formatCents(input.amountCents)} received (${input.reference})`,
   });
   revalidatePath("/network");
+}
+
+/**
+ * Stripe paid the operator's balance out to their bank. Called only by the
+ * verified webhook, for a connected account's `payout.paid`.
+ *
+ * The account id on the event is what says WHOSE books this is: it is the
+ * operator's own Connect account (lib/stripe), kept on their org row, and a
+ * payout for an account nobody here owns is ignored rather than posted to
+ * whoever is first. The posting is stripe down, bank down-and-up - the money
+ * was already ours; it moved rooms - and it lands with a payout id the Cash
+ * page matches the bank line against by amount and date, so a payout is the
+ * one bank line that arrives pre-matched.
+ */
+export async function recordStripePayout(input: {
+  account: string; payoutId: string; amountCents: number; arrivalDate: string;
+}): Promise<{ posted: boolean; reason?: string }> {
+  if (!input.account || !input.payoutId || input.amountCents <= 0) return { posted: false, reason: "nothing to post" };
+  const [org] = await db.select({ id: orgs.id }).from(orgs).where(eq(orgs.stripeAccountId, input.account));
+  if (!org) return { posted: false, reason: "no workspace owns that account" };
+  const on = /^\d{4}-\d{2}-\d{2}$/.test(input.arrivalDate) ? input.arrivalDate : shopToday();
+  const res = await postPayout({ tenantOrgId: org.id, payoutId: input.payoutId, cents: input.amountCents, on });
+  if (res?.created) {
+    await audit({
+      actor: "stripe", entityType: "ledger_entry", entityId: res.id, tenantOrgId: org.id,
+      action: `Stripe paid out ${formatCents(input.amountCents)} to the bank (${input.payoutId})`,
+    });
+    revalidatePath("/money/cash");
+    revalidatePath("/money");
+  }
+  return { posted: Boolean(res?.created) };
 }

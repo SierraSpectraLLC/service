@@ -16534,6 +16534,16 @@ async function applyQuoteApproval(
         // Sent on creation, so it posts on creation - as a liability, not
         // revenue: the work is not done, and the final invoice applies it.
         await postInvoiceSent({ inv, lines: depLines, depositFor: q.number, by: actorEmail || "client approval" });
+        // The deposit's own pay link, minted here so the page they just
+        // approved on can say "pay it now" - by card or bank transfer, on the
+        // hosted page, exactly as any sent invoice is paid. Same shape and
+        // life as markInvoiceSent's.
+        await db.insert(shareLinks).values({
+          token: crypto.randomBytes(18).toString("base64url"),
+          kind: "invoice", orgId: q.orgId, invoiceId: inv.id,
+          label: `Invoice ${number}`, expiresOn: addDays(today, 365),
+          tenantOrgId: q.tenantOrgId, createdBy: actorEmail || "client approval",
+        });
         depositInvoiceId = inv.id;
         break;
       } catch { /* number raced; try the next one */ }

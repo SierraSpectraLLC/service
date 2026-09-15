@@ -31,6 +31,28 @@ async function call(path: string, body: Record<string, string>): Promise<Record<
   return json as Record<string, unknown>;
 }
 
+/**
+ * What Stripe kept of a payment, in cents. Read off the charge's balance
+ * transaction, which is the only place the fee is a fact rather than an
+ * estimate. Zero when the charge has not settled to a balance transaction
+ * yet or the lookup fails: a missing fee row is a parity finding, a wrong one
+ * is a lie in the books.
+ */
+export async function paymentFee(paymentIntentId: string): Promise<number> {
+  const key = (process.env.STRIPE_SECRET_KEY ?? "").trim();
+  if (!key || !paymentIntentId) return 0;
+  const res = await fetch(`${API}/payment_intents/${encodeURIComponent(paymentIntentId)}?expand[]=latest_charge.balance_transaction`, {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  if (!res.ok) return 0;
+  const pi = await res.json() as { latest_charge?: { balance_transaction?: { fee?: number } | string } | string };
+  const charge = pi.latest_charge;
+  if (!charge || typeof charge === "string") return 0;
+  const bt = charge.balance_transaction;
+  if (!bt || typeof bt === "string") return 0;
+  return Math.max(0, Math.round(Number(bt.fee ?? 0)));
+}
+
 /** Start Connect onboarding for the operator. Express: Stripe does the KYB. */
 export async function createConnectAccount(email: string): Promise<string> {
   const acct = await call("/accounts", {

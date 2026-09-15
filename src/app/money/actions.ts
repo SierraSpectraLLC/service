@@ -15,13 +15,14 @@
 
 import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   disputes, expenseReports, expenses, invoiceFees, invoiceLines, invoices, ledgerEntries, orgs,
   payments, payroll, payrollRuns, poLines, promises, purchaseOrders, quotes, shareLinks, workOrders,
 } from "@/db/schema";
-import { houseOf, myTenantOrgId, requireOwner, requireStaff } from "@/lib/authz";
+import { houseOf, myTenantOrgId, requireOwner, requireStaff, requireUser } from "@/lib/authz";
+import { maySeeOrgMoney } from "@/lib/tenancy";
 import { audit } from "@/lib/audit";
 import { requireReason } from "@/lib/reason";
 import { formatCents, parseMoney } from "@/lib/money";
@@ -436,6 +437,57 @@ export async function openDispute(
     field: "reason", newValue: row.reason,
   });
   revInvoice(inv);
+  return {};
+}
+
+/**
+ * "Ask about this line" - the client's side of a dispute.
+ *
+ * The same row openDispute writes, opened from the portal by the person the
+ * bill is addressed to. Authorization runs the other way from the staff
+ * action: the invoice must be THEIR organization's (the id in the call buys
+ * nothing without the org behind the login), they must be allowed to read
+ * their company's money at all, and a read-only viewer cannot do it - a
+ * question here pauses collection on the line, which is a change to the
+ * books, and read-only means read-only (lib/authz). The brief named the
+ * viewer; the code's rule wins and is written up.
+ */
+export async function askAboutLine(
+  invoiceId: number, data: { lineId: number | null; reason: string },
+): Promise<{ error?: string }> {
+  let u;
+  try { u = await requireUser(); } catch { return { error: "Sign in to ask about a line." }; }
+  if (u.orgId === null) return { error: "This invoice is not yours to ask about." };
+  if (u.role === "client_viewer") return { error: "Your account is read-only. Ask a colleague who can approve orders." };
+  if (!(await maySeeOrgMoney(u, u.orgId))) return { error: "This invoice is not yours to ask about." };
+  const why = requireReason(data.reason);
+  if (typeof why !== "string") return why;
+  const [inv] = await db.select().from(invoices).where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, u.orgId)));
+  if (!inv) return { error: "Not found" };
+  if (inv.status === "draft" || inv.status === "void" || inv.status === "paid") {
+    return { error: "There is nothing open on this invoice to ask about." };
+  }
+  let line: typeof invoiceLines.$inferSelect | undefined;
+  if (data.lineId !== null) {
+    [line] = await db.select().from(invoiceLines).where(eq(invoiceLines.id, data.lineId));
+    if (!line || line.invoiceId !== invoiceId) return { error: "That line is not on this invoice" };
+  }
+  const open = await db.select({ id: disputes.id }).from(disputes)
+    .where(and(eq(disputes.invoiceId, invoiceId), isNull(disputes.resolvedOn),
+      line ? eq(disputes.lineId, line.id) : isNull(disputes.lineId)));
+  if (open.length) return { error: "That question is already with us - you will hear back on it." };
+  const [row] = await db.insert(disputes).values({
+    tenantOrgId: inv.tenantOrgId, invoiceId, lineId: line?.id ?? null,
+    reason: why, openedOn: shopToday(), openedBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: invoiceId, tenantOrgId: inv.tenantOrgId,
+    action: `the client asked about ${inv.number}${line ? `, line "${line.description}"` : ""} - ${row.reason}; collection paused on it`,
+    field: "reason", newValue: row.reason,
+  });
+  revInvoice(inv);
+  revalidatePath(`/orders/i/${invoiceId}`);
+  revalidatePath("/orders");
   return {};
 }
 
