@@ -2663,9 +2663,10 @@ table.list .acts .btn + .btn { margin-left: 6px; }
 
 /* The journal: an entry, and its postings when opened. */
 .ledger-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ledger-filters { flex: 1 1 auto; }
 .ledger-filters select, .ledger-filters input[type="text"], .ledger-filters input[type="date"] {
   border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: var(--radius);
-  padding: 5px 8px; font: inherit;
+  padding: 5px 8px; font: inherit; width: auto; flex: 0 1 auto; max-width: 100%;
 }
 .ledger-filters label.check { display: inline-flex; gap: 6px; align-items: center; font-size: var(--fs-small); color: var(--mut); }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--t-accent-bg); color: var(--t-accent-fg); font-size: var(--fs-meta); font-weight: 700; }

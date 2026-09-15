@@ -43,16 +43,18 @@ export default function DecisionButton({ action }: { action: DecisionAction }) {
     );
   }
   return (
-    <button className="btn sm" disabled={pending} onClick={() => startTransition(async () => {
+    <button className="btn sm" disabled={pending} onClick={async () => {
       if (!(await confirmDialog({
         title: `Run payroll for ${action.ym}?`,
         body: "Posts the register's gross for the month to payroll and out of the bank, dated today. Once per month; a correction is a reversal.",
         action: "Run payroll",
       }))) return;
-      const res = await runPayroll(action.ym);
-      if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
-      toast({ message: "Ran payroll - payroll / bank" });
-      router.refresh();
-    })}>{pending ? "Running…" : action.label}</button>
+      startTransition(async () => {
+        const res = await runPayroll(action.ym);
+        if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
+        toast({ message: "Ran payroll - payroll / bank" });
+        router.refresh();
+      });
+    }}>{pending ? "Running…" : action.label}</button>
   );
 }

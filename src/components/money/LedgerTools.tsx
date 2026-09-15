@@ -11,18 +11,23 @@ export function ReverseEntryButton({ entryId }: { entryId: number }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   return (
-    <button className="btn sm" disabled={pending} onClick={() => startTransition(async () => {
+    <button className="btn sm" disabled={pending} onClick={async () => {
+      // The question is asked BEFORE the transition: an update made inside an
+      // async transition commits when the action settles, and an action that
+      // is waiting on the dialog it has not yet shown never settles.
       const why = await confirmReason({
         title: `Reverse entry #${entryId}?`,
         body: "The original row stays. A mirror entry dated today corrects it, with your reason on it.",
         action: "Reverse",
       });
       if (!why) return;
-      const res = await reverseLedgerEntry(entryId, why);
-      if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
-      toast({ message: `Reversed entry #${entryId} - the mirror is dated today` });
-      router.refresh();
-    })}>{pending ? "Reversing…" : "Reverse this entry"}</button>
+      startTransition(async () => {
+        const res = await reverseLedgerEntry(entryId, why);
+        if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
+        toast({ message: `Reversed entry #${entryId} - the mirror is dated today` });
+        router.refresh();
+      });
+    }}>{pending ? "Reversing…" : "Reverse this entry"}</button>
   );
 }
 
@@ -31,17 +36,19 @@ export function CloseBooksForm({ closedThrough, months }: { closedThrough: strin
   const router = useRouter();
   const [ym, setYm] = useState(months[0]?.ym ?? "");
   const [pending, startTransition] = useTransition();
-  const act = (month: string) => startTransition(async () => {
+  const act = async (month: string) => {
     if (month && !(await confirmDialog({
       title: `Close the books through ${months.find((m) => m.ym === month)?.label ?? month}?`,
       body: "Nothing before it can be posted to again. A mistake found later is corrected by a reversing entry dated today, so the month your accountant already has never changes under them.",
       action: "Close",
     }))) return;
-    const res = await closeBooks(month);
-    if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
-    toast({ message: month ? `Closed the books through ${month}` : "Reopened the books" });
-    router.refresh();
-  });
+    startTransition(async () => {
+      const res = await closeBooks(month);
+      if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
+      toast({ message: month ? `Closed the books through ${month}` : "Reopened the books" });
+      router.refresh();
+    });
+  };
   return (
     <div className="inline-form">
       {months.length > 0 && (
@@ -88,16 +95,18 @@ export function PayrollRunButton({ ym, label, grossLabel }: { ym: string; label:
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   return (
-    <button className="btn sm" disabled={pending} onClick={() => startTransition(async () => {
+    <button className="btn sm" disabled={pending} onClick={async () => {
       if (!(await confirmDialog({
         title: `Run payroll for ${label}?`,
         body: `Posts ${grossLabel} gross to payroll and out of the bank, dated today. Once per month; a correction is a reversal.`,
         action: "Run payroll",
       }))) return;
-      const res = await runPayroll(ym);
-      if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
-      toast({ message: `Ran payroll for ${label} - payroll / bank` });
-      router.refresh();
-    })}>{pending ? "Running…" : "Run payroll"}</button>
+      startTransition(async () => {
+        const res = await runPayroll(ym);
+        if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
+        toast({ message: `Ran payroll for ${label} - payroll / bank` });
+        router.refresh();
+      });
+    }}>{pending ? "Running…" : "Run payroll"}</button>
   );
 }

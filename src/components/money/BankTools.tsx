@@ -65,13 +65,15 @@ export function UnmatchButton({ txnId }: { txnId: number }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   return (
-    <button className="btn link t-meta" disabled={pending} onClick={() => startTransition(async () => {
+    <button className="btn link t-meta" disabled={pending} onClick={async () => {
       if (!(await confirmDialog({ title: "Unmatch this bank line?", body: "The entry stays on the books. The line goes back to needing a home.", action: "Unmatch" }))) return;
-      const res = await unmatchBankLine(txnId);
-      if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
-      toast({ message: "Unmatched" });
-      router.refresh();
-    })}>unmatch</button>
+      startTransition(async () => {
+        const res = await unmatchBankLine(txnId);
+        if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
+        toast({ message: "Unmatched" });
+        router.refresh();
+      });
+    }}>unmatch</button>
   );
 }
 
