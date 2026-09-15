@@ -225,6 +225,14 @@ export async function checkoutSession(input: {
     success_url: input.successUrl,
     cancel_url: input.cancelUrl,
   };
+  // The invoice's id under the name the webhook looks for, on the session
+  // and on the payment intent both: payment_intent.succeeded is what settles
+  // it, and an intent that arrives with nothing on it becomes a suggestion
+  // somebody has to match by hand.
+  if (input.ref.key === "invoiceId") {
+    body["metadata[ridgeline_invoice_id]"] = String(input.ref.id);
+    body["payment_intent_data[metadata][ridgeline_invoice_id]"] = String(input.ref.id);
+  }
   if (fee > 0) body["payment_intent_data[application_fee_amount]"] = String(fee);
   if (input.customerEmail) body.customer_email = input.customerEmail;
   const session = await call("/checkout/sessions", body, input.accountId);

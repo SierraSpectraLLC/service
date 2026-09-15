@@ -4583,6 +4583,57 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- Every Stripe event acted on, by Stripe's id: the webhook's idempotence.
+CREATE TABLE IF NOT EXISTS "stripe_events" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "event_id" text NOT NULL,
+  "type" text NOT NULL DEFAULT '',
+  "account" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "stripe_events_event_id_unique" UNIQUE ("event_id")
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'stripe_events_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "stripe_events" ADD CONSTRAINT "stripe_events_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- Money that reached Stripe with no invoice named on it. Nothing is recorded
+-- on its own; the overview offers a one-click Record against the one open
+-- invoice whose balance matches.
+CREATE TABLE IF NOT EXISTS "payment_suggestions" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "provider" text NOT NULL DEFAULT 'stripe',
+  "reference" text NOT NULL,
+  "amount_cents" integer NOT NULL DEFAULT 0,
+  "method" text NOT NULL DEFAULT 'card',
+  "received_on" text NOT NULL DEFAULT '',
+  "invoice_id" integer,
+  "description" text NOT NULL DEFAULT '',
+  "status" text NOT NULL DEFAULT 'open',
+  "payment_id" integer,
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "payment_suggestions_reference_unique" UNIQUE ("provider", "reference")
+);
+CREATE INDEX IF NOT EXISTS "payment_suggestions_tenant_status_idx" ON "payment_suggestions" ("tenant_org_id", "status");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payment_suggestions_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "payment_suggestions" ADD CONSTRAINT "payment_suggestions_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payment_suggestions_invoice_id_fk') THEN
+    ALTER TABLE "payment_suggestions" ADD CONSTRAINT "payment_suggestions_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payment_suggestions_payment_id_fk') THEN
+    ALTER TABLE "payment_suggestions" ADD CONSTRAINT "payment_suggestions_payment_id_fk"
+      FOREIGN KEY ("payment_id") REFERENCES "payments"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
 -- A month of payroll, run: the register says what a month costs, this says it
 -- was paid, once. One row per (workspace, month).
 CREATE TABLE IF NOT EXISTS "payroll_runs" (

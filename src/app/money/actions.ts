@@ -19,7 +19,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   disputes, expenseReports, expenses, invoiceFees, invoiceLines, invoices, ledgerEntries, orgs,
-  payments, payroll, payrollRuns, poLines, promises, purchaseOrders, quotes, shareLinks, workOrders,
+  payments, paymentSuggestions, payroll, payrollRuns, poLines, promises, purchaseOrders, quotes, shareLinks, workOrders,
 } from "@/db/schema";
 import { houseOf, myTenantOrgId, requireOwner, requireStaff, requireUser } from "@/lib/authz";
 import { maySeeOrgMoney } from "@/lib/tenancy";
@@ -170,6 +170,59 @@ export async function recordPayment(
   revInvoice(inv);
   revMoney();
   return {};
+}
+
+/**
+ * The one-click Record on a Stripe payment the webhook could not place.
+ *
+ * The suggestion row carries everything the payment needs - the amount, the
+ * day, the method, the Stripe reference - and the invoice it matched; this
+ * records exactly that, posts it into the Stripe balance (that is where the
+ * money is), and closes the suggestion. Nothing is typed, so nothing can be
+ * mistyped. The suggestion's own workspace is the authorization, checked
+ * against the caller's, and the invoice has to be in it too.
+ */
+export async function recordSuggestedPayment(id: number): Promise<{ error?: string; number?: string }> {
+  const u = await requireStaff();
+  const [sug] = await db.select().from(paymentSuggestions).where(eq(paymentSuggestions.id, id));
+  if (!sug || !houseOf(u, sug.tenantOrgId)) return { error: "Not found" };
+  if (sug.status !== "open") return { error: "That payment has already been dealt with." };
+  if (sug.invoiceId === null) return { error: "No single open invoice matches that payment - record it from the invoice." };
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, sug.invoiceId));
+  if (!inv || inv.tenantOrgId !== sug.tenantOrgId) return { error: "Not found" };
+  if (inv.status === "draft" || inv.status === "void") return { error: `${inv.number} is ${inv.status}.` };
+
+  // Under the Stripe reference already - recorded by hand meanwhile - so the
+  // suggestion simply closes.
+  const already = await db.select({ id: payments.id }).from(payments)
+    .where(and(eq(payments.invoiceId, inv.id), eq(payments.reference, sug.reference)));
+  let row = already[0] ? { id: already[0].id } : null;
+  if (!row) {
+    const [inserted] = await db.insert(payments).values({
+      tenantOrgId: inv.tenantOrgId, invoiceId: inv.id, method: sug.method === "card" ? "card" : "ach",
+      amountCents: sug.amountCents, reference: sug.reference, receivedOn: sug.receivedOn || shopToday(),
+      recordedBy: "stripe",
+    }).returning();
+    try {
+      await postInvoicePayment({ inv, payment: inserted, by: u.email });
+    } catch (e) {
+      await db.delete(payments).where(and(eq(payments.id, inserted.id), eq(payments.tenantOrgId, inv.tenantOrgId as number)));
+      return ledgerRefusal(e);
+    }
+    row = inserted;
+  }
+  await db.update(paymentSuggestions).set({ status: "recorded", paymentId: row.id })
+    .where(and(eq(paymentSuggestions.id, id), eq(paymentSuggestions.tenantOrgId, sug.tenantOrgId as number)));
+  await settleStatus(inv);
+  const view = await currentView(inv.id);
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: inv.tenantOrgId,
+    action: `recorded the ${formatCents(sug.amountCents)} Stripe payment (${sug.reference}) on ${inv.number}`
+      + (view ? ` - ${view.balanceCents <= 0 ? "paid in full" : `${formatCents(view.balanceCents)} still open`}` : ""),
+  });
+  revInvoice(inv);
+  revMoney();
+  return { number: inv.number };
 }
 
 async function currentView(invoiceId: number) {

@@ -13,7 +13,7 @@ import { cache } from "react";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  agreements, bankTransactions, bills, expenseReports, expenses, orgs, payroll, payrollRuns,
+  agreements, bankTransactions, bills, expenseReports, expenses, orgs, payroll, payrollRuns, paymentSuggestions,
   poLines, purchaseOrders, quotes, shareLinks, workOrders,
 } from "@/db/schema";
 import { forTenant } from "@/lib/tenancy";
@@ -121,7 +121,7 @@ export const moneyFigures = cache(async (
 
   const [
     pos, flow, collected, balances, invRows, quoteRows, unbilled, orgRows, depositQuotes,
-    reportRows, billRows, poRows, poLineRows, bankRows, agreementRows, payRows, runs, links, woRows,
+    reportRows, billRows, poRows, poLineRows, bankRows, agreementRows, payRows, runs, links, woRows, suggestionRows,
   ] = await Promise.all([
     positions(tenant),
     periodFlow(tenant, from, to),
@@ -147,6 +147,8 @@ export const moneyFigures = cache(async (
       .where(and(forTenant(shareLinks.tenantOrgId, tenant), isNull(shareLinks.revokedAt))),
     db.select({ id: workOrders.id, number: workOrders.number, title: workOrders.title, state: workOrders.state, orgId: workOrders.orgId })
       .from(workOrders).where(forTenant(workOrders.tenantOrgId, tenant)),
+    db.select().from(paymentSuggestions)
+      .where(and(forTenant(paymentSuggestions.tenantOrgId, tenant), eq(paymentSuggestions.status, "open"))),
   ]);
 
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
@@ -253,6 +255,10 @@ export const moneyFigures = cache(async (
     })).filter((p) => p.cents > 0),
     unmatchedBank: { count: unmatchedRows.length, cents: unmatchedRows.reduce((n, b) => n + Math.abs(b.amountCents), 0) },
     stripeCents: pos.stripe,
+    stripeSuggestions: suggestionRows.map((p) => ({
+      id: p.id, description: p.description, cents: p.amountCents, invoiceId: p.invoiceId,
+      invoiceNumber: invRows.find((f) => f.row.id === p.invoiceId)?.row.number ?? "",
+    })),
     installments: agreementRows.filter((a) => a.billNextOn && a.billAmountCents > 0)
       .map((a) => ({ agreementId: a.id, orgName: name(a.orgId), title: a.title || a.number, cents: a.billAmountCents, on: a.billNextOn })),
     holds,

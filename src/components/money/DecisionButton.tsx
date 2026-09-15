@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
-import { markInvoiceSent, runPayroll } from "@/app/money/actions";
+import { markInvoiceSent, recordSuggestedPayment, runPayroll } from "@/app/money/actions";
 import DraftInvoiceButton from "@/components/DraftInvoiceButton";
 import PayPoButton from "@/components/money/PayPoButton";
 import type { DecisionAction } from "@/lib/money/decisions";
@@ -31,6 +31,16 @@ export default function DecisionButton({ action }: { action: DecisionAction }) {
   }
   if (action.kind === "pay-po") {
     return <PayPoButton poId={action.id} label={action.label} />;
+  }
+  if (action.kind === "record-suggestion") {
+    return (
+      <button className="btn sm primary" disabled={pending} onClick={() => startTransition(async () => {
+        const res = await recordSuggestedPayment(action.id);
+        if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
+        toast({ message: `Recorded on ${res.number} - stripe / receivable` });
+        router.refresh();
+      })}>{pending ? "Recording…" : action.label}</button>
+    );
   }
   if (action.kind === "send-invoice") {
     return (

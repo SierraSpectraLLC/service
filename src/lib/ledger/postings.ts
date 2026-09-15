@@ -284,6 +284,24 @@ export async function postProcessingFee(input: {
   });
 }
 
+/**
+ * Money sent back to the client from the Stripe balance: receivable up again,
+ * Stripe down. Keyed on the charge and the cumulative amount refunded, which
+ * is what Stripe reports - so a redelivered event with the same total posts
+ * nothing, and a second partial refund posts only its own delta.
+ */
+export async function postInvoiceRefund(input: {
+  inv: InvoiceRow; chargeId: string; refundedCents: number; cents: number; on: string; tx?: Db; ignoreClose?: boolean;
+}): Promise<Posted | null> {
+  if (input.cents <= 0) return null;
+  return post({
+    on: input.on, memo: `Refund on ${input.inv.number} - ${input.chargeId}`,
+    ref: invoiceRef(input.inv), kind: `refund:${input.chargeId}:${input.refundedCents}`,
+    lines: pair("receivable", "stripe", input.cents),
+    postedBy: "stripe", tenantOrgId: input.inv.tenantOrgId, tx: input.tx, ignoreClose: input.ignoreClose,
+  });
+}
+
 /** A Stripe payout landing in the bank. */
 export async function postPayout(input: {
   tenantOrgId: number | null; payoutId: string; cents: number; on: string; tx?: Db; ignoreClose?: boolean;
