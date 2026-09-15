@@ -4482,3 +4482,8 @@ CREATE INDEX IF NOT EXISTS "bills_tenant_idx" ON "bills" ("tenant_org_id");
 CREATE INDEX IF NOT EXISTS "bills_person_idx" ON "bills" ("person");
 ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "bill_id" integer REFERENCES "bills"("id") ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS "expenses_bill_idx" ON "expenses" ("bill_id");
+
+-- What was in the bank on a day, on the operator's own org row. lib/cash
+-- rolls it forward to cash on hand; blank date = never set.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "cash_opening_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "cash_opening_on" text NOT NULL DEFAULT '';

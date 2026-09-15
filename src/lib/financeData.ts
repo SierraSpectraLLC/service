@@ -15,6 +15,8 @@ import { shopToday } from "@/lib/shopday";
 import { formatCents } from "@/lib/money";
 import { maySeePayroll, payrollForMonth, type PayRow } from "@/lib/payroll";
 import { billsDueBetween, billsDueSoon } from "@/lib/bills";
+import { cashOnHand, type CashOnHand } from "@/lib/cash";
+import { isNull as isNullCol, inArray as inArrayCol } from "drizzle-orm";
 import { payrollViewerFor } from "@/lib/hr";
 import { maySeeBooks, type BooksViewer } from "@/lib/books";
 import {
@@ -183,6 +185,91 @@ export async function paidOutFigures(
       .reduce((n, e) => n + e.amountCents, 0),
     reimbursedReports: paid.length,
   };
+}
+
+/**
+ * Cash on hand for the reader's own company, rolled forward from the opening
+ * balance on its org row. See lib/cash for what counts and on what day.
+ *
+ * Its own loader rather than a field on financeFigures because its window
+ * is the opening day to today, not the period's - and because it is null,
+ * legitimately, for a shop that has not typed a balance in yet. Books
+ * readers only; both callers already asked.
+ */
+export async function cashFigures(user: SessionUser, today: string): Promise<{
+  orgId: number | null;
+  /** Null until an owner sets the opening balance. */
+  cash: CashOnHand | null;
+  seesPayroll: boolean;
+}> {
+  const mine = myTenantOrgId(user);
+  const { seesPayroll } = await moneyViewer(user);
+  if (mine === null) return { orgId: null, cash: null, seesPayroll };
+  const [org] = await db.select({ cents: orgs.cashOpeningCents, on: orgs.cashOpeningOn })
+    .from(orgs).where(eq(orgs.id, mine));
+  if (!org || !org.on) return { orgId: mine, cash: null, seesPayroll };
+  const t = readTenant(user);
+  const from = org.on;
+
+  const [paidRows, paidReports, overheadRows, payRows] = await Promise.all([
+    db.select({ on: payments.receivedOn, cents: payments.amountCents }).from(payments)
+      .where(and(forTenant(payments.tenantOrgId, t), gte(payments.receivedOn, from))),
+    db.select({ id: expenseReports.id, paidOn: expenseReports.paidOn }).from(expenseReports)
+      .where(and(
+        forTenant(expenseReports.tenantOrgId, t),
+        eq(expenseReports.status, "paid"),
+        gte(expenseReports.paidOn, from),
+      )),
+    // Company-paid only: no claim, nobody to reimburse. A row somebody is
+    // owed for leaves the account when their claim is paid - counted above.
+    db.select({ on: expenses.incurredOn, cents: expenses.amountCents }).from(expenses)
+      .where(and(
+        overheadExpense(),
+        forTenant(expenses.tenantOrgId, t),
+        isNullCol(expenses.reportId),
+        eq(expenses.person, ""),
+        gte(expenses.incurredOn, from),
+      )),
+    seesPayroll
+      ? db.select().from(payroll).where(eq(payroll.orgId, mine))
+      : Promise.resolve([]),
+  ]);
+
+  const reportIds = paidReports.map((r) => r.id);
+  const claimRows = reportIds.length
+    ? await db.select({ reportId: expenses.reportId, cents: expenses.amountCents }).from(expenses)
+        .where(inArrayCol(expenses.reportId, reportIds))
+    : [];
+  const paidOn = new Map(paidReports.map((r) => [r.id, r.paidOn]));
+  const reimbursed = claimRows.map((e) => ({ on: paidOn.get(e.reportId as number) ?? "", cents: e.cents }));
+
+  const payrollByMonth: Record<string, number> = {};
+  if (payRows.length) {
+    for (const ym of monthsFrom(from, today)) {
+      payrollByMonth[ym] = payrollForMonth(payRows as PayRow[], ym).totalCents;
+    }
+  }
+
+  return {
+    orgId: mine, seesPayroll,
+    cash: cashOnHand({
+      openingCents: org.cents, openingOn: from, today,
+      received: paidRows, reimbursed, overhead: overheadRows, payrollByMonth,
+    }),
+  };
+}
+
+/** Every "YYYY-MM" from the month of `from` to the month of `to`, inclusive. */
+function monthsFrom(from: string, to: string): string[] {
+  const out: string[] = [];
+  let y = Number(from.slice(0, 4)), m = Number(from.slice(5, 7));
+  const endY = Number(to.slice(0, 4)), endM = Number(to.slice(5, 7));
+  for (let i = 0; i < 600 && (y < endY || (y === endY && m <= endM)); i++) {
+    out.push(`${y}-${String(m).padStart(2, "0")}`);
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return out;
 }
 
 export async function financeFigures(
