@@ -4487,3 +4487,170 @@ CREATE INDEX IF NOT EXISTS "expenses_bill_idx" ON "expenses" ("bill_id");
 -- rolls it forward to cash on hand; blank date = never set.
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "cash_opening_cents" integer NOT NULL DEFAULT 0;
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "cash_opening_on" text NOT NULL DEFAULT '';
+
+-- ── The ledger ─────────────────────────────────────────────────────────────
+-- Every dollar on every money screen is SUM() over these rows; nothing stores
+-- a balance. Append-only: corrections are reversing entries. See lib/ledger.
+CREATE TABLE IF NOT EXISTS "ledger_entries" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "posted_on" text NOT NULL DEFAULT '',
+  "memo" text NOT NULL DEFAULT '',
+  "ref_type" text NOT NULL DEFAULT '',
+  "ref_id" text NOT NULL DEFAULT '',
+  "ref_org_id" integer,
+  "ref_work_order_id" integer,
+  "reverses_id" integer,
+  "posting_key" text NOT NULL DEFAULT '',
+  "posted_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "ledger_entries_tenant_on_idx" ON "ledger_entries" ("tenant_org_id", "posted_on");
+CREATE INDEX IF NOT EXISTS "ledger_entries_ref_idx" ON "ledger_entries" ("ref_type", "ref_id");
+CREATE INDEX IF NOT EXISTS "ledger_entries_org_idx" ON "ledger_entries" ("ref_org_id");
+CREATE INDEX IF NOT EXISTS "ledger_entries_wo_idx" ON "ledger_entries" ("ref_work_order_id");
+-- The never-post-twice key: one entry per (tenant, ref_type:ref_id:kind).
+-- Partial, so entries with no natural key (blank) do not collide.
+CREATE UNIQUE INDEX IF NOT EXISTS "ledger_entries_posting_key_unique"
+  ON "ledger_entries" ("tenant_org_id", "posting_key") WHERE "posting_key" <> '';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ledger_entries_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "ledger_entries" ADD CONSTRAINT "ledger_entries_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ledger_entries_ref_org_id_orgs_id_fk') THEN
+    ALTER TABLE "ledger_entries" ADD CONSTRAINT "ledger_entries_ref_org_id_orgs_id_fk"
+      FOREIGN KEY ("ref_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ledger_entries_ref_work_order_id_fk') THEN
+    ALTER TABLE "ledger_entries" ADD CONSTRAINT "ledger_entries_ref_work_order_id_fk"
+      FOREIGN KEY ("ref_work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ledger_entries_reverses_id_fk') THEN
+    ALTER TABLE "ledger_entries" ADD CONSTRAINT "ledger_entries_reverses_id_fk"
+      FOREIGN KEY ("reverses_id") REFERENCES "ledger_entries"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS "ledger_lines" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "entry_id" integer NOT NULL,
+  "account" text NOT NULL,
+  "debit_cents" integer NOT NULL DEFAULT 0,
+  "credit_cents" integer NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS "ledger_lines_entry_idx" ON "ledger_lines" ("entry_id");
+CREATE INDEX IF NOT EXISTS "ledger_lines_account_idx" ON "ledger_lines" ("account");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ledger_lines_entry_id_fk') THEN
+    ALTER TABLE "ledger_lines" ADD CONSTRAINT "ledger_lines_entry_id_fk"
+      FOREIGN KEY ("entry_id") REFERENCES "ledger_entries"("id") ON DELETE CASCADE;
+  END IF;
+  -- Exactly one side of a line carries money. The database refuses the
+  -- shapes lib/ledger/post already refuses, so a bug elsewhere cannot write
+  -- a zero line or a line that is both a debit and a credit.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ledger_lines_one_side_check') THEN
+    ALTER TABLE "ledger_lines" ADD CONSTRAINT "ledger_lines_one_side_check"
+      CHECK (("debit_cents" > 0 AND "credit_cents" = 0) OR ("credit_cents" > 0 AND "debit_cents" = 0));
+  END IF;
+END $$;
+
+-- What the bank says happened, pulled by the feed. matched_entry_id is the
+-- reconciliation, and a matched entry cannot be reversed on our side alone.
+CREATE TABLE IF NOT EXISTS "bank_transactions" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "provider" text NOT NULL DEFAULT '',
+  "provider_txn_id" text NOT NULL DEFAULT '',
+  "on" text NOT NULL DEFAULT '',
+  "description" text NOT NULL DEFAULT '',
+  "amount_cents" integer NOT NULL DEFAULT 0,
+  "matched_entry_id" integer,
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "bank_transactions_provider_txn_unique" UNIQUE ("provider", "provider_txn_id")
+);
+CREATE INDEX IF NOT EXISTS "bank_transactions_tenant_on_idx" ON "bank_transactions" ("tenant_org_id", "on");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'bank_transactions_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "bank_transactions" ADD CONSTRAINT "bank_transactions_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'bank_transactions_matched_entry_id_fk') THEN
+    ALTER TABLE "bank_transactions" ADD CONSTRAINT "bank_transactions_matched_entry_id_fk"
+      FOREIGN KEY ("matched_entry_id") REFERENCES "ledger_entries"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- A month of payroll, run: the register says what a month costs, this says it
+-- was paid, once. One row per (workspace, month).
+CREATE TABLE IF NOT EXISTS "payroll_runs" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "ym" text NOT NULL,
+  "gross_cents" integer NOT NULL DEFAULT 0,
+  "posted_on" text NOT NULL DEFAULT '',
+  "posted_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "payroll_runs_month_unique" UNIQUE ("tenant_org_id", "ym")
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payroll_runs_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "payroll_runs" ADD CONSTRAINT "payroll_runs_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- The last closed month, "YYYY-MM". lib/ledger/post refuses entries inside it.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "books_closed_through" text NOT NULL DEFAULT '';
+
+-- The day a late fee was waived, so the ledger's waiver entry has a date of
+-- its own rather than borrowing the fee's.
+ALTER TABLE "invoice_fees" ADD COLUMN IF NOT EXISTS "waived_on" text NOT NULL DEFAULT '';
+-- When a purchase order's vendor was paid. Blank = still a payable.
+ALTER TABLE "purchase_orders" ADD COLUMN IF NOT EXISTS "paid_on" text NOT NULL DEFAULT '';
+ALTER TABLE "purchase_orders" ADD COLUMN IF NOT EXISTS "paid_by" text NOT NULL DEFAULT '';
+ALTER TABLE "purchase_orders" ADD COLUMN IF NOT EXISTS "paid_ref" text NOT NULL DEFAULT '';
+
+-- One figure of one ledger parity run: legacy arithmetic beside the ledger's.
+CREATE TABLE IF NOT EXISTS "ledger_parity" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "run_at" timestamp NOT NULL DEFAULT now(),
+  "figure" text NOT NULL,
+  "label" text NOT NULL DEFAULT '',
+  "legacy_cents" integer NOT NULL DEFAULT 0,
+  "ledger_cents" integer NOT NULL DEFAULT 0,
+  "note" text NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS "ledger_parity_tenant_run_idx" ON "ledger_parity" ("tenant_org_id", "run_at");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ledger_parity_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "ledger_parity" ADD CONSTRAINT "ledger_parity_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- A workspace's bank feed connection: the provider's token, the sync cursor,
+-- the balance before the feed's first line. One per workspace.
+CREATE TABLE IF NOT EXISTS "bank_connections" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "provider" text NOT NULL DEFAULT 'plaid',
+  "provider_item_id" text NOT NULL DEFAULT '',
+  "access_token" text NOT NULL DEFAULT '',
+  "cursor" text NOT NULL DEFAULT '',
+  "institution" text NOT NULL DEFAULT '',
+  "opening_cents" integer NOT NULL DEFAULT 0,
+  "opening_on" text NOT NULL DEFAULT '',
+  "last_sync_at" timestamp,
+  "last_error" text NOT NULL DEFAULT '',
+  "connected_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "bank_connections_tenant_unique" UNIQUE ("tenant_org_id")
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'bank_connections_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "bank_connections" ADD CONSTRAINT "bank_connections_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;

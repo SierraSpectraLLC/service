@@ -29,9 +29,11 @@ export type QuoteLine = {
 export default function ClientQuote({
   token, quoteId, number, title, brandName, orgName, expiresOn, depositPct,
   lines, totalCents, onHold, standing, answeredBy, answeredOn, feeClause,
-  greeting = "", attn = "", address = [], discount, comments = "", specs,
+  greeting = "", attn = "", address = [], discount, comments = "", specs, depositPay = null,
 }: {
   token: string;
+  /** The deposit invoice's pay link, once approval has raised one and it is unpaid. */
+  depositPay?: { token: string; cents: number } | null;
   quoteId: number;
   number: string;
   title: string;
@@ -186,6 +188,15 @@ export default function ClientQuote({
       {done && (
         <div className="t-body" style={{ marginTop: 12, padding: "8px 10px", borderRadius: 8, background: "var(--t-good-bg)", color: "var(--t-good-fg)" }}>
           {done}
+        </div>
+      )}
+
+      {depositPay && (
+        <div className="row-2" style={{ marginTop: 12, alignItems: "center" }}>
+          <a className="btn primary" href={`/share/${depositPay.token}`} style={{ textDecoration: "none" }}>
+            Pay the {formatCents(depositPay.cents)} deposit
+          </a>
+          <span className="mut t-small">Card or bank transfer, on the hosted page. The work is scheduled once it lands.</span>
         </div>
       )}
 

@@ -6,12 +6,13 @@ import { appSettings, instruments, orgSites, orgs, poLines, purchaseOrders, stoc
 import { requireUser } from "@/lib/authz";
 import { forTenant, isHouse, readTenant, visibleSystemIds } from "@/lib/tenancy";
 import { makerNames } from "@/lib/makersData";
-import { shopMonthDay, shopTime } from "@/lib/shopday";
+import { shopMonthDay, shopTime, shopToday } from "@/lib/shopday";
 import { stockAccess } from "@/lib/stock";
 import PoPanel from "@/components/PoPanel";
 import { RecordHero, type HeroStat } from "@/components/ui";
 import PoJobCard from "@/components/PoJobCard";
 import PoShippingCard from "@/components/PoShippingCard";
+import PayPoButton from "@/components/money/PayPoButton";
 import { woOpen } from "@/lib/workOrders";
 import { PO_LABEL, PO_TONE, poEditable, poTotals } from "@/lib/po";
 
@@ -131,6 +132,13 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
         <a className="btn sm" href={`/api/export/po/${po.id}`} download>
           Excel
         </a>
+        {/* Paying the vendor is the owner's, and only for what has arrived:
+            the payable was posted on receipt, so this is payable down, bank
+            down, and nothing before that has anything to pay. */}
+        {isHouse(user.role) && user.role === "owner" && !po.paidOn && (po.status === "received" || po.status === "partial") && (
+          <PayPoButton poId={po.id} label={`Pay ${po.vendor}`} today={shopToday()} />
+        )}
+        {po.paidOn && <span className="t-meta mut">paid {po.paidOn}{po.paidRef ? ` · ${po.paidRef}` : ""}</span>}
       </div>
 
       {(canRoute || po.shipToSiteId !== null || po.urgent) && (

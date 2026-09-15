@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 // A plain module, not the server-action surface - see lib/stripeSettle.
-import { recordReferralPayment, recordStripePayment } from "@/lib/stripeSettle";
-import { verifyWebhook } from "@/lib/stripeApi";
+import { recordReferralPayment, recordStripePayment, recordStripePayout } from "@/lib/stripeSettle";
+import { paymentFee, verifyWebhook } from "@/lib/stripeApi";
 
 export const dynamic = "force-dynamic";
 
@@ -29,16 +29,35 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "bad signature" }, { status: 400 });
   }
 
-  let event: { type?: string; data?: { object?: Record<string, unknown> } };
+  let event: { type?: string; account?: string; data?: { object?: Record<string, unknown> } };
   try {
     event = JSON.parse(raw);
   } catch {
     return NextResponse.json({ error: "bad payload" }, { status: 400 });
   }
 
-  // One event type. Payment intents, charges and sessions all describe the
-  // same money, and listening to three of them is how one payment gets
-  // recorded twice.
+  // The other thing Stripe tells us: the balance went to the bank. A payout
+  // is not a payment - no invoice, no client - so it takes its own branch and
+  // its own posting, keyed on the payout id so a redelivery posts nothing.
+  if (event.type === "payout.paid") {
+    const payout = event.data?.object ?? {};
+    const arrival = Number(payout.arrival_date ?? 0);
+    try {
+      const r = await recordStripePayout({
+        account: String(event.account ?? ""),
+        payoutId: String(payout.id ?? ""),
+        amountCents: Math.round(Number(payout.amount ?? 0)),
+        arrivalDate: arrival > 0 ? new Date(arrival * 1000).toISOString().slice(0, 10) : "",
+      });
+      return NextResponse.json(r.posted ? { posted: String(payout.id ?? "") } : { ignored: r.reason ?? "payout" });
+    } catch (e) {
+      return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+    }
+  }
+
+  // One event type for money in. Payment intents, charges and sessions all
+  // describe the same money, and listening to three of them is how one
+  // payment gets recorded twice.
   if (event.type !== "checkout.session.completed") {
     return NextResponse.json({ ignored: event.type ?? "unknown" });
   }
@@ -70,9 +89,14 @@ export async function POST(req: Request) {
     if (!Number.isInteger(invoiceId)) {
       return NextResponse.json({ ignored: "nothing on the session to settle" });
     }
+    // Stripe's cut, read off the charge: its own cost row beside the
+    // payment, so the gross in the Stripe balance and the net that will
+    // reach the bank are both on the books. Best effort - a fee that has not
+    // settled yet is zero here and a parity finding later, not a 500.
+    const feeCents = await paymentFee(String(session.payment_intent ?? "")).catch(() => 0);
     await recordStripePayment({
       invoiceId, amountCents: Math.round(amount), reference,
-      method: method === "card" ? "card" : "ach",
+      method: method === "card" ? "card" : "ach", feeCents,
     });
     return NextResponse.json({ recorded: invoiceId });
   } catch (e) {

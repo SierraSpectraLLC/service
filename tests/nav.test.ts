@@ -196,23 +196,22 @@ describe("the rules every tree obeys", () => {
 describe("who gets which room", () => {
   it("keeps the two working rooms in exactly one menu", () => {
     /* Purchasing and Reimbursements are things an engineer DOES, so everybody
-       reaches them - but never twice. Whoever has a Financial menu finds them
-       there (lib/finance.WORKING_ROOMS); whoever has none finds them under
-       Operations. HR is the case that broke the old rule: a Financial menu
-       without the books. */
+       reaches them - but never twice. The Financial menu is now the seven
+       rooms over the journal (lib/finance.FINANCE_KEYS) and neither of these
+       is one of them, so every staff reader finds them under Operations,
+       whatever else they have. */
     for (const ctx of [OWNER, ENGINEER, HR, CLIENT_LAB]) {
       const t = buildNav(ctx);
       const hrefs = t.sections.flatMap((s) => s.items.map((i) => i.href.split("?")[0]));
       const purchasing = hrefs.filter((h) => h === "/money/purchasing");
       expect(purchasing.length).toBeLessThanOrEqual(1);
     }
-    const eng = buildNav(ENGINEER).sections.find((s) => s.key === "ops")!;
-    expect(eng.items.map((i) => i.href)).toContain("/money/purchasing");
-    const owner = buildNav(OWNER);
-    expect(owner.sections.find((s) => s.key === "ops")!.items.map((i) => i.href))
-      .not.toContain("/money/purchasing");
-    expect(owner.sections.find((s) => s.key === "money")!.items.map((i) => i.href))
-      .toContain("/money/purchasing");
+    for (const ctx of [OWNER, ENGINEER, HR]) {
+      const t = buildNav(ctx);
+      expect(t.sections.find((s) => s.key === "ops")!.items.map((i) => i.href)).toContain("/money/purchasing");
+      const money = t.sections.find((s) => s.key === "money");
+      if (money) expect(money.items.map((i) => i.href)).not.toContain("/money/purchasing");
+    }
   });
 
   it("gives HR the register without the books", () => {

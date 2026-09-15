@@ -1,33 +1,26 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser, myTenantOrgId } from "@/lib/authz";
-import { readTenant } from "@/lib/tenancy";
 import { isStaffRole } from "@/lib/tenants";
-import { formatCents, formatDollars } from "@/lib/money";
+import { formatCents } from "@/lib/money";
 import { brandForTenant } from "@/lib/brand";
-import { costingBoard } from "@/lib/invoiceData";
-import { booksContext, cashFigures } from "@/lib/financeData";
-import CashOpeningForm from "@/components/CashOpeningForm";
-import { periodDays, periodSpan } from "@/lib/finance";
-import { DUE_SOON_DAYS } from "@/lib/bills";
+import { booksContext } from "@/lib/financeData";
+import { periodSpan, periodWord } from "@/lib/finance";
 import FinanceShell from "@/components/FinanceShell";
-import PositionLine from "@/components/PositionLine";
-import DraftInvoiceButton from "@/components/DraftInvoiceButton";
-import { EmptyState, Id, Panel, Pill } from "@/components/ui";
+import CashOpeningForm from "@/components/CashOpeningForm";
+import DecisionButton from "@/components/money/DecisionButton";
+import { Figure } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Where the business stands, in money.
  *
- * This page used to open with five tiles - Quoted, Unbilled, Current, Past
- * due, Paid - side by side, with no arithmetic between any two of them. Every
- * figure an owner needs was on the screen and the answer was on none of it,
- * because the answer is a subtraction and nothing performed it.
- *
- * Three lanes perform it. What is owed to the business, what it owes, and the
- * difference. Underneath, the one list of things somebody has to decide,
- * gathered from four ledgers that were four menu items.
+ * The cash line first - the one big number, and what the books know about
+ * it. Then the position: owed, owes, and the difference, with the deposits
+ * called out as not-yours. Then the one list of things somebody has to
+ * decide, worst first, where every row's button is the action. Every figure
+ * is a button into the ledger, because nothing here is stored.
  */
 export default async function MoneyPage({ searchParams }: {
   searchParams: Promise<{ period?: string }>;
@@ -35,278 +28,130 @@ export default async function MoneyPage({ searchParams }: {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
-
-  // The window, the permission and every figure, asked the one way - see
-  // lib/financeData. A page that worked out `seesPayroll` slightly differently
-  // from the rail beside it is the leak this whole section is built around.
-  const { period, today, seesPayroll, figures: fig } =
-    await booksContext(user, (await searchParams).period);
-  const [brand, board, { cash }] = await Promise.all([
-    brandForTenant(myTenantOrgId(user)),
-    costingBoard(today, periodDays(today, period), readTenant(user)),
-    cashFigures(user, today),
-  ]);
-
-  const { moneyIn: mIn, moneyOut: mOut } = fig;
-  /*
-   * TWO different questions, and the page used to subtract across them.
-   *
-   * POSITION is a stock: what is outstanding in each direction, right now.
-   * Receivable less payable, and NOT less payroll or overhead - not because
-   * of who may read them (every reader of this page may; see periodNet) but
-   * because they are not outstanding. Nobody is waiting to be paid them. A
-   * salary already paid belongs in the flow below, not in a figure that
-   * answers "who owes whom".
-   *
-   * PERIOD is a flow: what actually moved. Collected, less what it cost to
-   * exist while collecting it. Open POs and unpaid reimbursements are NOT in
-   * it - those are commitments that have not moved yet, and they are already
-   * counted in the position.
-   *
-   * Both are real and neither is the other. Showing the position under the
-   * heading "what is left", beside a lane headed with money that had already
-   * been collected, is how a company that collected twenty thousand dollars
-   * and owes nobody anything reads as zero.
-   */
-  const owed = mIn.currentCents + mIn.pastDueCents;
-  const owes = mOut.purchasingCents + mOut.reimbursementsCents;
-  const net = owed - owes;
-
-  const collected = mIn.paidCents;
-  /*
-   * Never null on this page, and the reason is worth knowing because the old
-   * comment above got it wrong. maySeeBooks and maySeePayroll are
-   * character-for-character identical on their house branch (lib/books:48-50,
-   * lib/payroll:79-81) - `role === "owner" && operatorOrgId === orgId` in
-   * both. They diverge only for a CLIENT, on two different allowlist flags,
-   * and this page redirects every non-staff reader at the top. So anybody who
-   * can see these figures at all can see payroll, and the `?? 0` below is for
-   * the type rather than for a reader who exists.
-   */
-  const periodNet = collected - (mOut.payrollCents ?? 0) - (mOut.overheadCents ?? 0);
-  const spread = collected + mIn.currentCents + mIn.pastDueCents;
-  const width = (n: number) => (spread > 0 ? `${(n / spread) * 100}%` : "0%");
-
-  const margins = board.clients.filter((c) => c.marginPct !== null).slice(0, 5);
+  const { period, today, figures: f, rail } = await booksContext(user, (await searchParams).period);
+  const brand = await brandForTenant(myTenantOrgId(user));
+  const p = f.positions;
+  const net = p.receivable - f.owes.totalCents;
+  const unrec = f.unreconciled.unmatched + f.unreconciled.inTransit;
+  const hasOpening = f.sources.today !== "" && (p.bank !== 0 || p.stripe !== 0 || f.flow.cashInCents > 0);
 
   return (
     <FinanceShell
-      rail={{ active: "overview", amounts: fig.amounts, seesBooks: true, seesPayroll }}
+      rail={rail} active="overview"
       period={period}
       path="/money"
       title="Financial"
-      sub={`${brand.operatorName} · everything in, out, and what is left · ${periodSpan(today, period)}`}
-      banner={
-        <PositionLine owedCents={owed} owesCents={owes}
-          pastDueCents={mIn.pastDueCents} pastDueCount={mIn.pastDueCount} period={period} />
-      }
+      sub={`${brand.operatorName} · cash, position, and what needs deciding · ${periodSpan(today, period)}`}
     >
-      <div className="lanes">
-        <div className="lane in">
-          {/* The lane's own footer, not collected + owed: the header used to
-              carry money that had already arrived and therefore contributes
-              nothing to the position beside it. Collected is still the first
-              row, where it is a fact about the period rather than a claim
-              about what is outstanding. */}
-          <h3>Money in <span className="tot money">{formatDollars(owed)}</span></h3>
-          <div className="inner">
-            <Row label="Paid this period" sub="ACH, card, check" cents={mIn.paidCents} />
-            <Row label="Invoiced, current" sub="inside terms" cents={mIn.currentCents} />
-            <Row label="Past due" sub={`${mIn.pastDueCount} in collections`}
-              cents={mIn.pastDueCents} tone={mIn.pastDueCents > 0 ? "bad" : undefined} />
-            <Row label="Worked, unbilled" sub={`${mIn.unbilledJobs} closed job${mIn.unbilledJobs === 1 ? "" : "s"} - the leak`}
-              cents={mIn.unbilledCents} tone={mIn.unbilledCents > 0 ? "warn" : undefined} />
-            <div className="ledger total">
-              <span className="grow">Owed to you</span>
-              <span className="money">{formatCents(owed)}</span>
+      <div className="panel">
+        <div className="cashline">
+          <div>
+            <div>
+              <Figure cents={f.cashCents} filter={{ acct: "bank" }} big />
+            </div>
+            <div className="since">
+              Cash on hand · <Figure cents={p.bank} filter={{ acct: "bank" }} label={`${formatCents(p.bank)} in the bank`} />
+              {p.stripe !== 0 && <> + <Figure cents={p.stripe} filter={{ acct: "stripe" }} label={`${formatCents(p.stripe)} in Stripe`} /></>}
+              {" · "}
+              {unrec > 0
+                ? <Link href="/money/cash">{unrec} item{unrec === 1 ? "" : "s"} unreconciled</Link>
+                : f.unreconciled.hasFeed ? "reconciled to the bank" : <Link href="/money/cash">no bank feed yet</Link>}
+              . <b>{formatCents(f.collected.cents)}</b> collected and <b>−{formatCents(f.flow.costCents)}</b> out {periodWord(period)}.
+            </div>
+            {!hasOpening && (
+              <div className="mut t-small" style={{ marginTop: 8 }}>
+                The bank balance is the one figure the books cannot work out. Tell it once; it posts an opening entry and carries the figure forward.
+              </div>
+            )}
+            <div style={{ marginTop: 8 }}>
+              <CashOpeningForm today={today} compact={hasOpening} canSet={user.role === "owner"} />
             </div>
           </div>
-        </div>
-
-        <div className="lane out">
-          <h3>Money out</h3>
-          <div className="inner">
-            {/* Payroll and overhead appear only for a reader who may read them.
-                Absent rather than zeroed: a $0 payroll line would be a lie, and
-                a line labelled but blank tells them a number exists. */}
-            {mOut.payrollCents !== null && (
-              <Row label="Payroll" sub="gross this period" cents={mOut.payrollCents} />
-            )}
-            <Row label="Purchase orders" sub={`${mOut.openPos} committed, not yet received`}
-              cents={mOut.purchasingCents} />
-            {mOut.overheadCents !== null && (
-              <Row label="Overhead" sub="runs whether or not anyone works" cents={mOut.overheadCents} />
-            )}
-            {/* Forward-looking, alone in this lane: the standing bills landing
-                in the next two weeks, so the dashboard says what is about to
-                leave as well as what has. They post to Overhead on their day
-                by themselves; this row is the heads-up, and Bills is where
-                the pay links are. */}
-            <Row label="Bills coming due"
-              sub={`next ${DUE_SOON_DAYS} days · ${mOut.billsSoonCount} bill${mOut.billsSoonCount === 1 ? "" : "s"} - pay them at Bills`}
-              cents={mOut.billsSoonCents} />
-            {/* Reimbursements, as the two figures they actually are - the flaw
-                the shop called out was one row wearing the other's name. Money
-                OUT is what left the account: reports PAID in the period, cash
-                basis on paidOn, the same rule "Paid this period" applies
-                across the aisle. What is submitted and unpaid has not moved
-                yet - it is the payable half of the position, feeds "Owed by
-                you" below, and now says so in its own name. */}
-            <Row label="Reimbursed" sub="paid out this period" cents={mOut.reimbursedCents} />
-            <Row label="Reimbursements pending" sub={`${mOut.reimbursementReports} report${mOut.reimbursementReports === 1 ? "" : "s"} awaiting payout`}
-              cents={mOut.reimbursementsCents} tone={mOut.reimbursementsCents > 0 ? "warn" : undefined} />
-            <div className="ledger total">
-              <span className="grow">
-                Owed by you
-                <span className="sub">outstanding only - payroll and overhead are period cost</span>
-              </span>
-              <span className="money">{formatCents(owes)}</span>
-            </div>
+          <div className="runway">
+            <div className="n">{f.runway.months === null ? "—" : `${f.runway.months} mo`}</div>
+            <div className="meta t-meta mut">runway at {formatCents(f.runway.burnCents)}/mo average burn (last two months)</div>
           </div>
         </div>
-
-        <div className="lane net">
-          <h3>Where you stand</h3>
-          <div className="inner">
-            {/* THE number: what is in the bank, as far as the app can tell.
-                Nothing here is a bank feed, so it is carried forward from a
-                balance the owner typed - see lib/cash for what counts. Absent
-                until one is set, with the form in its place: a $0 here would
-                read as broke, and a page that quietly showed the position
-                instead would leave the owner's actual question unanswered. */}
-            {cash ? (
-              <>
-                <div className={`bignum${cash.cents < 0 ? " neg" : ""}`}>{formatCents(cash.cents)}</div>
-                <div className="biglab">
-                  cash on hand · from {formatDollars(cash.openingCents)} on {cash.openingOn},
-                  {" "}plus {formatDollars(cash.receivedCents)} collected, less
-                  {" "}{formatDollars(cash.reimbursedCents + cash.overheadCents + cash.payrollCents)} out
-                  {cash.payrollMonths.length
-                    ? ` (payroll counted at month end, ${cash.payrollMonths.length} month${cash.payrollMonths.length === 1 ? "" : "s"})`
-                    : ""}
-                  {" · "}purchase orders and anything paid outside the app are not counted
-                </div>
-                <div style={{ marginTop: 6 }}>
-                  <CashOpeningForm today={today} compact canSet={user.role === "owner"} />
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="biglab" style={{ fontWeight: 600 }}>Cash on hand</div>
-                <div className="mut t-small" style={{ marginBottom: 8 }}>
-                  What is in the bank is the one figure the books cannot work out. Tell it once and it
-                  carries the number forward: plus what arrives, less claims paid, overhead and payroll.
-                </div>
-                <CashOpeningForm today={today} canSet={user.role === "owner"} />
-              </>
-            )}
-            <div className="rule" />
-            <div className={`bignum${net < 0 ? " neg" : ""}`}>{formatCents(net)}</div>
-            <div className="biglab">
-              outstanding position · receivable less payable
-              {owed === 0 && owes === 0 ? " · nobody owes anybody" : ""}
+        <div className="position">
+          <div>
+            <div className="k">Owed to you</div>
+            <div className="v"><Figure cents={p.receivable} filter={{ acct: "receivable" }} /></div>
+            <div className="d">
+              <Figure cents={f.stages.pastDue.cents} filter={{ acct: "receivable", live: true }} tone={f.stages.pastDue.cents ? "bad" : undefined} />
+              {" "}past due on {f.stages.pastDue.n} · {formatCents(f.stages.current.cents)} inside terms
             </div>
-            <div className="rule" />
-            <div className={`bignum${periodNet < 0 ? " neg" : ""}`}>{formatCents(periodNet)}</div>
-            <div className="biglab">
-              this period · {formatDollars(collected)} collected less payroll and overhead
-              {" · "}{periodSpan(today, period)}
+          </div>
+          <div>
+            <div className="k">You owe</div>
+            <div className="v"><Figure cents={f.owes.totalCents} filter={{ acct: "payable" }} /></div>
+            <div className="d">
+              {formatCents(f.owes.vendorsCents)} to vendors · {formatCents(f.owes.reimbDueCents)} to your people · {formatCents(f.owes.taxCents)} sales tax
             </div>
-            <div className="rule" />
-            <div className="bar" role="img"
-              aria-label={`${formatDollars(collected)} collected, ${formatDollars(mIn.currentCents)} inside terms, ${formatDollars(mIn.pastDueCents)} past terms`}>
-              <span style={{ width: width(collected), background: "var(--t-good-fg)" }} />
-              <span style={{ width: width(mIn.currentCents), background: "var(--t-info-fg)" }} />
-              <span style={{ width: width(mIn.pastDueCents), background: "var(--t-bad-fg)" }} />
+          </div>
+          <div>
+            <div className="k">Position</div>
+            <div className={`v${net < 0 ? " fig bad" : ""}`}>{formatCents(net)}</div>
+            <div className="d">
+              receivable less payable, right now. <Figure cents={p.depositsHeld} filter={{ acct: "deposits_held" }} /> held in deposits is not yours yet.
             </div>
-            <div className="bar-key">
-              <span><i style={{ background: "var(--t-good-fg)" }} />Collected</span>
-              <span><i style={{ background: "var(--t-info-fg)" }} />Current</span>
-              <span><i style={{ background: "var(--t-bad-fg)" }} />Past due</span>
-            </div>
-            <div className="rule" />
-            <Row label="Committed monthly" sub="contracts in force" cents={fig.contractsMonthlyCents} />
-            <Row label="Quoted, awaiting" sub="not revenue until accepted" cents={mIn.quotedCents} />
           </div>
         </div>
       </div>
 
-      <div className="pair" style={{ marginTop: 12 }}>
-        <Panel title="Needs a decision" count={fig.decisions.length}
-          hint="Every ledger in this section, ranked. Before it existed these lived on five pages and nothing added them up."
-          empty="Nothing is waiting on you.">
-          {fig.decisions.length > 0 && fig.decisions.map((d) => (
-            <div key={d.key} className="ledger">
-              <Pill tone={d.tone}>{d.tone === "bad" ? "Now" : "Soon"}</Pill>
-              <span className="grow">
-                <Link href={d.href} className="t-body plain" style={{ fontWeight: 600 }}>{d.title}</Link>
-                <span className="sub">{d.detail}</span>
-              </span>
-            </div>
+      <div className="panel decide">
+        <div className="ph">
+          <h2>Needs a decision</h2>
+          <span className="t-meta mut">{f.decisions.length} item{f.decisions.length === 1 ? "" : "s"}, worst first · each one is a button that posts</span>
+        </div>
+        <ul>
+          {f.decisions.length === 0 && <li><span className="mut">Nothing waiting on you.</span></li>}
+          {f.decisions.map((d) => (
+            <li key={d.key}>
+              <div className="why">
+                <Link href={d.href}>{d.title}</Link>
+                <span className="meta">{d.detail}</span>
+              </div>
+              <div className={`amt${d.tone ? ` ${d.tone}` : ""}`}>{formatCents(d.cents)}</div>
+              <div><DecisionButton action={d.action} /></div>
+            </li>
           ))}
-        </Panel>
-
-        <Panel title="Margin by client"
-          hint={`Closed jobs, ${periodSpan(today, period).toLowerCase()}.`}
-          actions={<Link className="btn sm" href="/money/costing">Open job costing</Link>}
-          empty="Nothing closed in this window.">
-          {margins.length > 0 && margins.map((c) => (
-            <div key={c.orgId} className="ledger">
-              <span className="grow">
-                {c.orgName}
-                <span className="sub">{formatCents(c.billedCents)} billed · {c.jobs} job{c.jobs === 1 ? "" : "s"}</span>
-              </span>
-              <Pill tone={(c.marginPct ?? 0) < 20 ? "bad" : (c.marginPct ?? 0) < 35 ? "warn" : "good"}>
-                {c.marginPct}%
-              </Pill>
-              <span className="money">{formatCents(c.billedCents - c.costCents)}</span>
-            </div>
-          ))}
-        </Panel>
+        </ul>
       </div>
 
-      {/* The only place a closed job can be turned into an invoice. The
-          decisions list names the leak; this is where it gets plugged. */}
-      <Panel title="Needs an invoice" count={fig.unbilled.length} empty="Nothing to invoice.">
-        {fig.unbilled.length > 0 && fig.unbilled.map((j) => (
-          <div key={j.woId} className="ledger">
-            <span className="grow">
-              <Link href={`/work/${j.woId}`} className="t-body plain" style={{ fontWeight: 600 }}>
-                <Id>{j.number}</Id> {j.title}
-              </Link>
-              <span className="sub">
-                {j.orgName}
-                {j.closedOn ? ` · closed ${j.daysClosed}d ago` : ""}
-                {j.coveredBy ? ` · ${j.allCovered ? "covered by" : "partly covered by"} ${j.coveredBy}` : ""}
-              </span>
-            </span>
-            <span className="money">{formatCents(j.valueCents)}</span>
-            <DraftInvoiceButton workOrderId={j.woId} number={j.number} />
-          </div>
-        ))}
-      </Panel>
-
-      {fig.decisions.length === 0 && owed === 0 && owes === 0 && (
-        <EmptyState title="No money is moving yet."
-          body="Quotes, invoices and orders show up here as they are raised." />
-      )}
+      <div className="two">
+        <div className="panel">
+          <div className="ph"><h2>Money in · {periodSpan(today, period)}</h2></div>
+          <div className="tblwrap"><table className="list"><tbody>
+            <tr><td>Collected</td><td className="meta">{f.collected.n} payment{f.collected.n === 1 ? "" : "s"}</td>
+              <td className="num"><Figure cents={f.collected.cents} filter={{ acct: "bank", type: "invoice", from: f.from, to: f.to }} tone="good" /></td></tr>
+            <tr><td>Invoiced, inside terms</td><td className="meta">{f.stages.current.n} invoice{f.stages.current.n === 1 ? "" : "s"}</td>
+              <td className="num"><Link className="fig money" href="/money/receivables?stage=current">{formatCents(f.stages.current.cents)}</Link></td></tr>
+            <tr><td>Past due</td><td className="meta">{f.stages.pastDue.n} in collections</td>
+              <td className="num"><Link className={`fig money${f.stages.pastDue.cents ? " bad" : ""}`} href="/money/receivables?stage=pastdue">{formatCents(f.stages.pastDue.cents)}</Link></td></tr>
+            <tr><td>Worked, unbilled</td><td className="meta">{f.stages.unbilled.n} closed job{f.stages.unbilled.n === 1 ? "" : "s"} and draft{f.stages.unbilled.n === 1 ? "" : "s"} · not in the ledger until sent</td>
+              <td className="num"><Link className={`fig money${f.stages.unbilled.cents ? " warn" : ""}`} href="/money/receivables?stage=unbilled">{formatCents(f.stages.unbilled.cents)}</Link></td></tr>
+          </tbody></table></div>
+        </div>
+        <div className="panel">
+          <div className="ph"><h2>Money out · {periodSpan(today, period)}</h2></div>
+          <div className="tblwrap"><table className="list"><tbody>
+            <tr><td>Parts bought</td><td className="meta">on received orders</td>
+              <td className="num"><Figure cents={f.flow.cost.cost_parts} filter={{ acct: "cost_parts", from: f.from, to: f.to }} /></td></tr>
+            <tr><td>Overhead</td><td className="meta">rent, insurance, telecom, software</td>
+              <td className="num"><Figure cents={f.flow.cost.overhead} filter={{ acct: "overhead", from: f.from, to: f.to }} /></td></tr>
+            {rail.seesPayroll && (
+              <tr><td>Payroll</td><td className="meta">{f.sources.payroll ? "this month not yet run" : "run"}</td>
+                <td className="num"><Figure cents={f.flow.cost.payroll} filter={{ acct: "payroll", from: f.from, to: f.to }} /></td></tr>
+            )}
+            <tr><td>Field expenses</td><td className="meta">reimbursed to engineers, and paid on jobs</td>
+              <td className="num"><Figure cents={f.flow.cost.cost_field_expenses} filter={{ acct: "cost_field_expenses", from: f.from, to: f.to }} /></td></tr>
+            <tr><td>Processing fees</td><td className="meta">Stripe, on pay-link payments</td>
+              <td className="num"><Figure cents={f.flow.cost.cost_processing} filter={{ acct: "cost_processing", from: f.from, to: f.to }} /></td></tr>
+            <tr><td>On order, not yet a cost</td><td className="meta">orders sent, not received</td>
+              <td className="num"><Link className="fig money" href="/money/payables">{formatCents(f.onOrderCents)}</Link></td></tr>
+          </tbody></table></div>
+        </div>
+      </div>
     </FinanceShell>
-  );
-}
-
-/** One line of a lane: what it is, what it comes to, and why it is here. */
-function Row({ label, sub, cents, tone }: {
-  label: string; sub: string; cents: number; tone?: "warn" | "bad";
-}) {
-  return (
-    <div className="ledger">
-      <span className="grow">
-        {label}
-        <span className="sub">{sub}</span>
-      </span>
-      <span className="money" style={tone ? { color: `var(--t-${tone}-fg)` } : undefined}>
-        {formatCents(cents)}
-      </span>
-    </div>
   );
 }

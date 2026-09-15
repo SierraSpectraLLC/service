@@ -16,7 +16,7 @@
 // Pure on purpose. The facts it branches on are gathered in lib/navData, so
 // the branching itself is testable without a database - see tests/nav.test.ts,
 // which pins one tree per persona.
-import { financeNavItems } from "@/lib/finance";
+import { financeNavItems, WORKING_ROOMS } from "@/lib/finance";
 
 /** One destination. `badge` is a count; `tone` says the count is a problem. */
 export type NavLeaf = { href: string; label: string; badge?: number; tone?: "warn" | "bad" };
@@ -323,16 +323,10 @@ function staffSections(ctx: NavContext): NavSection[] {
          menu was owner-only and so the two readerships never overlapped. They
          do now: HR gets that menu for the payroll register, and would have
          seen the same two rooms twice.
-         So: one door each, and which menu it is in depends on which menus this
-         reader has. lib/finance.WORKING_ROOMS keeps them in the Financial menu
-         for everybody who has one. */
-      ...(fin ? [] : [
-        { href: "/money/purchasing", label: "Purchasing" },
-        /* "Reimbursements", not "Expenses": Overhead is also expenses, and two
-           things by one name in one section is the confusion the financial
-           merge exists to remove. */
-        { href: "/money/reimbursements", label: "Reimbursements" },
-      ]),
+         So: one door each, and it is this one. The Financial menu is now the
+         seven rooms over the journal (lib/finance.FINANCE_KEYS), and neither
+         of these is one of them, so every staff reader finds them here. */
+      ...WORKING_ROOMS.map((r) => ({ href: r.href, label: r.label })),
       /* Payroll lives in the Financial menu. It is not something an engineer
          DOES - unlike the two rooms above it, which stay here precisely
          because they are - and its gate is the register gate, so anybody who
@@ -350,6 +344,10 @@ function staffSections(ctx: NavContext): NavSection[] {
       ...(ctx.modules.sheetSync
         ? [{ href: "/parity", label: "Sheet parity", badge: ctx.openDiffs, tone: "warn" as const }]
         : []),
+      /* The dual-write period's record: the money computed the old way beside
+         the ledger's. A books reader's page, next to Sheet parity because it
+         is the same kind of page - see lib/ledger/parity. */
+      ...(ctx.seesBooks ? [{ href: "/parity/ledger", label: "Ledger parity" }] : []),
       { href: "/archive", label: "Archived" },
     ],
   });

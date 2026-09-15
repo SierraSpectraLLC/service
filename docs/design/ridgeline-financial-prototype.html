@@ -1,0 +1,1127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ridgeline · Financial (redesign mockup)</title>
+<style>
+:root {
+  --navy: #172A4A; --navy-2: #21395F; --coral: #E8613C; --coral-2: #D4532F;
+  --coral-wash: #FDF2F1; --sky: #5BA8D9; --slate: #64748B;
+  --bg: #F5F6F9; --card: #FFFFFF; --line: #E4E8EF; --ink: #1E293B; --mut: #64748B; --link: #1D6396;
+  --hover: #EDF1F7; --current: #E9EEF6;
+  --radius: 8px;
+  --shadow-sm: 0 1px 2px rgba(23,42,74,.05); --shadow-md: 0 8px 24px rgba(23,42,74,.14);
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-micro: 10px; --fs-meta: 11px; --fs-small: 12px; --fs-body: 13px; --fs-lead: 14px;
+  --fs-title: 16px; --fs-hero: 19px; --fs-page: 22px; --fs-metric: 26px; --fs-figure: 48px;
+  --t-neutral-bg:#EEF1F5; --t-neutral-fg:#475569; --t-faint-bg:#F4F6F9; --t-faint-fg:#94A3B8;
+  --t-info-bg:#E7F2FA; --t-info-fg:#1D6396; --t-good-bg:#E5F3E5; --t-good-fg:#2E6B2E;
+  --t-warn-bg:#FAF0DC; --t-warn-fg:#8A5410; --t-accent-bg:#EDEBFA; --t-accent-fg:#4F45A3;
+  --t-bad-bg:#FBE9E9; --t-bad-fg:#A32D2D;
+  --dur: 140ms; --ease: cubic-bezier(.2,.7,.3,1);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg:#0F1726; --card:#172033; --line:#26324A; --ink:#E6EAF2; --mut:#93A0B8; --link:#7FB6E0;
+  --hover:#1E2A40; --current:#22304A; --slate:#A3AFC4;
+  --t-neutral-bg:#26324A; --t-neutral-fg:#C5CEDD; --t-faint-bg:#1B2436; --t-faint-fg:#7A879C;
+  --t-info-bg:#183246; --t-info-fg:#8CC5EA; --t-good-bg:#173321; --t-good-fg:#8ED08E;
+  --t-warn-bg:#3A2C10; --t-warn-fg:#F0C273; --t-accent-bg:#26224A; --t-accent-fg:#B9B0F2;
+  --t-bad-bg:#40191B; --t-bad-fg:#F1A0A0;
+}}
+:root[data-theme="dark"] {
+  --bg:#0F1726; --card:#172033; --line:#26324A; --ink:#E6EAF2; --mut:#93A0B8; --link:#7FB6E0;
+  --hover:#1E2A40; --current:#22304A; --slate:#A3AFC4;
+  --t-neutral-bg:#26324A; --t-neutral-fg:#C5CEDD; --t-faint-bg:#1B2436; --t-faint-fg:#7A879C;
+  --t-info-bg:#183246; --t-info-fg:#8CC5EA; --t-good-bg:#173321; --t-good-fg:#8ED08E;
+  --t-warn-bg:#3A2C10; --t-warn-fg:#F0C273; --t-accent-bg:#26224A; --t-accent-fg:#B9B0F2;
+  --t-bad-bg:#40191B; --t-bad-fg:#F1A0A0;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: var(--fs-body); line-height: 1.45;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+a { color: var(--link); }
+.money { font-variant-numeric: tabular-nums; }
+h1, h2, h3 { margin: 0; font-weight: 700; }
+h2 { font-size: var(--fs-title); }
+h3 { font-size: var(--fs-lead); }
+.mut { color: var(--mut); }
+.sm { font-size: var(--fs-small); }
+.meta { font-size: var(--fs-meta); color: var(--mut); }
+:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+
+/* ── chrome ─────────────────────────────────────────────────────────── */
+.topbar {
+  background: var(--navy); color: #fff; height: 48px; display: flex; align-items: center;
+  padding: 0 20px; gap: 18px; position: sticky; top: 0; z-index: 20;
+}
+.topbar .wordmark { font-weight: 800; letter-spacing: -.01em; font-size: var(--fs-lead); }
+.topbar .op { opacity: .75; font-size: var(--fs-small); }
+.topbar .sp { flex: 1; }
+.topbar .mock { font-size: var(--fs-micro); opacity: .6; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 20px; }
+.head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+.head h1 { font-size: var(--fs-page); }
+.head .sub { color: var(--mut); margin-top: 2px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--card); }
+.seg button { border: 0; background: transparent; color: var(--slate); font-size: var(--fs-small); font-weight: 700; padding: 6px 12px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--navy); color: #fff; }
+
+.rail-body { display: grid; grid-template-columns: 196px minmax(0,1fr); gap: 24px; align-items: start; }
+.rail { position: sticky; top: 68px; }
+.railhead { font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .9px; font-weight: 700; color: var(--slate); padding: 0 8px 8px; }
+.rail ul + .railhead { padding-top: 14px; }
+.rail ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.rail button {
+  width: 100%; display: flex; align-items: center; gap: 8px; background: none; border: 0;
+  border-radius: var(--radius); padding: 7px 8px 7px 12px; text-align: left;
+  border-left: 3px solid transparent;
+}
+.rail button:hover { background: var(--hover); }
+.rail button[aria-current="true"] { background: var(--current); font-weight: 700; border-left-color: var(--navy); }
+.rail .lbl { flex: 1; }
+.rail .amt { font-family: var(--mono); font-size: var(--fs-meta); font-weight: 700; color: var(--mut); }
+.rail .amt.bad { color: var(--t-bad-fg); } .rail .amt.warn { color: var(--t-warn-fg); }
+@media (max-width: 960px) {
+  .rail-body { grid-template-columns: minmax(0,1fr); gap: 12px; }
+  .rail { position: static; display: flex; overflow-x: auto; gap: 4px; padding-bottom: 4px; }
+  .railhead { display: none; }
+  .rail ul { flex-direction: row; }
+  .rail button { white-space: nowrap; border-left: 0; border-bottom: 3px solid transparent; }
+  .rail button[aria-current="true"] { border-bottom-color: var(--navy); }
+}
+
+/* ── panels & tables ────────────────────────────────────────────────── */
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.panel + .panel { margin-top: 16px; }
+.panel .ph { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.panel .pb { padding: 12px 16px; }
+table.list { width: 100%; border-collapse: collapse; }
+table.list th { text-align: left; font-size: var(--fs-meta); color: var(--mut); font-weight: 600; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+table.list td { padding: 10px 16px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+table.list tr:last-child td { border-bottom: 0; }
+table.list tr.row:hover td { background: var(--hover); }
+table.list .r { text-align: right; }
+table.list .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.list .doc { font-family: var(--mono); font-size: var(--fs-small); font-weight: 600; }
+table.list .title { font-weight: 600; }
+table.list .title .meta { font-weight: 400; display: block; }
+.tblwrap { overflow-x: auto; }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: var(--fs-meta); font-weight: 700; white-space: nowrap; }
+.pill.neutral{background:var(--t-neutral-bg);color:var(--t-neutral-fg)} .pill.faint{background:var(--t-faint-bg);color:var(--t-faint-fg)}
+.pill.info{background:var(--t-info-bg);color:var(--t-info-fg)} .pill.good{background:var(--t-good-bg);color:var(--t-good-fg)}
+.pill.warn{background:var(--t-warn-bg);color:var(--t-warn-fg)} .pill.accent{background:var(--t-accent-bg);color:var(--t-accent-fg)}
+.pill.bad{background:var(--t-bad-bg);color:var(--t-bad-fg)}
+.btn { border: 1px solid var(--line); background: var(--card); border-radius: var(--radius); padding: 6px 12px; font-size: var(--fs-small); font-weight: 600; white-space: nowrap; }
+.btn:hover { background: var(--hover); }
+.btn.primary { background: var(--navy); color: #fff; border-color: var(--navy); }
+.btn.primary:hover { background: var(--navy-2); }
+.btn.coral { background: var(--coral); color: #fff; border-color: var(--coral); }
+.btn.coral:hover { background: var(--coral-2); }
+.btn.sm { padding: 3px 9px; font-size: var(--fs-meta); }
+.btn:disabled { opacity: .45; cursor: default; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--link); text-decoration: underline; font-size: inherit; }
+
+/* Every money figure is a button into the ledger. Underline only on hover, so
+   the page reads as figures and not as a wall of links. */
+.fig { background: none; border: 0; padding: 0; font: inherit; font-variant-numeric: tabular-nums; color: inherit; cursor: pointer; border-bottom: 1px dotted transparent; }
+.fig:hover { border-bottom-color: currentColor; }
+.fig.bad { color: var(--t-bad-fg); } .fig.warn { color: var(--t-warn-fg); } .fig.good { color: var(--t-good-fg); }
+
+/* ── home ───────────────────────────────────────────────────────────── */
+.cashline { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 24px; align-items: end; padding: 20px 24px; }
+.cashline .big { font-size: var(--fs-figure); font-weight: 800; letter-spacing: -.03em; line-height: 1; }
+.cashline .big .fig { border-bottom-width: 2px; }
+.cashline .since { color: var(--mut); margin-top: 6px; }
+.cashline .since b { color: var(--ink); }
+.cashline .runway { text-align: right; }
+.cashline .runway .n { font-size: var(--fs-metric); font-weight: 700; line-height: 1.1; }
+@media (max-width: 640px) { .cashline { grid-template-columns: 1fr; } .cashline .runway { text-align: left; } }
+.position { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); border-top: 1px solid var(--line); }
+.position > div { padding: 14px 24px; }
+.position > div + div { border-left: 1px solid var(--line); }
+.position .k { font-size: var(--fs-small); color: var(--mut); }
+.position .v { font-size: var(--fs-hero); font-weight: 700; margin-top: 2px; }
+.position .d { font-size: var(--fs-small); color: var(--mut); margin-top: 2px; }
+@media (max-width: 640px) { .position { grid-template-columns: 1fr; } .position > div + div { border-left: 0; border-top: 1px solid var(--line); } }
+.decide li { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 14px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.decide li:last-child { border-bottom: 0; }
+.decide ul { list-style: none; margin: 0; padding: 0; }
+.decide .why { font-weight: 600; }
+.decide .why .meta { display: block; font-weight: 400; }
+.decide .amt { font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+@media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+.two .panel + .panel { margin-top: 0; }
+
+/* ── pipeline ───────────────────────────────────────────────────────── */
+.stages { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: 0; }
+.stages button { background: none; border: 0; border-right: 1px solid var(--line); padding: 12px 14px; text-align: left; display: block; position: relative; }
+.stages button:last-child { border-right: 0; }
+.stages button:hover { background: var(--hover); }
+.stages button[aria-pressed="true"] { background: var(--current); }
+.stages button[aria-pressed="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; background: var(--navy); }
+.stages .k { font-size: var(--fs-small); color: var(--mut); }
+.stages .v { font-size: var(--fs-hero); font-weight: 700; font-variant-numeric: tabular-nums; }
+.stages .c { font-size: var(--fs-meta); color: var(--mut); }
+.stages .v.bad { color: var(--t-bad-fg); } .stages .v.warn { color: var(--t-warn-fg); } .stages .v.good { color: var(--t-good-fg); }
+@media (max-width: 900px) { .stages { grid-template-columns: repeat(3, 1fr); } .stages button { border-bottom: 1px solid var(--line); } }
+.bar { height: 6px; background: var(--t-faint-bg); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--navy); }
+.bar i.warn { background: var(--t-warn-fg); } .bar i.bad { background: var(--t-bad-fg); } .bar i.good { background: var(--t-good-fg); }
+
+/* ── ledger ─────────────────────────────────────────────────────────── */
+.filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.filters select, .filters input { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: var(--radius); padding: 5px 8px; font: inherit; font-size: var(--fs-small); }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--t-accent-bg); color: var(--t-accent-fg); font-size: var(--fs-meta); font-weight: 700; }
+.chip button { background: none; border: 0; color: inherit; padding: 0; font-weight: 800; }
+tr.entry td { cursor: pointer; }
+tr.entry.open td { background: var(--current); }
+tr.lines td { background: var(--t-faint-bg); padding: 6px 16px 10px; }
+.postings { display: grid; grid-template-columns: max-content max-content max-content; gap: 2px 18px; font-family: var(--mono); font-size: var(--fs-small); }
+.postings .cr { padding-left: 24px; }
+.balanced { font-family: var(--mono); font-size: var(--fs-meta); }
+.balanced.ok { color: var(--t-good-fg); }
+.reversed { text-decoration: line-through; color: var(--mut); }
+
+/* ── reports ────────────────────────────────────────────────────────── */
+.pl td.ind { padding-left: 32px; }
+.pl tr.tot td { font-weight: 700; border-top: 2px solid var(--line); }
+.margin .bar { margin-top: 4px; }
+
+/* ── cash / reconciliation / forecast ──────────────────────────────── */
+.recon { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); }
+.recon > div { padding: 14px 20px; }
+.recon > div + div { border-left: 1px solid var(--line); }
+.recon .k { font-size: var(--fs-small); color: var(--mut); } .recon .v { font-size: var(--fs-hero); font-weight: 700; margin-top: 2px; } .recon .d { font-size: var(--fs-small); color: var(--mut); margin-top: 2px; }
+@media (max-width: 900px) { .recon { grid-template-columns: 1fr 1fr; } .recon > div:nth-child(3) { border-left: 0; } .recon > div:nth-child(n+3) { border-top: 1px solid var(--line); } }
+.fc td.wk { white-space: nowrap; }
+.fc tr.low td { background: var(--t-warn-bg); }
+.fc tr.neg td { background: var(--t-bad-bg); }
+.fc .in { color: var(--t-good-fg); } .fc .out { color: var(--t-bad-fg); }
+.fc .why { font-size: var(--fs-meta); color: var(--mut); display: block; }
+.ghost { border-style: dashed; background: transparent; box-shadow: none; }
+.ghost .pb { color: var(--mut); font-size: var(--fs-small); }
+.ghost .pb b { color: var(--ink); }
+.portal { border: 2px solid var(--sky); border-radius: var(--radius); padding: 14px 16px; margin-top: 12px; background: var(--bg); }
+.portal .ph2 { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.portal .ph2 b { font-size: var(--fs-lead); }
+.portal .ph2 .meta { color: var(--t-info-fg); font-weight: 700; }
+.portal table { width: 100%; border-collapse: collapse; } .portal td { padding: 6px 0; border-bottom: 1px solid var(--line); }
+pre.csv { font-family: var(--mono); font-size: var(--fs-meta); background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; overflow: auto; max-height: 60vh; white-space: pre; }
+.stand { display: inline-flex; align-items: center; gap: 6px; }
+.stand i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.stand.good i { background: var(--t-good-fg); } .stand.warn i { background: var(--t-warn-fg); } .stand.bad i { background: var(--t-bad-fg); }
+
+/* ── drawer ─────────────────────────────────────────────────────────── */
+.scrim { position: fixed; inset: 0; background: rgba(23,42,74,.35); z-index: 30; display: none; }
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100vw); background: var(--card); z-index: 31; box-shadow: var(--shadow-md); transform: translateX(100%); transition: transform var(--dur) var(--ease); overflow-y: auto; display: flex; flex-direction: column; }
+.drawer.on { transform: none; } .scrim.on { display: block; }
+@media (prefers-reduced-motion: reduce) { .drawer { transition: none; } }
+.drawer .dh { padding: 16px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: flex-start; gap: 12px; }
+.drawer .dh h2 { font-size: var(--fs-hero); }
+.drawer .dh .x { margin-left: auto; background: none; border: 0; font-size: 20px; line-height: 1; color: var(--mut); }
+.drawer .db { padding: 16px 20px; }
+.drawer .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 4px; }
+.drawer .lines td { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.drawer .lines { width: 100%; border-collapse: collapse; }
+.drawer .lines .cov { color: var(--mut); text-decoration: line-through; }
+.timeline { list-style: none; margin: 0; padding: 0; }
+.timeline li { display: grid; grid-template-columns: 74px minmax(0,1fr) auto; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-small); }
+.timeline li:last-child { border-bottom: 0; }
+.timeline .d { color: var(--mut); font-variant-numeric: tabular-nums; }
+.timeline .n { font-variant-numeric: tabular-nums; }
+.drawer label { display: block; font-size: var(--fs-small); color: var(--mut); margin-top: 10px; }
+.drawer input, .drawer select, .drawer textarea { width: 100%; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: var(--radius); padding: 7px 9px; font: inherit; }
+.drawer .form { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin-top: 12px; }
+.drawer .form h3 { font-size: var(--fs-body); }
+.formrow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--navy); color: #fff; padding: 10px 16px; border-radius: var(--radius); box-shadow: var(--shadow-md); opacity: 0; transition: all var(--dur) var(--ease); z-index: 40; font-size: var(--fs-small); pointer-events: none; max-width: 90vw; }
+.toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast b { color: #FFB59E; }
+.empty { padding: 28px 16px; text-align: center; color: var(--mut); }
+.note { font-size: var(--fs-small); color: var(--mut); padding: 10px 16px; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span class="wordmark">Ridgeline</span>
+  <span class="op">Sierra Spectra</span>
+  <span class="sp"></span>
+  <span class="mock">Financial redesign · interactive mockup · everything before Treasury · Mon 14 Sep 2026</span>
+</div>
+
+<div class="wrap">
+  <div class="head">
+    <div>
+      <h1 id="title">Financial</h1>
+      <div class="sub" id="sub"></div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn sm" id="reset" title="Put the seed data back">Reset data</button>
+      <div class="seg" role="group" aria-label="Reporting period" id="period"></div>
+    </div>
+  </div>
+
+  <div class="rail-body">
+    <nav class="rail" aria-label="Financial sections" id="rail"></nav>
+    <main id="pane"></main>
+  </div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-label="Document"></aside>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   THE THESIS OF THIS MOCKUP
+   Every dollar on every screen is SUM() over rows in one append-only
+   journal. Nothing stores a balance. Actions post entries; screens re-read.
+   Click any figure and the ledger opens filtered to the rows that made it.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+const TODAY = "2026-09-14";
+const ACCOUNTS = {
+  cash:   { name: "Bank",             side: "dr" },
+  stripe: { name: "Stripe balance",   side: "dr" },
+  ar:     { name: "Receivable",       side: "dr" },
+  ap:     { name: "Payable",          side: "cr" },
+  dep:    { name: "Deposits held",    side: "cr" },
+  tax:    { name: "Sales tax owed",   side: "cr" },
+  rev_l:  { name: "Labor revenue",    side: "cr", group: "Revenue" },
+  rev_p:  { name: "Parts revenue",    side: "cr", group: "Revenue" },
+  rev_t:  { name: "Travel revenue",   side: "cr", group: "Revenue" },
+  rev_c:  { name: "Contract revenue", side: "cr", group: "Revenue" },
+  fees:   { name: "Late fees",        side: "cr", group: "Revenue" },
+  cogs:   { name: "Parts cost",       side: "dr", group: "Cost" },
+  ovh:    { name: "Overhead",         side: "dr", group: "Cost" },
+  pay:    { name: "Payroll",          side: "dr", group: "Cost" },
+  reimb:  { name: "Field expenses",   side: "dr", group: "Cost" },
+  pfees:  { name: "Processing fees",  side: "dr", group: "Cost" },
+  equity: { name: "Opening balance",  side: "cr" },
+};
+
+const $ = (s, r = document) => r.querySelector(s);
+const fmt = (c, signed = false) => {
+  const neg = c < 0; const v = Math.abs(c);
+  const s = "$" + (v / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (neg ? "−" : (signed && c > 0 ? "+" : "")) + s;
+};
+const fmtK = (c) => { const v = Math.abs(c); const s = v >= 100000 ? "$" + (v / 100000).toFixed(1).replace(/\.0$/, "") + "k" : "$" + Math.round(v / 100).toLocaleString(); return (c < 0 ? "−" : "") + s; };
+const dOf = (s) => new Date(s + "T12:00:00Z");
+const daysBetween = (a, b) => Math.round((dOf(b) - dOf(a)) / 86400000);
+const addDays = (s, n) => new Date(dOf(s).getTime() + n * 86400000).toISOString().slice(0, 10);
+const shortDate = (s) => s ? dOf(s).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "";
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* ── state ─────────────────────────────────────────────────────────── */
+let S; // the whole world; rebuilt by seed()
+let ui = { room: "home", period: "month", stage: null, ledgerFilter: null, drawer: null };
+
+function seed() {
+  S = { ledger: [], nextId: 1, clients: {}, quotes: {}, jobs: {}, invoices: {}, pos: {}, bills: {}, reports: {}, payroll: {} };
+  const C = (id, name, terms, taxBps, contact) => S.clients[id] = { id, name, terms, taxBps, contact, overrides: [] };
+  C("foothill", "Foothill Analytical", 30, 825, "Dana R.");
+  C("cascade", "Cascade Environmental Labs", 30, 875, "Wen Tsai");
+  C("merced", "Merced Water District Lab", 45, 775, "Ray Ochoa");
+  C("ridgecrest", "Ridgecrest Biosciences", 30, 775, "Sam Patel");
+  C("delta", "Delta Ag Testing", 30, 900, "Luis Aguirre");
+  S.agreements = { "AGR-22": { id: "AGR-22", client: "cascade", title: "Annual PM agreement · 4 systems", annualCents: 2400000, installmentCents: 600000, nextOn: "2026-10-01", allowanceCents: 400000, allowanceUsed: 128000, systems: 4 } };
+  S.closedThrough = "2026-07";
+  S.bank = []; S.nextBank = 1;
+
+  // Journal helper. `ref` ties an entry to the document that caused it.
+  const post = (on, memo, ref, lines, extra = {}) => {
+    const dr = lines.filter(l => l.dr).reduce((a, l) => a + l.dr, 0);
+    const cr = lines.filter(l => l.cr).reduce((a, l) => a + l.cr, 0);
+    if (dr !== cr) throw new Error("unbalanced: " + memo);
+    if (S.closedThrough && on.slice(0, 7) <= S.closedThrough && S.ledger.length > 40) throw new Error("closed period");
+    const e = { id: S.nextId++, on, memo, ref, lines, ...extra };
+    S.ledger.push(e); return e;
+  };
+  S.post = post;
+
+  // Opening balance, typed once by the owner.
+  post("2026-07-01", "Opening cash balance", { type: "opening" }, [{ acct: "cash", dr: 5850000 }, { acct: "equity", cr: 5850000 }]);
+
+  // Documents. Money-in.
+  const inv = (id, client, title, lines, o = {}) => S.invoices[id] = { id, client, title, lines, status: "draft", sentOn: "", dueOn: "", fees: [], dispute: null, promise: null, dunning: [], ...o };
+  const L = (kind, desc, qty, unit, unitCents, o = {}) => ({ kind, desc, qty, unit, unitCents, ...o });
+  const acctFor = { labor: "rev_l", parts: "rev_p", travel: "rev_t", contract: "rev_c", fee: "fees" };
+  const total = (lines) => lines.filter(l => !l.covered).reduce((a, l) => a + Math.round(l.qty * l.unitCents), 0);
+  const sendInvoice = (id, on) => {
+    const i = S.invoices[id]; const c = S.clients[i.client];
+    i.status = "sent"; i.sentOn = on; i.dueOn = addDays(on, c.terms);
+    const by = {}; for (const l of i.lines) { if (l.covered) continue; by[acctFor[l.kind]] = (by[acctFor[l.kind]] || 0) + Math.round(l.qty * l.unitCents); }
+    const taxC = taxOf(i); i.taxCents = taxC;
+    const lines = [{ acct: "ar", dr: total(i.lines) + taxC }, ...Object.entries(by).map(([acct, cr]) => ({ acct, cr })), ...(taxC ? [{ acct: "tax", cr: taxC }] : [])];
+    post(on, `Invoice ${id} sent · ${i.title}`, { type: "invoice", id, client: i.client, job: i.job }, lines);
+    // A deposit held for this job is applied the moment the invoice exists.
+    if (i.job && S.jobs[i.job] && S.jobs[i.job].depositCents) {
+      const d = S.jobs[i.job].depositCents; S.jobs[i.job].depositCents = 0;
+      post(on, `Deposit applied to ${id}`, { type: "invoice", id, client: i.client, job: i.job }, [{ acct: "dep", dr: d }, { acct: "ar", cr: d }]);
+    }
+  };
+  const pay = (id, on, cents, method, refno) => {
+    const i = S.invoices[id];
+    const e = post(on, `Payment on ${id} · ${method}${refno ? " " + refno : ""}`, { type: "invoice", id, client: i.client, job: i.job, method }, [{ acct: "cash", dr: cents }, { acct: "ar", cr: cents }]);
+    i.status = balanceOf(id) <= 0 ? "paid" : "partial";
+    return e;
+  };
+  // A card or ACH payment through the pay link: gross lands in the Stripe
+  // balance, the processing fee is its own cost row, and nothing reaches the
+  // bank until a payout.
+  const payByLink = (id, on, cents, method = "card") => {
+    const i = S.invoices[id]; const fee = Math.round(cents * (method === "card" ? 0.029 : 0.008) + (method === "card" ? 30 : 0));
+    post(on, `Payment on ${id} · ${method} via pay link`, { type: "invoice", id, client: i.client, job: i.job, method, stripe: true }, [{ acct: "stripe", dr: cents }, { acct: "ar", cr: cents }]);
+    post(on, `Stripe fee on ${id}`, { type: "invoice", id, client: i.client, job: i.job, stripe: true }, [{ acct: "pfees", dr: fee }, { acct: "stripe", cr: fee }]);
+    i.status = balanceOf(id) <= 0 ? "paid" : "partial";
+  };
+  S.payByLink = payByLink;
+  S.sendInvoice = sendInvoice; S.pay = pay; S.total = total; S.acctFor = acctFor;
+
+  inv("INV-1035", "cascade", "Annual PM agreement · Q3 installment", [L("contract", "PM agreement, 4 systems, Jul–Sep", 1, "qtr", 600000)]);
+  sendInvoice("INV-1035", "2026-07-01"); pay("INV-1035", "2026-07-10", balanceOf("INV-1035"), "ACH", "");
+  inv("INV-1037", "foothill", "Agilent 6470 QQQ · nebulizer + tune", [L("labor", "Onsite engineering", 5, "h", 17500), L("parts", "Nebulizer, ESI", 1, "ea", 168000), L("travel", "Trip, Fresno", 1, "trip", 9500)]);
+  sendInvoice("INV-1037", "2026-07-15"); pay("INV-1037", "2026-08-12", balanceOf("INV-1037"), "check", "#4471");
+  inv("INV-1041", "foothill", "Waters Quattro · roughing pump replacement", [L("labor", "Onsite engineering", 8, "h", 17500), L("parts", "Edwards nXDS10i, exchange", 1, "ea", 239700), L("travel", "Trip, Fresno", 1, "trip", 9500)], { job: "WO-2184" });
+  sendInvoice("INV-1041", "2026-07-28");
+  inv("INV-1047", "ridgecrest", "Sciex 5500 · detector board, expedited", [L("labor", "Onsite engineering", 6, "h", 17500), L("parts", "Detector board assy", 1, "ea", 428000), L("travel", "Trip, Ridgecrest", 1, "trip", 15000)], { job: "WO-2190" });
+  sendInvoice("INV-1047", "2026-08-05");
+  S.invoices["INV-1047"].dispute = { line: 1, reason: "Client says board was under OEM warranty", openedOn: "2026-09-03", cents: 428000 };
+  inv("INV-1044", "cascade", "PM visit · August (beyond contract)", [L("labor", "PM, 4 systems", 0, "h", 0, { covered: true, coveredBy: "AGR-22" }), L("parts", "Consumables kit, GC inlet", 2, "ea", 64000), L("labor", "Beyond-contract: LC pump rebuild", 4, "h", 17500), L("travel", "Trip, Sacramento", 1, "trip", 20000)]);
+  sendInvoice("INV-1044", "2026-08-15");
+  inv("INV-1039", "delta", "GC/MS 7890 · inlet liner + column", [L("labor", "Onsite engineering", 12, "h", 17500), L("parts", "Column DB-5ms", 1, "ea", 92000), L("travel", "Trip, Stockton", 2, "trip", 12000)], { job: "WO-2188" });
+  sendInvoice("INV-1039", "2026-08-22"); payByLink("INV-1039", "2026-09-05", balanceOf("INV-1039"), "card");
+  inv("INV-1046", "merced", "TOC-Vw · helium regulator + install", [L("labor", "Onsite engineering", 3, "h", 17500), L("parts", "Regulator, two-stage", 1, "ea", 64000), L("travel", "Trip, Merced", 1, "trip", 9500)], { job: "WO-2195" });
+  sendInvoice("INV-1046", "2026-09-02");
+  pay("INV-1041", "2026-08-30", 150000, "check", "#4502");
+  S.invoices["INV-1041"].promise = { on: "2026-09-12", by: "Dana R.", note: "Remaining balance goes out Friday" };
+  S.invoices["INV-1041"].dunning = ["Reminder · Sep 1", "Statement · Sep 8"];
+  // Late fee on INV-1041: its own row, never edits the invoice.
+  { const b41 = balanceOf("INV-1041"); const fee41 = Math.round(b41 * 0.015);
+    S.invoices["INV-1041"].fees.push({ id: "F-1", cents: fee41, basis: `1.5%/mo on ${fmt(b41)} outstanding, 5 days past due`, on: "2026-09-01", waived: false });
+    post("2026-09-01", "Late fee posted on INV-1041", { type: "invoice", id: "INV-1041", client: "foothill", fee: "F-1" }, [{ acct: "ar", dr: fee41 }, { acct: "fees", cr: fee41 }]); }
+  inv("INV-1048", "cascade", "Beyond-contract labor · September", [L("labor", "LC troubleshooting, remote", 4, "h", 17500)]);
+
+  // Quotes and jobs.
+  const Q = (id, client, title, cents, o = {}) => S.quotes[id] = { id, client, title, cents, status: "sent", ...o };
+  Q("Q-0141", "ridgecrest", "Sciex 5500 · source rebuild + PM", 684000, { sentOn: "2026-09-08", expiresOn: "2026-10-08", depositPct: 30 });
+  Q("Q-0143", "merced", "GC/MS 5977 · relocation and re-qualification", 1120000, { sentOn: "2026-09-11", expiresOn: "2026-10-11", depositPct: 0 });
+  Q("Q-0139", "delta", "GC/MS 7890/5977 · install and IQ/OQ", 980000, { sentOn: "2026-08-28", expiresOn: "2026-09-28", depositPct: 25, status: "approved", approvedOn: "2026-09-02", job: "WO-2207" });
+  Q("Q-0136", "cascade", "Annual PM agreement · 4 systems", 2400000, { sentOn: "2026-06-12", status: "approved", approvedOn: "2026-06-20", agreement: "AGR-22" });
+  const J = (id, client, title, lines, o = {}) => S.jobs[id] = { id, client, title, lines, status: "closed", depositCents: 0, invoice: null, ...o };
+  J("WO-2198", "foothill", "Agilent 1290 · pump seal + leak", [L("labor", "Onsite engineering", 6, "h", 17500), L("parts", "Seal kit, binary pump", 1, "ea", 56000, { costCents: 41250 }), L("travel", "Trip, Fresno", 1, "trip", 9500)], { closedOn: "2026-09-09" });
+  J("WO-2201", "merced", "TOC-Vw · autosampler alignment", [L("labor", "Onsite engineering", 3.5, "h", 17500), L("travel", "Trip, Merced", 1, "trip", 9500)], { closedOn: "2026-09-11" });
+  J("WO-2207", "delta", "GC/MS 7890/5977 · install and IQ/OQ", [L("labor", "Install + IQ/OQ", 32, "h", 17500), L("parts", "Startup consumables", 1, "ea", 218000, { costCents: 164000 }), L("travel", "Trips, Stockton", 4, "trip", 12000)], { status: "in progress", quote: "Q-0139", depositCents: 245000 });
+  post("2026-09-03", "Deposit received on Q-0139 · ACH", { type: "job", id: "WO-2207", client: "delta", method: "ACH" }, [{ acct: "cash", dr: 245000 }, { acct: "dep", cr: 245000 }]);
+  for (const id of ["WO-2184", "WO-2190", "WO-2188", "WO-2195"]) S.jobs[id] = { id, status: "invoiced", lines: [] };
+  S.jobs["WO-2184"].client = "foothill"; S.jobs["WO-2190"].client = "ridgecrest"; S.jobs["WO-2188"].client = "delta"; S.jobs["WO-2195"].client = "merced";
+  S.jobs["WO-2188"].costCents = 61000; S.jobs["WO-2184"].costCents = 189000; S.jobs["WO-2190"].costCents = 355000; S.jobs["WO-2195"].costCents = 47000;
+  S.jobs["WO-2198"].closedOn = "2026-09-09";
+
+  // Money-out documents.
+  const PO = (id, vendor, title, cents, o = {}) => S.pos[id] = { id, vendor, title, cents, status: "sent", ...o };
+  PO("PO-0312", "Agilent", "Seal kit + inlet liners (WO-2198, stock)", 114720, { status: "received", receivedOn: "2026-09-06", job: "WO-2198" });
+  post("2026-09-06", "PO-0312 received · Agilent", { type: "po", id: "PO-0312", job: "WO-2198" }, [{ acct: "cogs", dr: 114720 }, { acct: "ap", cr: 114720 }]);
+  PO("PO-0315", "Edwards", "nXDS10i exchange pump (Ridgecrest)", 298000, { status: "received", receivedOn: "2026-09-10", job: "WO-2190" });
+  post("2026-09-10", "PO-0315 received · Edwards", { type: "po", id: "PO-0315", job: "WO-2190" }, [{ acct: "cogs", dr: 298000 }, { acct: "ap", cr: 298000 }]);
+  PO("PO-0314", "Restek", "Columns, DB-5ms ×3 (stock)", 86000, { status: "sent", expectedOn: "2026-09-19" });
+  PO("PO-0316", "Peak Scientific", "N2 generator filter set (WO-2207)", 41200, { status: "sent", expectedOn: "2026-09-17", job: "WO-2207" });
+
+  const B = (id, payee, kind, cents, day) => S.bills[id] = { id, payee, kind, cents, day, paid: {} };
+  B("B-lease", "Sierra Commerce Park", "Rent", 185000, 1);
+  B("B-ins", "The Hartford", "Insurance", 41200, 15);
+  B("B-tel", "Verizon", "Telecom", 18600, 20);
+  B("B-sw", "Google Workspace", "Software", 7200, 1);
+  const payBill = (id, on) => { const b = S.bills[id]; b.paid[on.slice(0, 7)] = on; post(on, `${b.payee} · ${b.kind}`, { type: "bill", id }, [{ acct: "ovh", dr: b.cents }, { acct: "cash", cr: b.cents }]); };
+  S.payBill = payBill;
+  for (const m of ["2026-07", "2026-08"]) { payBill("B-lease", m + "-01"); payBill("B-sw", m + "-01"); payBill("B-ins", m + "-15"); payBill("B-tel", m + "-20"); }
+  payBill("B-lease", "2026-09-01"); payBill("B-sw", "2026-09-01");
+
+  const R = (id, person, title, cents, o = {}) => S.reports[id] = { id, person, title, cents, status: "submitted", ...o };
+  R("EXP-86", "Priya Natarajan", "Mileage + meals, Merced (Aug)", 14800, { status: "paid", paidOn: "2026-09-04" });
+  post("2026-09-04", "EXP-86 paid · Priya Natarajan", { type: "report", id: "EXP-86" }, [{ acct: "reimb", dr: 14800 }, { acct: "cash", cr: 14800 }]);
+  R("EXP-88", "Marcus Lee", "Hotel + mileage, Ridgecrest (Sep 9–10)", 31240, { submittedOn: "2026-09-11", job: "WO-2198" });
+  R("EXP-89", "Priya Natarajan", "Mileage, Merced (Sep)", 9820, { submittedOn: "2026-09-12" });
+
+  S.payroll = { grossCents: 1460000, runs: {} };
+  const runPayroll = (ym, on) => { S.payroll.runs[ym] = on; post(on, `Payroll · ${dOf(ym + "-01").toLocaleDateString("en-US", { month: "long", timeZone: "UTC" })}`, { type: "payroll", id: ym }, [{ acct: "pay", dr: S.payroll.grossCents }, { acct: "cash", cr: S.payroll.grossCents }]); };
+  S.runPayroll = runPayroll;
+  runPayroll("2026-07", "2026-07-31"); runPayroll("2026-08", "2026-08-31");
+
+  // ── The bank feed. What the bank says happened, independent of the books.
+  // Seeded from the journal's own bank postings (that is what a clean feed
+  // looks like), then made honest: one check has not cleared, one client
+  // paid without anyone recording it, and two card swipes have no row.
+  const bankDesc = (e) => e.ref.type === "invoice" ? `ACH CREDIT ${S.clients[e.ref.client].name.toUpperCase().slice(0, 18)}` : e.ref.type === "bill" ? `${S.bills[e.ref.id].payee.toUpperCase()} AUTOPAY` : e.ref.type === "payroll" ? "GUSTO PAYROLL" : e.ref.type === "po" ? `${S.pos[e.ref.id].vendor.toUpperCase()} INC` : e.ref.type === "report" ? `ZELLE TO ${S.reports[e.ref.id].person.toUpperCase()}` : e.ref.type === "job" ? "ACH CREDIT DELTA AG TESTING" : "OPENING BALANCE";
+  const bankLine = (on, desc, cents, matched = null) => S.bank.push({ id: S.nextBank++, on, desc, cents, matched });
+  for (const e of S.ledger) {
+    const l = e.lines.find(l => l.acct === "cash"); if (!l || e.ref.type === "opening") continue;
+    if (e.ref.type === "invoice" && e.ref.id === "INV-1041") continue;             // check #4502, still in the mail
+    const desc = e.ref.method === "check" ? `CHECK ${e.ref.id === "INV-1037" ? "4471" : ""}`.trim() : bankDesc(e);
+    bankLine(addDays(e.on, e.ref.method === "check" ? 3 : 0), desc, (l.dr || 0) - (l.cr || 0), e.id);
+    e.bank = S.bank[S.bank.length - 1].id;
+  }
+  bankLine("2026-09-01", "MONTHLY SERVICE FEE", -1500);
+  bankLine("2026-09-08", "SHELL OIL 57210 FRESNO CA", -6120);
+  bankLine("2026-09-14", "ACH CREDIT CASCADE ENV LABS", balanceOf("INV-1044"));
+  S.bank.sort((a, b) => a.on < b.on ? -1 : a.on > b.on ? 1 : a.id - b.id);
+
+  S.ledger.sort((a, b) => a.on < b.on ? -1 : a.on > b.on ? 1 : a.id - b.id);
+}
+
+/* ── derived figures (all from the journal) ─────────────────────────── */
+const live = (e) => !e.reversed && !e.reverses;
+function sumAcct(acct, pred = () => true) {
+  let dr = 0, cr = 0;
+  for (const e of S.ledger) { if (!pred(e)) continue; for (const l of e.lines) { if (l.acct !== acct) continue; dr += l.dr || 0; cr += l.cr || 0; } }
+  return ACCOUNTS[acct].side === "dr" ? dr - cr : cr - dr;
+}
+const forDoc = (type, id) => (e) => e.ref.type === type && e.ref.id === id;
+const balanceOf = (invId) => sumAcct("ar", forDoc("invoice", invId));
+const periodStart = () => ui.period === "ytd" ? "2026-01-01" : ui.period === "quarter" ? "2026-07-01" : "2026-09-01";
+const periodLabel = () => ({ month: "September 2026", quarter: "Q3 2026 to date", ytd: "2026 to date" })[ui.period];
+const inPeriod = (e) => e.on >= periodStart() && e.on <= TODAY;
+const taxOf = (i) => Math.round(i.lines.filter(l => l.kind === "parts" && !l.covered).reduce((a, l) => a + Math.round(l.qty * l.unitCents), 0) * S.clients[i.client].taxBps / 10000);
+const invTotal = (i) => S.total(i.lines) + (i.status === "draft" ? taxOf(i) : (i.taxCents || 0)) + i.fees.filter(f => !f.waived).reduce((a, f) => a + f.cents, 0);
+const jobValue = (j) => S.total(j.lines);
+const LOADED_HOUR = 5800; // what an engineer-hour costs the shop, from the payroll register
+const jobCost = (j) => (j.costCents ?? j.lines.reduce((a, l) => a + (l.costCents || 0), 0)) + j.lines.filter(l => l.kind === "labor" && l.unit === "h").reduce((a, l) => a + Math.round(l.qty * LOADED_HOUR), 0);
+const bankBalance = () => S.bank.reduce((a, t) => a + t.cents, 0) + 5850000;
+const unmatchedBank = () => S.bank.filter(t => t.matched === null);
+const inTransit = () => S.ledger.filter(e => !e.bank && e.ref.type !== "opening" && e.lines.some(l => l.acct === "cash") && live(e));
+const holdDays = 15;
+function standing(cid) {
+  let worst = 0, owed = 0;
+  for (const i of Object.values(S.invoices)) { if (i.client !== cid) continue; const b = balanceOf(i.id); if (b <= 0 || (i.status !== "sent" && i.status !== "partial")) continue; owed += b; if (i.dueOn < TODAY) worst = Math.max(worst, daysBetween(i.dueOn, TODAY)); }
+  const c = S.clients[cid]; const ov = c.overrides.find(o => !o.lifted && (!o.until || o.until >= TODAY));
+  const hold = worst > holdDays && !ov;
+  return { owed, worst, hold, override: ov, tone: hold ? "bad" : worst > 0 ? "warn" : "good", label: hold ? "On hold" : ov ? "Held, overridden" : worst > 0 ? `${worst}d past due` : "In good standing" };
+}
+
+function figures() {
+  const f = {};
+  f.bank = sumAcct("cash"); f.stripe = sumAcct("stripe"); f.cash = f.bank + f.stripe; f.tax = sumAcct("tax");
+  f.ar = sumAcct("ar"); f.ap = sumAcct("ap"); f.dep = sumAcct("dep");
+  f.pastDue = 0; f.pastDueN = 0; f.current = 0; f.currentN = 0;
+  for (const i of Object.values(S.invoices)) {
+    if (i.status !== "sent" && i.status !== "partial") continue;
+    const b = balanceOf(i.id); if (b <= 0) continue;
+    if (i.dueOn < TODAY) { f.pastDue += b; f.pastDueN++; } else { f.current += b; f.currentN++; }
+  }
+  f.unbilled = 0; f.unbilledN = 0;
+  for (const j of Object.values(S.jobs)) if (j.status === "closed") { f.unbilled += jobValue(j); f.unbilledN++; }
+  f.quoted = 0; f.quotedN = 0; f.awarded = 0; f.awardedN = 0;
+  for (const q of Object.values(S.quotes)) { if (q.status === "sent") { f.quoted += q.cents; f.quotedN++; } if (q.status === "approved" && q.job && S.jobs[q.job].status === "in progress") { f.awarded += q.cents - (S.jobs[q.job].depositCents || 0); f.awardedN++; } }
+  const isPay = (e) => e.ref.type === "invoice" && e.lines.some(l => (l.acct === "cash" || l.acct === "stripe") && l.dr && !e.ref.stripe) || (e.ref.stripe && e.lines.some(l => l.acct === "ar"));
+  f.collected = S.ledger.filter(e => inPeriod(e) && isPay(e) && live(e)).reduce((a, e) => a + e.lines.filter(l => l.acct === "ar").reduce((s, l) => s + (l.cr || 0), 0), 0);
+  f.collectedN = S.ledger.filter(e => inPeriod(e) && isPay(e) && live(e)).length;
+  f.onOrder = Object.values(S.pos).filter(p => p.status === "sent").reduce((a, p) => a + p.cents, 0);
+  f.reimbDue = Object.values(S.reports).filter(r => r.status === "submitted" || r.status === "approved").reduce((a, r) => a + r.cents, 0);
+  f.billsDue = 0; for (const b of Object.values(S.bills)) if (!b.paid["2026-09"]) f.billsDue += b.cents;
+  f.payrollDue = S.payroll.runs["2026-09"] ? 0 : S.payroll.grossCents;
+  f.owes = f.ap + f.reimbDue + f.tax;
+  f.periodOut = ["cogs", "ovh", "pay", "reimb", "pfees"].reduce((a, k) => a + sumAcct(k, inPeriod), 0);
+  f.unmatched = unmatchedBank().length; f.transit = inTransit().length;
+  f.holds = Object.keys(S.clients).filter(c => standing(c).hold);
+  const monthlyBurn = ["ovh", "pay", "reimb"].reduce((a, k) => a + sumAcct(k, (e) => e.on >= "2026-07-01" && e.on < "2026-09-01"), 0) / 2;
+  f.runwayMonths = monthlyBurn > 0 ? f.cash / monthlyBurn : Infinity;
+  f.burn = monthlyBurn;
+  return f;
+}
+
+/* ── actions: each one posts, then everything re-renders ────────────── */
+function act(fn, msg) { try { fn(); } catch (err) { if (err.message === "closed period") { toast("That date is in a closed month. Post it today instead - the record keeps both."); return; } if (err.message === "bank-confirmed") { toast("The bank saw this money move, so it cannot be reversed on our side alone. Correct it with a new entry when the refund or return shows up in the feed."); return; } throw err; } S.ledger.sort((a, b) => a.on < b.on ? -1 : a.on > b.on ? 1 : a.id - b.id); render(); toast(msg); }
+const A = {
+  sendInvoice: (id) => act(() => S.sendInvoice(id, TODAY), `Sent <b>${id}</b> · posted to Receivable and Revenue`),
+  recordPayment: (id, cents, method, refno) => act(() => S.pay(id, TODAY, cents, method, refno), `Recorded ${fmt(cents)} on <b>${id}</b> · Cash / Receivable`),
+  postFee: (id) => act(() => {
+    const i = S.invoices[id]; const b = balanceOf(id); const days = daysBetween(i.dueOn, TODAY);
+    const cents = Math.round(b * 0.015); const fid = "F-" + (i.fees.length + 1);
+    i.fees.push({ id: fid, cents, basis: `1.5%/mo on ${fmt(b)} outstanding, ${days} days past due`, on: TODAY, waived: false });
+    S.post(TODAY, `Late fee posted on ${id}`, { type: "invoice", id, client: i.client, fee: fid }, [{ acct: "ar", dr: cents }, { acct: "fees", cr: cents }]);
+  }, `Posted late fee on <b>${id}</b>`),
+  waiveFee: (id, fid) => act(() => {
+    const i = S.invoices[id]; const f = i.fees.find(x => x.id === fid); f.waived = true;
+    S.post(TODAY, `Late fee waived on ${id}`, { type: "invoice", id, client: i.client, fee: fid }, [{ acct: "fees", dr: f.cents }, { acct: "ar", cr: f.cents }]);
+    if (balanceOf(id) <= 0 && i.status !== "draft") i.status = "paid";
+  }, `Waived fee on <b>${id}</b> · the charge and the waiver both stay on record`),
+  resolveDispute: (id, how) => act(() => {
+    const i = S.invoices[id]; const d = i.dispute; i.dispute = null;
+    if (how === "credit") {
+      i.lines.push({ kind: "parts", desc: "Credit: " + i.lines[d.line].desc + " (warranty)", qty: 1, unit: "ea", unitCents: -d.cents });
+      S.post(TODAY, `Credit issued on ${id} · dispute resolved`, { type: "invoice", id, client: i.client }, [{ acct: "rev_p", dr: d.cents }, { acct: "ar", cr: d.cents }]);
+      if (balanceOf(id) <= 0) i.status = "paid";
+    }
+  }, how === "credit" ? `Credited <b>${id}</b> · negative line posted, nothing edited` : `Dispute on <b>${id}</b> closed · line stands`),
+  sendRung: (id) => act(() => { const i = S.invoices[id]; const r = ["Reminder", "Statement", "Final notice", "Demand letter"][i.dunning.length] || "Demand letter"; i.dunning.push(`${r} · ${shortDate(TODAY)}`); }, `Sent <b>${id}</b> the next rung · logged`),
+  draftFromJob: (id) => act(() => {
+    const j = S.jobs[id]; const n = "INV-" + (1049 + Object.keys(S.invoices).filter(k => k > "INV-1048").length);
+    S.invoices[n] = { id: n, client: j.client, title: j.title, lines: j.lines.map(l => ({ ...l })), status: "draft", sentOn: "", dueOn: "", fees: [], dispute: null, promise: null, dunning: [], job: id };
+    j.status = "invoiced"; j.invoice = n; j.costCents = jobCost(j);
+    ui.drawer = { type: "invoice", id: n };
+  }, `Drafted invoice from <b>${id}</b> · nothing posts until it is sent`),
+  approveQuote: (id) => act(() => {
+    const q = S.quotes[id]; q.status = "approved"; q.approvedOn = TODAY;
+    const jid = "WO-" + (2208 + Object.keys(S.jobs).filter(k => k > "WO-2207").length);
+    S.jobs[jid] = { id: jid, client: q.client, title: q.title, lines: [{ kind: "labor", desc: "Per quote " + id, qty: 1, unit: "job", unitCents: q.cents }], status: "in progress", depositCents: 0, quote: id };
+    q.job = jid;
+    if (q.depositPct) { const d = Math.round(q.cents * q.depositPct / 100); S.jobs[jid].depositCents = d; S.post(TODAY, `Deposit received on ${id} · card`, { type: "job", id: jid, client: q.client, method: "card" }, [{ acct: "cash", dr: d }, { acct: "dep", cr: d }]); }
+  }, `Awarded <b>${id}</b> · job opened${S.quotes[id].depositPct ? ", deposit posted as a liability" : ""}`),
+  closeJob: (id) => act(() => { S.jobs[id].status = "closed"; S.jobs[id].closedOn = TODAY; }, `Closed <b>${id}</b> · now sitting in Worked, unbilled`),
+  receivePo: (id) => act(() => { const p = S.pos[id]; p.status = "received"; p.receivedOn = TODAY; S.post(TODAY, `${id} received · ${p.vendor}`, { type: "po", id, job: p.job }, [{ acct: "cogs", dr: p.cents }, { acct: "ap", cr: p.cents }]); }, `Received <b>${id}</b> · Parts cost / Payable`),
+  payPo: (id) => act(() => { const p = S.pos[id]; p.status = "paid"; p.paidOn = TODAY; S.post(TODAY, `${id} paid · ${p.vendor}`, { type: "po", id, job: p.job }, [{ acct: "ap", dr: p.cents }, { acct: "cash", cr: p.cents }]); }, `Paid <b>${id}</b> · Payable / Cash`),
+  payBill: (id) => act(() => S.payBill(id, TODAY), `Paid <b>${S.bills[id].payee}</b> · Overhead / Cash`),
+  approveReport: (id) => act(() => { S.reports[id].status = "approved"; }, `Approved <b>${id}</b> · ready to pay`),
+  payReport: (id) => act(() => { const r = S.reports[id]; r.status = "paid"; r.paidOn = TODAY; S.post(TODAY, `${id} paid · ${r.person}`, { type: "report", id, job: r.job }, [{ acct: "reimb", dr: r.cents }, { acct: "cash", cr: r.cents }]); }, `Paid <b>${id}</b> to ${S.reports[id].person}`),
+  runPayroll: () => act(() => S.runPayroll("2026-09", TODAY), `Ran September payroll · Payroll / Cash`),
+  payLink: (id, method) => act(() => S.payByLink(id, TODAY, balanceOf(id), method), `${S.clients[S.invoices[id].client].name} paid <b>${id}</b> by ${method} · gross to Stripe balance, fee posted as its own row`),
+  payout: () => act(() => {
+    const c = sumAcct("stripe"); if (c <= 0) return;
+    const e = S.post(TODAY, "Stripe payout to bank", { type: "payout", id: "PO" + TODAY.replace(/-/g, "") }, [{ acct: "cash", dr: c }, { acct: "stripe", cr: c }]);
+    S.bank.push({ id: S.nextBank++, on: TODAY, desc: "STRIPE PAYOUT", cents: c, matched: e.id }); e.bank = S.bank[S.bank.length - 1].id;
+  }, `Paid out ${fmt(sumAcct("cash") - 0)} · Bank / Stripe balance · matched to the bank line it will produce`),
+  matchBank: (tid, eid) => act(() => { const t = S.bank.find(x => x.id === Number(tid)); const e = S.ledger.find(x => x.id === Number(eid)); t.matched = e.id; e.bank = t.id; }, `Matched bank line to entry <b>#${eid}</b>`),
+  recordFromBank: (tid, inv) => act(() => { const t = S.bank.find(x => x.id === Number(tid)); const e = S.pay(inv, t.on, t.cents, "ACH", "from bank feed"); t.matched = e.id; e.bank = t.id; }, `Recorded the bank line as payment on <b>${inv}</b> · Bank / Receivable, matched`),
+  postFromBank: (tid, acct, memo) => act(() => { const t = S.bank.find(x => x.id === Number(tid)); const c = Math.abs(t.cents); const lines = t.cents < 0 ? [{ acct, dr: c }, { acct: "cash", cr: c }] : [{ acct: "cash", dr: c }, { acct, cr: c }]; const e = S.post(t.on, memo, { type: "bank", id: "BK-" + t.id }, lines); t.matched = e.id; e.bank = t.id; }, `Posted bank line to <b>${ACCOUNTS[acct].name}</b> · matched`),
+  invoiceInstallment: (agr) => act(() => {
+    const a = S.agreements[agr]; const n = "INV-" + (1049 + Object.keys(S.invoices).filter(k => k > "INV-1048").length);
+    S.invoices[n] = { id: n, client: a.client, title: a.title + " · installment due " + shortDate(a.nextOn), lines: [{ kind: "contract", desc: `PM agreement, ${a.systems} systems, quarter from ${shortDate(a.nextOn)}`, qty: 1, unit: "qtr", unitCents: a.installmentCents }], status: "draft", sentOn: "", dueOn: "", fees: [], dispute: null, promise: null, dunning: [], agreement: agr };
+    a.nextOn = addDays(a.nextOn, 91); ui.drawer = { type: "invoice", id: n };
+  }, `Drafted the next installment on <b>${agr}</b> · send it and the contract revenue posts`),
+  overrideHold: (cid, reason) => act(() => { S.clients[cid].overrides.push({ reason, on: TODAY, by: "Joe", until: addDays(TODAY, 14) }); }, `Override on <b>${S.clients[cid].name}</b> for 14 days · reason kept`),
+  liftOverride: (cid) => act(() => { for (const o of S.clients[cid].overrides) o.lifted = true; }, `Override lifted on <b>${S.clients[cid].name}</b>`),
+  remitTax: () => act(() => { const c = sumAcct("tax"); if (c <= 0) return; S.post(TODAY, "Sales tax remitted · CDTFA", { type: "tax", id: "Q3-2026" }, [{ acct: "tax", dr: c }, { acct: "cash", cr: c }]); }, `Remitted sales tax · Sales tax owed / Bank`),
+  closePeriod: (ym) => act(() => { S.closedThrough = ym; }, `Closed the books through <b>${ym}</b> · nothing before it can be posted to again; corrections land in the open month`),
+  reopen: () => act(() => { S.closedThrough = "2026-07"; }, `Reopened August`),
+  reverse: (eid) => act(() => {
+    const e = S.ledger.find(x => x.id === eid); if (!e || e.reversed) return;
+    if (e.bank) throw new Error("bank-confirmed");
+    e.reversed = true;
+    S.post(TODAY, `Reversal of #${e.id} · ${e.memo}`, { ...e.ref, reversal: true }, e.lines.map(l => ({ acct: l.acct, dr: l.cr, cr: l.dr })), { reverses: e.id });
+    if (e.ref.type === "invoice" && S.invoices[e.ref.id]) { const i = S.invoices[e.ref.id]; if (i.status !== "draft") i.status = balanceOf(i.id) <= 0 ? "paid" : balanceOf(i.id) < invTotal(i) ? "partial" : "sent"; }
+  }, `Reversed entry <b>#${eid}</b> · the original row stays; a mirror row corrects it`),
+};
+
+/* ── rendering ──────────────────────────────────────────────────────── */
+const ROOMS = [
+  { key: "home", label: "Home", group: "Position" },
+  { key: "cash", label: "Cash", group: "Position" },
+  { key: "receivables", label: "Receivables", group: "Money" },
+  { key: "payables", label: "Payables", group: "Money" },
+  { key: "clients", label: "Clients", group: "Money" },
+  { key: "ledger", label: "Ledger", group: "Record" },
+  { key: "reports", label: "Reports", group: "Record" },
+];
+const SUBS = {
+  home: () => `Sierra Spectra · cash, position, and what needs deciding · ${periodLabel()}`,
+  cash: () => `Bank against books, and the next eight weeks`,
+  clients: () => `Who owes what, who is on hold, and what they see`,
+  receivables: () => `Everything owed to the shop, from quote to paid · ${periodLabel()}`,
+  payables: () => `Everything the shop owes, and when · ${periodLabel()}`,
+  ledger: () => `Every posting, in order. The one place a figure is proven.`,
+  reports: () => `Derived from the ledger, nothing typed · ${periodLabel()}`,
+};
+
+function fig(cents, filter, tone = "", label) {
+  const t = tone ? ` ${tone}` : "";
+  return `<button class="fig${t}" data-filter='${esc(JSON.stringify(filter))}' title="Show the ledger rows behind this figure">${label ?? fmt(cents)}</button>`;
+}
+function pill(status) {
+  const m = { draft: ["faint", "Draft"], sent: ["info", "Sent"], partial: ["warn", "Partial"], paid: ["good", "Paid"], approved: ["accent", "Awarded"], expired: ["faint", "Expired"], received: ["warn", "Received"], "in progress": ["info", "In work"], closed: ["warn", "Unbilled"], submitted: ["warn", "Awaiting approval"], "paid-r": ["good", "Paid"] };
+  const [tone, label] = m[status] || ["neutral", status];
+  return `<span class="pill ${tone}">${label}</span>`;
+}
+
+function render() {
+  const f = figures();
+  $("#sub").textContent = SUBS[ui.room]();
+  $("#period").innerHTML = ["month", "quarter", "ytd"].map(p => `<button aria-pressed="${ui.period === p}" data-p="${p}">${{ month: "This month", quarter: "Quarter", ytd: "Year to date" }[p]}</button>`).join("");
+  const amounts = { receivables: [f.ar, f.pastDue > 0 ? "bad" : ""], payables: [f.owes, ""], cash: [f.cash, ""], clients: [f.holds.length ? f.holds.length : null, "bad"], ledger: [null], reports: [null], home: [null] };
+  let rail = ""; let g = "";
+  for (const r of ROOMS) {
+    if (r.group !== g) { if (g) rail += "</ul>"; rail += `<div class="railhead">${r.group}</div><ul>`; g = r.group; }
+    const [c, tone] = amounts[r.key];
+    rail += `<li><button aria-current="${ui.room === r.key}" data-room="${r.key}"><span class="lbl">${r.label}</span>${c ? `<span class="amt ${tone}">${r.key === "clients" ? c + " on hold" : fmtK(c)}</span>` : ""}</button></li>`;
+  }
+  $("#rail").innerHTML = rail + "</ul>";
+  $("#pane").innerHTML = ({ home: rHome, cash: rCash, receivables: rRecv, payables: rPay, clients: rClients, ledger: rLedger, reports: rReports })[ui.room](f);
+  renderDrawer();
+}
+
+/* Home */
+function rHome(f) {
+  const decisions = [];
+  for (const i of Object.values(S.invoices)) {
+    if (i.status === "draft") decisions.push({ why: `Send ${i.id}`, meta: `${S.clients[i.client].name} · drafted, nothing posted yet`, cents: invTotal(i), btn: `<button class="btn sm primary" data-act="sendInvoice" data-id="${i.id}">Send</button>`, open: ["invoice", i.id] });
+    if ((i.status === "sent" || i.status === "partial") && i.dueOn < TODAY) {
+      const b = balanceOf(i.id); const days = daysBetween(i.dueOn, TODAY);
+      const broken = i.promise && i.promise.on < TODAY;
+      decisions.push({ why: `${i.id} is ${days} days past due`, meta: `${S.clients[i.client].name}${broken ? ` · promise for ${shortDate(i.promise.on)} broken` : ""}${i.dispute ? " · one line disputed" : ""}`, cents: b, tone: "bad", btn: i.dispute ? `<button class="btn sm" data-open="invoice:${i.id}">Resolve dispute</button>` : `<button class="btn sm coral" data-act="sendRung" data-id="${i.id}">Send next rung</button>`, open: ["invoice", i.id] });
+    }
+  }
+  for (const j of Object.values(S.jobs)) if (j.status === "closed") decisions.push({ why: `${j.id} closed ${daysBetween(j.closedOn, TODAY)} days ago, not billed`, meta: `${S.clients[j.client].name} · ${j.title} · the leak`, cents: jobValue(j), tone: "warn", btn: `<button class="btn sm primary" data-act="draftFromJob" data-id="${j.id}">Draft invoice</button>`, open: ["job", j.id] });
+  for (const r of Object.values(S.reports)) if (r.status === "submitted") decisions.push({ why: `${r.person} is waiting on ${r.id}`, meta: r.title + ` · submitted ${shortDate(r.submittedOn)}`, cents: r.cents, btn: `<button class="btn sm" data-act="approveReport" data-id="${r.id}">Approve</button>`, open: ["report", r.id] });
+  else if (r.status === "approved") decisions.push({ why: `Pay ${r.id} to ${r.person}`, meta: r.title + " · approved", cents: r.cents, btn: `<button class="btn sm primary" data-act="payReport" data-id="${r.id}">Pay</button>`, open: ["report", r.id] });
+  for (const b of Object.values(S.bills)) if (!b.paid["2026-09"]) { const due = `2026-09-${String(b.day).padStart(2, "0")}`; const d = daysBetween(TODAY, due); decisions.push({ why: `${b.payee} due ${d === 0 ? "today" : d < 0 ? Math.abs(d) + " days ago" : "in " + d + " days"}`, meta: b.kind + " · " + fmt(b.cents) + " monthly", cents: b.cents, tone: d < 0 ? "bad" : d <= 3 ? "warn" : "", btn: `<button class="btn sm" data-act="payBill" data-id="${b.id}">Pay</button>` }); }
+  for (const p of Object.values(S.pos)) if (p.status === "received") decisions.push({ why: `Pay ${p.vendor} for ${p.id}`, meta: p.title + ` · received ${shortDate(p.receivedOn)}`, cents: p.cents, btn: `<button class="btn sm" data-act="payPo" data-id="${p.id}">Pay</button>`, open: ["po", p.id] });
+  if (f.unmatched) decisions.push({ why: `${f.unmatched} bank line${f.unmatched === 1 ? " has" : "s have"} no entry`, meta: "the bank says money moved and the books do not - reconcile", cents: unmatchedBank().reduce((a, t) => a + Math.abs(t.cents), 0), tone: "warn", btn: `<button class="btn sm primary" data-room="cash">Reconcile</button>` });
+  if (f.stripe > 0) decisions.push({ why: `${fmt(f.stripe)} sitting in Stripe`, meta: "collected by pay link, not yet in the bank", cents: f.stripe, btn: `<button class="btn sm" data-act="payout">Pay out</button>` });
+  for (const a of Object.values(S.agreements)) if (daysBetween(TODAY, a.nextOn) <= 21) decisions.push({ why: `${S.clients[a.client].name} installment due ${shortDate(a.nextOn)}`, meta: a.title + " · the next quarter, not yet drafted", cents: a.installmentCents, btn: `<button class="btn sm" data-act="invoiceInstallment" data-id="${a.id}">Draft it</button>` });
+  for (const c of f.holds) decisions.push({ why: `${S.clients[c].name} is on credit hold`, meta: `${standing(c).worst} days past due · new work cannot be scheduled without an override`, cents: standing(c).owed, tone: "bad", btn: `<button class="btn sm" data-open="client:${c}">Review</button>`, open: ["client", c] });
+  if (!S.payroll.runs["2026-09"]) decisions.push({ why: "September payroll runs on the 30th", meta: "Gross for 3 people · " + fmt(S.payroll.grossCents), cents: S.payroll.grossCents, btn: `<button class="btn sm" data-act="runPayroll">Run now</button>` });
+  const order = { bad: 0, warn: 1, "": 2, undefined: 2 };
+  decisions.sort((a, b) => order[a.tone] - order[b.tone] || b.cents - a.cents);
+  const net = f.ar - f.owes;
+  const runway = f.runwayMonths === Infinity ? "—" : f.runwayMonths.toFixed(1);
+  return `
+  <div class="panel">
+    <div class="cashline">
+      <div>
+        <div class="big money">${fig(f.cash, { acct: "cash" })}</div>
+        <div class="since">Cash on hand · ${fig(f.bank, { acct: "cash" }, "", fmt(f.bank) + " in the bank")}${f.stripe ? ` + ${fig(f.stripe, { acct: "stripe" }, "", fmt(f.stripe) + " in Stripe")}` : ""}${f.unmatched || f.transit ? ` · <button class="link-btn" data-room="cash">${f.unmatched + f.transit} items unreconciled</button>` : " · reconciled to the bank"}. <b>${fmt(f.collected, true)}</b> collected and <b>−${fmt(f.periodOut)}</b> out ${ui.period === "month" ? "this month" : "this " + (ui.period === "ytd" ? "year" : "quarter")}.</div>
+      </div>
+      <div class="runway">
+        <div class="n">${runway} mo</div>
+        <div class="meta">runway at ${fmt(f.burn)}/mo average burn (Jul–Aug)</div>
+      </div>
+    </div>
+    <div class="position">
+      <div><div class="k">Owed to you</div><div class="v money">${fig(f.ar, { acct: "ar" })}</div><div class="d">${fig(f.pastDue, { acct: "ar", status: "pastdue" }, f.pastDue ? "bad" : "")} past due on ${f.pastDueN} · ${fmt(f.current)} inside terms</div></div>
+      <div><div class="k">You owe</div><div class="v money">${fig(f.owes, { acct: "ap" })}</div><div class="d">${fmt(f.ap)} to vendors · ${fmt(f.reimbDue)} to your people · ${fmt(f.tax)} sales tax</div></div>
+      <div><div class="k">Position</div><div class="v money ${net < 0 ? "fig bad" : ""}">${fmt(net)}</div><div class="d">receivable less payable, right now. ${fmt(f.dep)} held in deposits is not yours yet.</div></div>
+    </div>
+  </div>
+
+  <div class="panel decide" style="margin-top:16px">
+    <div class="ph"><h2>Needs a decision</h2><span class="meta">${decisions.length} items, worst first · each one is a button that posts</span></div>
+    <ul>${decisions.map(d => `<li>
+      <div class="why">${d.open ? `<button class="link-btn" style="color:inherit;text-decoration:none;font-weight:600" data-open="${d.open[0]}:${d.open[1]}">${d.why}</button>` : d.why}<span class="meta">${d.meta}</span></div>
+      <div class="amt ${d.tone === "bad" ? "fig bad" : d.tone === "warn" ? "fig warn" : ""}">${fmt(d.cents)}</div>
+      <div>${d.btn}</div></li>`).join("") || `<li class="empty">Nothing waiting on you.</li>`}</ul>
+  </div>
+
+  <div class="two">
+    <div class="panel">
+      <div class="ph"><h2>Money in · ${periodLabel()}</h2></div>
+      <div class="tblwrap"><table class="list"><tbody>
+        <tr><td>Collected</td><td class="meta">${f.collectedN} payments</td><td class="num">${fig(f.collected, { acct: "cash", type: "invoice", period: true }, "good")}</td></tr>
+        <tr><td>Invoiced, inside terms</td><td class="meta">${f.currentN} invoices</td><td class="num">${fig(f.current, { acct: "ar", status: "current" })}</td></tr>
+        <tr><td>Past due</td><td class="meta">${f.pastDueN} in collections</td><td class="num">${fig(f.pastDue, { acct: "ar", status: "pastdue" }, f.pastDue ? "bad" : "")}</td></tr>
+        <tr><td>Worked, unbilled</td><td class="meta">${f.unbilledN} closed jobs · not in the ledger until sent</td><td class="num ${f.unbilled ? "fig warn" : ""}">${fmt(f.unbilled)}</td></tr>
+      </tbody></table></div>
+    </div>
+    <div class="panel">
+      <div class="ph"><h2>Money out · ${periodLabel()}</h2></div>
+      <div class="tblwrap"><table class="list"><tbody>
+        <tr><td>Parts bought</td><td class="meta">on received POs</td><td class="num">${fig(sumAcct("cogs", inPeriod), { acct: "cogs", period: true })}</td></tr>
+        <tr><td>Overhead</td><td class="meta">rent, insurance, telecom, software</td><td class="num">${fig(sumAcct("ovh", inPeriod), { acct: "ovh", period: true })}</td></tr>
+        <tr><td>Payroll</td><td class="meta">${S.payroll.runs["2026-09"] ? "September run posted" : "September not yet run"}</td><td class="num">${fig(sumAcct("pay", inPeriod), { acct: "pay", period: true })}</td></tr>
+        <tr><td>Field expenses</td><td class="meta">reimbursed to engineers</td><td class="num">${fig(sumAcct("reimb", inPeriod), { acct: "reimb", period: true })}</td></tr>
+        <tr><td>Processing fees</td><td class="meta">Stripe, on pay-link payments</td><td class="num">${fig(sumAcct("pfees", inPeriod), { acct: "pfees", period: true })}</td></tr>
+        <tr><td>On order, not yet a cost</td><td class="meta">POs sent, not received</td><td class="num">${fmt(f.onOrder)}</td></tr>
+      </tbody></table></div>
+    </div>
+  </div>`;
+}
+
+/* Receivables — one pipeline, six stages, one list */
+function rRecv(f) {
+  const stages = [
+    { k: "quoted", label: "Quoted", cents: f.quoted, n: f.quotedN },
+    { k: "awarded", label: "Awarded, in work", cents: f.awarded, n: f.awardedN },
+    { k: "unbilled", label: "Worked, unbilled", cents: f.unbilled, n: f.unbilledN, tone: f.unbilled ? "warn" : "" },
+    { k: "current", label: "Invoiced, in terms", cents: f.current, n: f.currentN },
+    { k: "pastdue", label: "Past due", cents: f.pastDue, n: f.pastDueN, tone: f.pastDue ? "bad" : "" },
+    { k: "paid", label: "Paid, " + (ui.period === "month" ? "this month" : ui.period === "ytd" ? "YTD" : "this quarter"), cents: f.collected, n: f.collectedN, tone: "good" },
+  ];
+  const rows = [];
+  const cl = (id) => S.clients[id].name;
+  for (const q of Object.values(S.quotes)) if (q.status === "sent") rows.push({ stage: "quoted", status: "sent", client: cl(q.client), doc: q.id, title: q.title, meta: `sent ${shortDate(q.sentOn)} · expires ${shortDate(q.expiresOn)}${q.depositPct ? ` · ${q.depositPct}% deposit on approval` : ""}`, cents: q.cents, sort: q.expiresOn, act: `<button class="btn sm" data-act="approveQuote" data-id="${q.id}">Mark approved</button>`, open: "quote:" + q.id });
+  for (const j of Object.values(S.jobs)) {
+    if (j.status === "in progress") rows.push({ stage: "awarded", status: "in progress", client: cl(j.client), doc: j.id, title: j.title, meta: `from ${j.quote}${j.depositCents ? ` · ${fmt(j.depositCents)} deposit held, applies on invoice` : ""}`, cents: jobValue(j) - (j.depositCents || 0), sort: "z", act: `<button class="btn sm" data-act="closeJob" data-id="${j.id}">Close job</button>`, open: "job:" + j.id });
+    if (j.status === "closed") rows.push({ stage: "unbilled", status: "closed", client: cl(j.client), doc: j.id, title: j.title, meta: `closed ${shortDate(j.closedOn)} · ${daysBetween(j.closedOn, TODAY)} days unbilled`, cents: jobValue(j), tone: "warn", sort: j.closedOn, act: `<button class="btn sm primary" data-act="draftFromJob" data-id="${j.id}">Draft invoice</button>`, open: "job:" + j.id });
+  }
+  for (const i of Object.values(S.invoices)) {
+    const b = balanceOf(i.id);
+    if (i.status === "draft") rows.push({ stage: "unbilled", status: "draft", client: cl(i.client), doc: i.id, title: i.title, meta: "draft · nothing posted until sent", cents: invTotal(i), tone: "warn", sort: "0", act: `<button class="btn sm primary" data-act="sendInvoice" data-id="${i.id}">Send</button>`, open: "invoice:" + i.id });
+    else if ((i.status === "sent" || i.status === "partial") && b > 0) {
+      const past = i.dueOn < TODAY; const d = daysBetween(i.dueOn, TODAY);
+      rows.push({ stage: past ? "pastdue" : "current", status: i.status, client: cl(i.client), doc: i.id, title: i.title, meta: past ? `${d} days past due · ${i.dunning.length} rungs sent${i.dispute ? " · dispute open" : ""}${i.promise ? ` · promised ${shortDate(i.promise.on)}` : ""}` : `due ${shortDate(i.dueOn)} · ${-d} days${i.status === "partial" ? " · partly paid" : ""}`, cents: b, tone: past ? "bad" : "", sort: i.dueOn, act: past ? (i.dispute ? `<button class="btn sm" data-open="invoice:${i.id}">Resolve dispute</button>` : `<button class="btn sm coral" data-act="sendRung" data-id="${i.id}">Send next rung</button>`) : `<button class="btn sm" data-open="invoice:${i.id}">Record payment</button>`, open: "invoice:" + i.id });
+    }
+    else if (i.status === "paid") { const last = [...S.ledger].reverse().find(e => e.ref.type === "invoice" && e.ref.id === i.id && e.lines.some(l => l.acct === "cash")); if (last && inPeriod(last)) rows.push({ stage: "paid", status: "paid", client: cl(i.client), doc: i.id, title: i.title, meta: `paid ${shortDate(last.on)}`, cents: invTotal(i), tone: "good", sort: last.on, act: "", open: "invoice:" + i.id }); }
+  }
+  const order = { pastdue: 0, unbilled: 1, current: 2, awarded: 3, quoted: 4, paid: 5 };
+  rows.sort((a, b) => order[a.stage] - order[b.stage] || (a.sort < b.sort ? -1 : 1));
+  const shown = ui.stage ? rows.filter(r => r.stage === ui.stage) : rows;
+  // By client, so the pipeline can also be read as who owes what.
+  const byClient = {};
+  for (const r of rows) { if (r.stage === "paid" || r.stage === "quoted") continue; byClient[r.client] = (byClient[r.client] || 0) + r.cents; }
+  const maxC = Math.max(1, ...Object.values(byClient));
+  return `
+  <div class="panel">
+    <div class="stages">${stages.map(s => `<button aria-pressed="${ui.stage === s.k}" data-stage="${s.k}"><div class="k">${s.label}</div><div class="v ${s.tone || ""}">${fmt(s.cents)}</div><div class="c">${s.n} ${s.k === "paid" ? "payment" : s.k === "quoted" ? "quote" : s.k === "awarded" || s.k === "unbilled" ? "job" : "invoice"}${s.n === 1 ? "" : "s"}</div></button>`).join("")}</div>
+    <div class="note">Left to right is the order money moves. Quotes and unbilled work are not in the ledger yet - they are the pipeline's promise, not its record. Tap a stage to filter; tap it again to clear.</div>
+  </div>
+  <div class="panel">
+    <div class="ph"><h2>${ui.stage ? stages.find(s => s.k === ui.stage).label : "The whole pipeline"} <span class="meta">${shown.length} rows</span></h2>${ui.stage ? `<span class="chip">${stages.find(s => s.k === ui.stage).label} <button data-stage="${ui.stage}" aria-label="Clear">×</button></span>` : ""}</div>
+    <div class="tblwrap"><table class="list"><thead><tr><th>Client</th><th>Document</th><th>What</th><th class="r">Amount</th><th></th></tr></thead><tbody>
+    ${shown.map(r => `<tr class="row"><td>${r.client}</td><td><button class="link-btn doc" data-open="${r.open}">${r.doc}</button><br><span class="meta">${pill(r.status)}</span></td><td class="title">${r.title}<span class="meta">${r.meta}</span></td><td class="num ${r.tone ? "fig " + r.tone : ""}">${fmt(r.cents)}</td><td class="r">${r.act}</td></tr>`).join("") || `<tr><td colspan="5" class="empty">Nothing at this stage.</td></tr>`}
+    </tbody></table></div>
+  </div>
+  <div class="panel margin">
+    <div class="ph"><h2>Exposure by client</h2><span class="meta">awarded + unbilled + invoiced, excluding quotes and paid</span></div>
+    <div class="tblwrap"><table class="list"><tbody>${Object.entries(byClient).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<tr><td style="width:40%">${c}</td><td><div class="bar"><i style="width:${v / maxC * 100}%"></i></div></td><td class="num">${fmt(v)}</td></tr>`).join("")}</tbody></table></div>
+  </div>`;
+}
+
+/* Payables — one queue, by when */
+function rPay(f) {
+  const rows = [];
+  for (const b of Object.values(S.bills)) if (!b.paid["2026-09"]) rows.push({ when: `2026-09-${String(b.day).padStart(2, "0")}`, payee: b.payee, kind: "Bill · " + b.kind, doc: b.id, title: "Monthly, every " + b.day + (b.day === 1 ? "st" : b.day === 15 ? "th" : "th"), cents: b.cents, status: "due", act: `<button class="btn sm" data-act="payBill" data-id="${b.id}">Pay</button>` });
+  for (const p of Object.values(S.pos)) {
+    if (p.status === "received") rows.push({ when: addDays(p.receivedOn, 30), payee: p.vendor, kind: "Purchase order", doc: p.id, title: p.title + (p.job ? ` · for ${p.job}` : ""), cents: p.cents, status: "owed", act: `<button class="btn sm" data-act="payPo" data-id="${p.id}">Pay</button>`, open: "po:" + p.id });
+    if (p.status === "sent") rows.push({ when: p.expectedOn, payee: p.vendor, kind: "Purchase order", doc: p.id, title: p.title + ` · expected ${shortDate(p.expectedOn)}`, cents: p.cents, status: "on order", act: `<button class="btn sm" data-act="receivePo" data-id="${p.id}">Mark received</button>`, open: "po:" + p.id });
+  }
+  for (const r of Object.values(S.reports)) if (r.status !== "paid") rows.push({ when: r.submittedOn, payee: r.person, kind: "Reimbursement", doc: r.id, title: r.title, cents: r.cents, status: r.status === "approved" ? "owed" : "to approve", act: r.status === "approved" ? `<button class="btn sm primary" data-act="payReport" data-id="${r.id}">Pay</button>` : `<button class="btn sm" data-act="approveReport" data-id="${r.id}">Approve</button>`, open: "report:" + r.id });
+  if (f.tax > 0) rows.push({ when: "2026-10-31", payee: "CDTFA", kind: "Sales tax", doc: "Q3 2026", title: "Collected on parts sold, owed to the state", cents: f.tax, status: "accruing", act: `<button class="btn sm" data-act="remitTax">Remit</button>` });
+  if (!S.payroll.runs["2026-09"]) rows.push({ when: "2026-09-30", payee: "3 people", kind: "Payroll", doc: "Sep 2026", title: "Gross, salaried + hourly", cents: S.payroll.grossCents, status: "scheduled", act: `<button class="btn sm" data-act="runPayroll">Run</button>` });
+  rows.sort((a, b) => a.when < b.when ? -1 : 1);
+  const tone = { due: "warn", owed: "warn", "to approve": "neutral", "on order": "faint", scheduled: "info", accruing: "info" };
+  const owedNow = rows.filter(r => r.status === "owed" || r.status === "due" || r.status === "to approve").reduce((a, r) => a + r.cents, 0);
+  const committed = rows.filter(r => r.status === "on order" || r.status === "scheduled").reduce((a, r) => a + r.cents, 0);
+  const paid = ["cogs", "ovh", "pay", "reimb", "pfees"].map(k => [k, sumAcct(k, inPeriod)]);
+  return `
+  <div class="panel">
+    <div class="position" style="border-top:0">
+      <div><div class="k">Owed now</div><div class="v money">${fig(f.ap, { acct: "ap" }, "", fmt(owedNow))}</div><div class="d">vendors, bills due, and your own people</div></div>
+      <div><div class="k">Committed, not yet owed</div><div class="v money">${fmt(committed)}</div><div class="d">POs on order and payroll not yet run - not in the ledger</div></div>
+      <div><div class="k">Paid out · ${periodLabel()}</div><div class="v money">${fig(f.periodOut, { acct: "cash", side: "cr", period: true })}</div><div class="d">${paid.map(([k, v]) => `${ACCOUNTS[k].name.toLowerCase()} ${fmtK(v)}`).join(" · ")}</div></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="ph"><h2>What goes out, in order</h2><span class="meta">${rows.length} items · a purchase order and a bill are the same question</span></div>
+    <div class="tblwrap"><table class="list"><thead><tr><th>When</th><th>Payee</th><th>What</th><th class="r">Amount</th><th></th></tr></thead><tbody>
+    ${rows.map(r => { const d = daysBetween(TODAY, r.when); return `<tr class="row"><td class="num" style="text-align:left">${shortDate(r.when)}<br><span class="meta">${d < 0 ? Math.abs(d) + "d late" : d === 0 ? "today" : "in " + d + "d"}</span></td><td>${r.payee}<br><span class="meta">${r.kind}</span></td><td class="title">${r.open ? `<button class="link-btn doc" data-open="${r.open}">${r.doc}</button>` : `<span class="doc">${r.doc}</span>`} <span class="pill ${tone[r.status]}">${r.status}</span><span class="meta">${r.title}</span></td><td class="num">${fmt(r.cents)}</td><td class="r">${r.act}</td></tr>`; }).join("") || `<tr><td colspan="5" class="empty">Nothing owed. Enjoy it.</td></tr>`}
+    </tbody></table></div>
+  </div>`;
+}
+
+/* Cash — bank against books, then the next eight weeks */
+function rCash(f) {
+  const unm = unmatchedBank(); const trans = inTransit(); const bankBal = bankBalance();
+  const diff = f.bank - bankBal;
+  const cand = (t) => S.ledger.filter(e => !e.bank && live(e) && e.ref.type !== "opening" && e.lines.some(l => l.acct === "cash" && ((l.dr || 0) - (l.cr || 0)) === t.cents) && Math.abs(daysBetween(e.on, t.on)) <= 7);
+  const invMatch = (t) => t.cents > 0 ? Object.values(S.invoices).filter(i => (i.status === "sent" || i.status === "partial") && balanceOf(i.id) === t.cents) : [];
+  const feed = [...S.bank].reverse().slice(0, 14);
+  // Forecast: only what is committed. No quotes, no hopes.
+  const weeks = []; let bal = f.cash;
+  for (let w = 0; w < 8; w++) {
+    const from = addDays(TODAY, w * 7), to = addDays(TODAY, w * 7 + 6); const ins = [], outs = [];
+    const inWin = (d) => d >= from && d <= to;
+    for (const i of Object.values(S.invoices)) { if (i.status !== "sent" && i.status !== "partial") continue; const b = balanceOf(i.id); if (b <= 0) continue; const exp = i.dueOn < TODAY ? addDays(TODAY, 14) : i.dueOn; if (inWin(exp)) ins.push([b, `${i.id}${i.dueOn < TODAY ? " (past due, assumed 2 wks)" : ""}`]); }
+    for (const a of Object.values(S.agreements)) { const due = addDays(a.nextOn, S.clients[a.client].terms); if (inWin(due)) ins.push([a.installmentCents, `${a.id} installment`]); }
+    for (const m of ["2026-09", "2026-10", "2026-11"]) { for (const b of Object.values(S.bills)) { if (b.paid[m]) continue; const d = `${m}-${String(b.day).padStart(2, "0")}`; if (d >= TODAY && inWin(d)) outs.push([b.cents, b.payee]); } const pr = `${m}-30`; if (!S.payroll.runs[m] && pr >= TODAY && inWin(pr)) outs.push([S.payroll.grossCents, "Payroll"]); }
+    for (const p of Object.values(S.pos)) { const d = p.status === "received" ? addDays(p.receivedOn, 30) : p.status === "sent" ? addDays(p.expectedOn, 30) : null; if (d && inWin(d)) outs.push([p.cents, `${p.id} ${p.vendor}`]); }
+    for (const r of Object.values(S.reports)) if (r.status !== "paid" && w === 0) outs.push([r.cents, `${r.id} ${r.person}`]);
+    if (f.tax > 0 && inWin("2026-10-31")) outs.push([f.tax, "Sales tax"]);
+    const tin = ins.reduce((a, x) => a + x[0], 0), tout = outs.reduce((a, x) => a + x[0], 0); bal += tin - tout;
+    weeks.push({ from, to, ins, outs, tin, tout, bal });
+  }
+  const low = Math.min(...weeks.map(w => w.bal)); const lowIdx = weeks.findIndex(w => w.bal === low);
+  return `
+  <div class="panel"><div class="recon">
+    <div><div class="k">Books say</div><div class="v money">${fig(f.bank, { acct: "cash" })}</div><div class="d">Bank account, from the ledger</div></div>
+    <div><div class="k">Bank says</div><div class="v money">${fmt(bankBal)}</div><div class="d">statement balance from the feed</div></div>
+    <div><div class="k">Difference</div><div class="v money ${diff ? "fig warn" : "fig good"}">${fmt(diff)}</div><div class="d">${unm.length} bank line${unm.length === 1 ? "" : "s"} unposted · ${trans.length} entr${trans.length === 1 ? "y" : "ies"} not yet at the bank</div></div>
+    <div><div class="k">In Stripe</div><div class="v money">${fig(f.stripe, { acct: "stripe" })}</div><div class="d">${f.stripe > 0 ? `<button class="btn sm" data-act="payout">Pay out to bank</button>` : "nothing waiting"}</div></div>
+  </div><div class="note">Reconciled means every bank line has an entry and every cash entry has a bank line. The difference is not a rounding error to absorb; it is the list below.</div></div>
+  <div class="panel">
+    <div class="ph"><h2>Bank feed</h2><span class="meta">${unm.length ? unm.length + " need a home" : "everything has a home"} · read-only feed, no money moves from here</span></div>
+    <div class="tblwrap"><table class="list"><thead><tr><th>Date</th><th>Bank description</th><th class="r">Amount</th><th>Books</th><th></th></tr></thead><tbody>
+    ${feed.map(t => {
+      const e = t.matched ? S.ledger.find(x => x.id === t.matched) : null;
+      if (e) return `<tr><td class="num" style="text-align:left">${shortDate(t.on)}</td><td class="doc">${esc(t.desc)}</td><td class="num ${t.cents < 0 ? "" : "fig good"}">${fmt(t.cents, true)}</td><td colspan="2"><span class="pill good">matched</span> <span class="meta">#${e.id} · ${esc(e.memo)}</span></td></tr>`;
+      const cs = cand(t), im = invMatch(t);
+      let act = "";
+      if (cs.length) act = cs.map(c => `<button class="btn sm primary" data-act="matchBank" data-id="${t.id}" data-entry="${c.id}">Match #${c.id}</button>`).join(" ");
+      else if (im.length) act = im.map(i => `<button class="btn sm primary" data-act="recordFromBank" data-id="${t.id}" data-inv="${i.id}">Payment on ${i.id}</button>`).join(" ");
+      else if (t.cents < 0) act = `<select data-postsel="${t.id}"><option value="">Post as…</option><option value="ovh">Overhead</option><option value="reimb">Field expense</option><option value="cogs">Parts cost</option><option value="pfees">Bank/processing fee</option></select>`;
+      else act = `<button class="btn sm" data-act="postFromBank" data-id="${t.id}" data-acct="fees" data-memo="Unidentified deposit">Post as other income</button>`;
+      return `<tr><td class="num" style="text-align:left">${shortDate(t.on)}</td><td class="doc">${esc(t.desc)}</td><td class="num ${t.cents < 0 ? "" : "fig good"}">${fmt(t.cents, true)}</td><td><span class="pill warn">no entry</span>${im.length ? ` <span class="meta">equals the balance on ${im[0].id}</span>` : cs.length ? ` <span class="meta">looks like #${cs[0].id}</span>` : ""}</td><td class="r">${act}</td></tr>`;
+    }).join("")}
+    </tbody></table></div>
+    ${trans.length ? `<div class="note">Not yet at the bank: ${trans.map(e => `<b>#${e.id}</b> ${esc(e.memo)} (${fmt(e.lines.find(l => l.acct === "cash").dr || e.lines.find(l => l.acct === "cash").cr)})`).join(" · ")}. A check in the mail is still a fact in the books; the bank just has not seen it.</div>` : ""}
+  </div>
+  <div class="panel fc">
+    <div class="ph"><h2>Next eight weeks</h2><span class="meta">from what is committed: invoices by due date, bills, payroll, POs · quotes and unbilled work deliberately excluded</span></div>
+    <div class="tblwrap"><table class="list"><thead><tr><th>Week</th><th class="r">In</th><th class="r">Out</th><th class="r">Ending cash</th></tr></thead><tbody>
+    ${weeks.map((w, i) => `<tr class="${w.bal < 0 ? "neg" : i === lowIdx && low < f.cash ? "low" : ""}"><td class="wk">${shortDate(w.from)} – ${shortDate(w.to)}${i === 0 ? '<span class="why">this week</span>' : ""}</td><td class="num in">${w.tin ? "+" + fmt(w.tin) : ""}${w.ins.map(x => `<span class="why">${esc(x[1])}</span>`).join("")}</td><td class="num out">${w.tout ? "−" + fmt(w.tout) : ""}${w.outs.map(x => `<span class="why">${esc(x[1])}</span>`).join("")}</td><td class="num"><b>${fmt(w.bal)}</b>${i === lowIdx && low < f.cash ? '<span class="why">low point</span>' : ""}</td></tr>`).join("")}
+    </tbody></table></div>
+    <div class="note">Low point ${fmt(low)} in the week of ${shortDate(weeks[lowIdx].from)}. If that number is too close, the levers are all on this page's neighbours: chase what is past due, draft what is unbilled, hold a PO.</div>
+  </div>
+  <div class="panel ghost">
+    <div class="pb"><b>Not until Craton.</b> Everything above works with a read-only bank feed and Stripe Connect: the bank is someone else's, the books are ours, and reconciling is how the two agree. What needs Stripe Treasury is the other half - an operating account that <em>is</em> the ledger (no reconciliation, because there is no second book), cards for engineers and jobs, funded pockets for allowances, and escrow for broker deals. Those are drawn here as the line, not as rooms.</div>
+  </div>`;
+}
+
+/* Clients — standing, exposure, allowances, and what they see */
+function rClients() {
+  const rows = Object.values(S.clients).map(c => { const st = standing(c.id); const agr = Object.values(S.agreements).find(a => a.client === c.id); const open = Object.values(S.invoices).filter(i => i.client === c.id && (i.status === "sent" || i.status === "partial") && balanceOf(i.id) > 0).length; const quoted = Object.values(S.quotes).filter(q => q.client === c.id && q.status === "sent").reduce((a, q) => a + q.cents, 0); return { c, st, agr, open, quoted }; });
+  rows.sort((a, b) => ({ bad: 0, warn: 1, good: 2 })[a.st.tone] - ({ bad: 0, warn: 1, good: 2 })[b.st.tone] || b.st.owed - a.st.owed);
+  return `
+  <div class="panel">
+    <div class="ph"><h2>Standing</h2><span class="meta">hold at ${holdDays} days past due · the scheduler reads this, not a person</span></div>
+    <div class="tblwrap"><table class="list"><thead><tr><th>Client</th><th>Standing</th><th class="r">Owes</th><th>Terms</th><th>Agreement</th><th class="r">Quoted</th><th></th></tr></thead><tbody>
+    ${rows.map(({ c, st, agr, open, quoted }) => `<tr class="row"><td><button class="link-btn" style="font-weight:600;text-decoration:none;color:inherit" data-open="client:${c.id}">${c.name}</button><br><span class="meta">${c.contact}</span></td><td><span class="stand ${st.tone}"><i></i>${st.label}</span>${st.override ? `<br><span class="meta">until ${shortDate(st.override.until)}: ${esc(st.override.reason)}</span>` : ""}</td><td class="num ${st.tone === "bad" ? "fig bad" : ""}">${fmt(st.owed)}<br><span class="meta">${open} open</span></td><td>Net ${c.terms}<br><span class="meta">tax ${(c.taxBps / 100).toFixed(2)}%</span></td><td>${agr ? `${agr.id}<br><span class="meta">allowance ${fmt(agr.allowanceCents - agr.allowanceUsed)} left of ${fmt(agr.allowanceCents)}</span>` : '<span class="meta">time and materials</span>'}</td><td class="num">${quoted ? fmt(quoted) : ""}</td><td class="r"><button class="btn sm" data-open="client:${c.id}">Statement</button></td></tr>`).join("")}
+    </tbody></table></div>
+  </div>
+  <div class="panel ghost"><div class="pb"><b>What the client gets today:</b> a statement, a pay link on every invoice, a place to question a line, and their allowance balance - all buildable on Connect. <b>What waits for Craton:</b> a funded pocket they can watch draw down, and escrow on an instrument purchase through a broker.</div></div>`;
+}
+
+/* Ledger — the journal itself */
+function rLedger() {
+  const F = ui.ledgerFilter || {};
+  const match = (e) => {
+    if (F.acct && !e.lines.some(l => l.acct === F.acct && (!F.side || (F.side === "cr" ? l.cr : l.dr)))) return false;
+    if (F.type && e.ref.type !== F.type) return false;
+    if (F.id && e.ref.id !== F.id) return false;
+    if (F.client && e.ref.client !== F.client) return false;
+    if (F.period && !inPeriod(e)) return false;
+    if (F.status) { const i = S.invoices[e.ref.id]; if (!i || e.ref.type !== "invoice") return false; const past = i.dueOn < TODAY; const open = (i.status === "sent" || i.status === "partial") && balanceOf(i.id) > 0; if (!open) return false; if (F.status === "pastdue" && !past) return false; if (F.status === "current" && past) return false; }
+    if (F.q) { const q = F.q.toLowerCase(); if (!(e.memo.toLowerCase().includes(q) || String(e.ref.id || "").toLowerCase().includes(q))) return false; }
+    return true;
+  };
+  const rows = S.ledger.filter(match).slice().reverse();
+  let dr = 0, cr = 0; for (const e of rows) for (const l of e.lines) { dr += l.dr || 0; cr += l.cr || 0; }
+  const figSum = F.acct ? sumAcct(F.acct, match) : null;
+  const desc = [];
+  if (F.acct) desc.push(ACCOUNTS[F.acct].name + (F.side === "cr" ? " (out)" : ""));
+  if (F.status) desc.push(F.status === "pastdue" ? "past-due invoices" : "invoices in terms");
+  if (F.type) desc.push({ invoice: "invoices", job: "jobs", po: "purchase orders", bill: "bills", report: "reimbursements", payroll: "payroll" }[F.type]);
+  if (F.id) desc.push(F.id); if (F.client) desc.push(S.clients[F.client].name); if (F.period) desc.push(periodLabel());
+  const accts = Object.entries(ACCOUNTS);
+  return `
+  <div class="panel">
+    <div class="ph">
+      <div class="filters">
+        <select id="lf-acct"><option value="">Any account</option>${accts.map(([k, a]) => `<option value="${k}" ${F.acct === k ? "selected" : ""}>${a.name}</option>`).join("")}</select>
+        <select id="lf-type"><option value="">Any document</option>${["invoice", "job", "po", "bill", "report", "payroll", "bank", "payout", "tax", "opening"].map(t => `<option value="${t}" ${F.type === t ? "selected" : ""}>${t}</option>`).join("")}</select>
+        <input id="lf-q" placeholder="Search memo or number" value="${esc(F.q || "")}">
+        <label style="display:inline-flex;gap:6px;align-items:center;font-size:var(--fs-small);color:var(--mut)"><input type="checkbox" id="lf-period" ${F.period ? "checked" : ""} style="width:auto"> ${periodLabel()} only</label>
+        ${desc.length ? `<span class="chip">${desc.join(" · ")} <button id="lf-clear" aria-label="Clear filters">×</button></span>` : ""}
+      </div>
+      <div class="balanced ${dr === cr ? "ok" : ""}" title="Every entry is a balanced pair; the filter cannot break that">${rows.length} entries · debits ${fmt(dr)} = credits ${fmt(cr)} ${dr === cr ? "✓" : "✗"}</div>
+    </div>
+    ${figSum !== null ? `<div class="note">These rows sum to <b class="money" style="color:var(--ink)">${fmt(figSum)}</b> on ${ACCOUNTS[F.acct].name} - the figure you clicked. Nothing on any screen is stored; this is where it comes from.</div>` : ""}
+    <div class="tblwrap"><table class="list"><thead><tr><th style="width:40px">#</th><th>Date</th><th>Entry</th><th>Document</th><th class="r">Debit</th><th class="r">Credit</th></tr></thead><tbody>
+    ${rows.map(e => {
+      const dsum = e.lines.reduce((a, l) => a + (l.dr || 0), 0);
+      const open = ui.openEntry === e.id;
+      const docBtn = e.ref.id && ["invoice", "job", "po", "report"].includes(e.ref.type) ? `<button class="link-btn doc" data-open="${e.ref.type}:${e.ref.id}">${e.ref.id}</button>` : `<span class="doc mut">${e.ref.id || "—"}</span>`;
+      return `<tr class="entry ${open ? "open" : ""} ${e.reversed ? "reversed" : ""}" data-entry="${e.id}"><td class="meta">${e.id}</td><td class="num" style="text-align:left">${shortDate(e.on)}</td><td>${esc(e.memo)}${e.reverses ? `<span class="meta"> · reverses #${e.reverses}</span>` : ""}${e.ref.client ? `<span class="meta"> · ${S.clients[e.ref.client].name}</span>` : ""}</td><td>${docBtn}</td><td class="num">${fmt(dsum)}</td><td class="num">${fmt(dsum)}</td></tr>
+      ${open ? `<tr class="lines"><td colspan="6"><div class="postings">${e.lines.map(l => `<span>${l.dr ? "" : "&nbsp;&nbsp;&nbsp;&nbsp;"}${ACCOUNTS[l.acct].name}</span><span class="num">${l.dr ? fmt(l.dr) : ""}</span><span class="num cr">${l.cr ? fmt(l.cr) : ""}</span>`).join("")}</div>
+        <div style="margin-top:8px;display:flex;gap:8px;align-items:center"><span class="meta">Rows are never edited or deleted.</span>${!e.reversed && !e.reverses && e.ref.type !== "opening" && !e.bank ? `<button class="btn sm" data-act="reverse" data-id="${e.id}">Reverse this entry</button>` : e.bank ? `<span class="meta">Matched to bank line #${e.bank} - the bank saw it, so it stays.</span>` : ""}</div></td></tr>` : ""}`;
+    }).join("") || `<tr><td colspan="6" class="empty">No entries match.</td></tr>`}
+    </tbody></table></div>
+  </div>`;
+}
+
+/* Reports — P&L, cash flow, margin by client, job costing */
+function rReports() {
+  const revK = ["rev_l", "rev_p", "rev_t", "rev_c", "fees"], costK = ["cogs", "reimb", "ovh", "pay"];
+  const rev = revK.map(k => [k, sumAcct(k, inPeriod)]); const cost = costK.map(k => [k, sumAcct(k, inPeriod)]);
+  const revT = rev.reduce((a, [, v]) => a + v, 0), costT = cost.reduce((a, [, v]) => a + v, 0);
+  const inRows = S.ledger.filter(e => inPeriod(e) && e.lines.some(l => l.acct === "cash" && l.dr)).reduce((a, e) => a + e.lines.filter(l => l.acct === "cash").reduce((s, l) => s + (l.dr || 0), 0), 0);
+  const outRows = S.ledger.filter(e => inPeriod(e) && e.lines.some(l => l.acct === "cash" && l.cr)).reduce((a, e) => a + e.lines.filter(l => l.acct === "cash").reduce((s, l) => s + (l.cr || 0), 0), 0);
+  const openCash = sumAcct("cash", (e) => e.on < periodStart());
+  // Margin by client: revenue posted per client, less parts cost on their jobs.
+  const byClient = {};
+  for (const e of S.ledger) {
+    if (!inPeriod(e) || !live(e)) continue;
+    const c = e.ref.client || (e.ref.job && S.jobs[e.ref.job] && S.jobs[e.ref.job].client);
+    if (!c) continue;
+    const row = byClient[c] = byClient[c] || { rev: 0, cost: 0 };
+    for (const l of e.lines) { if (revK.includes(l.acct)) row.rev += (l.cr || 0) - (l.dr || 0); if (l.acct === "cogs") row.cost += (l.dr || 0) - (l.cr || 0); }
+  }
+  const jobs = Object.values(S.jobs).filter(j => j.status === "invoiced").map(j => { const inv = Object.values(S.invoices).find(i => i.job === j.id); const v = inv ? invTotal(inv) : 0; const c = jobCost(j); return { j, inv, v, c, m: v ? (v - c) / v : 0 }; }).filter(x => x.inv);
+  return `
+  <div class="two" style="margin-top:0">
+    <div class="panel"><div class="ph"><h2>Profit and loss · ${periodLabel()}</h2><span class="meta">accrual: revenue when invoiced, cost when received</span></div>
+      <div class="tblwrap"><table class="list pl"><tbody>
+        <tr><td>Revenue</td><td class="num"></td></tr>
+        ${rev.map(([k, v]) => `<tr><td class="ind">${ACCOUNTS[k].name}</td><td class="num">${fig(v, { acct: k, period: true })}</td></tr>`).join("")}
+        <tr class="tot"><td>Total revenue</td><td class="num">${fmt(revT)}</td></tr>
+        <tr><td>Costs</td><td></td></tr>
+        ${cost.map(([k, v]) => `<tr><td class="ind">${ACCOUNTS[k].name}</td><td class="num">${fig(v, { acct: k, period: true })}</td></tr>`).join("")}
+        <tr class="tot"><td>Total costs</td><td class="num">${fmt(costT)}</td></tr>
+        <tr class="tot"><td>Net</td><td class="num ${revT - costT < 0 ? "fig bad" : "fig good"}">${fmt(revT - costT)}</td></tr>
+      </tbody></table></div></div>
+    <div class="panel"><div class="ph"><h2>Cash flow · ${periodLabel()}</h2><span class="meta">the other question: what actually moved</span></div>
+      <div class="tblwrap"><table class="list pl"><tbody>
+        <tr><td>Opening cash</td><td class="num">${fmt(openCash)}</td></tr>
+        <tr><td class="ind">In (payments, deposits)</td><td class="num">${fig(inRows, { acct: "cash", period: true }, "good")}</td></tr>
+        <tr><td class="ind">Out (vendors, bills, people)</td><td class="num">${fig(outRows, { acct: "cash", side: "cr", period: true }, "bad", "−" + fmt(outRows))}</td></tr>
+        <tr class="tot"><td>Closing cash</td><td class="num">${fmt(openCash + inRows - outRows)}</td></tr>
+        <tr><td class="meta" colspan="2" style="padding-top:12px">Net income ${fmt(revT - costT)} and cash change ${fmt(inRows - outRows, true)} differ by ${fmt(Math.abs((revT - costT) - (inRows - outRows)))} - that gap is receivables aging, payables unpaid, and deposits held. It is the number most shops cannot see.</td></tr>
+      </tbody></table></div></div>
+  </div>
+  <div class="panel margin" style="margin-top:16px"><div class="ph"><h2>Margin by client · ${periodLabel()}</h2><span class="meta">revenue invoiced less parts bought for their jobs</span></div>
+    <div class="tblwrap"><table class="list"><thead><tr><th>Client</th><th>Revenue</th><th class="r">Parts cost</th><th class="r">Margin</th></tr></thead><tbody>
+    ${Object.entries(byClient).sort((a, b) => b[1].rev - a[1].rev).map(([c, r]) => { const m = r.rev ? (r.rev - r.cost) / r.rev : 0; return `<tr><td style="width:30%">${S.clients[c].name}</td><td><div class="bar"><i style="width:${Math.min(100, r.rev / Math.max(1, ...Object.values(byClient).map(x => x.rev)) * 100)}%"></i></div><span class="meta">${fmt(r.rev)}</span></td><td class="num">${fmt(r.cost)}</td><td class="num ${m < .5 ? "fig warn" : ""}">${r.rev ? Math.round(m * 100) + "%" : "—"}</td></tr>`; }).join("") || `<tr><td colspan="4" class="empty">Nothing invoiced in this window.</td></tr>`}
+    </tbody></table></div></div>
+  <div class="two">
+    <div class="panel"><div class="ph"><h2>Close the books</h2><span class="meta">closed through <b>${dOf(S.closedThrough + "-01").toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })}</b></span></div>
+      <div class="pb"><p class="sm" style="margin:0 0 10px">A closed month takes no new postings. A mistake found later is corrected by a reversing entry dated today, so the month your accountant already has never changes under them.</p>
+      <div class="actions" style="margin:0;display:flex;gap:8px">${S.closedThrough < "2026-08" ? `<button class="btn primary" data-act="closePeriod" data-id="2026-08">Close August</button>` : `<button class="btn" data-act="reopen">Reopen August</button>`}</div></div></div>
+    <div class="panel"><div class="ph"><h2>Send to the accountant</h2><span class="meta">the journal, not a summary of it</span></div>
+      <div class="pb"><p class="sm" style="margin:0 0 10px">Ridgeline is not the tax return. It is the book the return is prepared from. Both exports are the ledger, row for row.</p>
+      <div class="actions" style="margin:0;display:flex;gap:8px"><button class="btn" data-open="export:csv">Ledger as CSV</button><button class="btn" data-open="export:qbo">Journal for QuickBooks</button></div></div></div>
+  </div>
+  <div class="panel" style="margin-top:16px"><div class="ph"><h2>Job costing</h2><span class="meta">billed against parts, expenses, and hours at ${fmt(LOADED_HOUR)}/h loaded</span></div>
+    <div class="tblwrap"><table class="list"><thead><tr><th>Job</th><th>Client</th><th class="r">Billed</th><th class="r">Cost</th><th class="r">Margin</th></tr></thead><tbody>
+    ${jobs.sort((a, b) => a.m - b.m).map(x => `<tr class="row"><td><button class="link-btn doc" data-open="invoice:${x.inv.id}">${x.j.id}</button><br><span class="meta">${x.inv.title}</span></td><td>${S.clients[x.j.client].name}</td><td class="num">${fmt(x.v)}</td><td class="num">${fmt(x.c)}</td><td class="num ${x.m < .5 ? "fig warn" : ""}">${Math.round(x.m * 100)}%</td></tr>`).join("")}
+    </tbody></table></div></div>`;
+}
+
+/* Drawer — a document, its lines, its money timeline, its next actions */
+function renderDrawer() {
+  const d = $("#drawer"), s = $("#scrim");
+  if (!ui.drawer) { d.classList.remove("on"); s.classList.remove("on"); return; }
+  const { type, id } = ui.drawer;
+  let html = "";
+  const timeline = (pred) => { const es = S.ledger.filter(pred); return es.length ? `<h3 style="margin-top:16px">Money timeline</h3><ul class="timeline">${es.map(e => `<li><span class="d">${shortDate(e.on)}</span><span>${esc(e.memo)}${e.reversed ? ' <span class="pill faint">reversed</span>' : ""}</span><span class="n">${fmt(e.lines.reduce((a, l) => a + (l.dr || 0), 0))}</span></li>`).join("")}</ul><button class="btn sm" style="margin-top:8px" data-ledger='${esc(JSON.stringify({ type, id }))}'>Open in ledger</button>` : `<p class="meta" style="margin-top:14px">Nothing has posted for this yet.</p>`; };
+  if (type === "invoice") {
+    const i = S.invoices[id]; const c = S.clients[i.client]; const b = balanceOf(id); const past = i.status !== "draft" && i.dueOn < TODAY && b > 0;
+    html = `<div class="dh"><div><div class="meta">${c.name} · invoice</div><h2>${id} ${pill(i.status)}</h2><div class="sm mut">${esc(i.title)}${i.job ? ` · from ${i.job}` : ""}</div></div><button class="x" data-close aria-label="Close">×</button></div>
+    <div class="db">
+      <table class="lines"><tbody>${i.lines.map(l => `<tr><td class="${l.covered ? "cov" : ""}">${esc(l.desc)}<br><span class="meta">${l.qty} ${l.unit} × ${fmt(l.unitCents)}${l.covered ? ` · covered by ${l.coveredBy}` : ""}</span></td><td class="num" style="text-align:right">${l.covered ? "$0.00" : fmt(Math.round(l.qty * l.unitCents))}</td></tr>`).join("")}
+      ${(i.status === "draft" ? taxOf(i) : i.taxCents) ? `<tr><td>Sales tax<br><span class="meta">${(c.taxBps / 100).toFixed(2)}% on parts, ${c.name.split(" ")[0]}</span></td><td class="num" style="text-align:right">${fmt(i.status === "draft" ? taxOf(i) : i.taxCents)}</td></tr>` : ""}
+      ${i.fees.map(f => `<tr><td class="${f.waived ? "cov" : ""}">Late fee<br><span class="meta">${f.basis}${f.waived ? " · waived" : ""}</span></td><td class="num" style="text-align:right">${fmt(f.cents)}</td></tr>`).join("")}
+      <tr><td><b>${i.status === "draft" ? "Would post" : "Total"}</b>${i.status !== "draft" ? `<br><span class="meta">sent ${shortDate(i.sentOn)} · due ${shortDate(i.dueOn)}</span>` : ""}</td><td class="num" style="text-align:right"><b>${fmt(invTotal(i))}</b></td></tr>
+      ${i.status !== "draft" ? `<tr><td><b>Balance</b></td><td class="num" style="text-align:right"><b class="${past ? "fig bad" : ""}">${fmt(b)}</b></td></tr>` : ""}</tbody></table>
+      ${i.dispute ? `<div class="form"><h3>Dispute open since ${shortDate(i.dispute.openedOn)}</h3><p class="sm" style="margin:6px 0">${esc(i.dispute.reason)} · ${fmt(i.dispute.cents)} paused; the rest keeps aging.</p><div class="actions" style="margin:0"><button class="btn sm primary" data-act="resolveDispute" data-id="${id}" data-how="credit">Credit the line</button><button class="btn sm" data-act="resolveDispute" data-id="${id}" data-how="keep">Line stands</button></div></div>` : ""}
+      ${i.promise ? `<p class="sm" style="margin:12px 0 0"><b>Promise:</b> ${esc(i.promise.by)} said "${esc(i.promise.note)}" for ${shortDate(i.promise.on)}${i.promise.on < TODAY && b > 0 ? ' <span class="pill bad">broken</span>' : ""}</p>` : ""}
+      ${i.dunning.length ? `<p class="sm mut" style="margin:6px 0 0">Rungs sent: ${i.dunning.join(" · ")}</p>` : ""}
+      <div class="actions">
+        ${i.status === "draft" ? `<button class="btn primary" data-act="sendInvoice" data-id="${id}">Send to ${c.name}</button>` : ""}
+        ${past && !i.dispute ? `<button class="btn coral" data-act="sendRung" data-id="${id}">Send next rung</button><button class="btn" data-act="postFee" data-id="${id}">Post late fee</button>` : ""}
+        ${i.fees.filter(f => !f.waived).map(f => `<button class="btn" data-act="waiveFee" data-id="${id}" data-fee="${f.id}">Waive fee</button>`).join("")}
+        ${i.status !== "draft" && b > 0 ? `<button class="btn" data-act="payLink" data-id="${id}" data-method="card" title="Simulates the client paying through the link">Client pays by link</button>` : ""}
+      </div>
+      ${i.status !== "draft" && b > 0 ? `<div class="form"><h3>Record a payment</h3><div class="formrow"><div><label>Amount</label><input id="pay-amt" value="${(b / 100).toFixed(2)}"></div><div><label>Method</label><select id="pay-m"><option>ACH</option><option>check</option><option>card</option></select></div></div><label>Reference</label><input id="pay-ref" placeholder="check number, Stripe id"><div class="actions"><button class="btn primary" data-act="recordPayment" data-id="${id}">Record payment</button></div><p class="meta" style="margin:4px 0 0">Posts Cash / Receivable. A mistake is corrected by reversing the row, never by editing it.</p></div>` : ""}
+      ${timeline(e => e.ref.type === "invoice" && e.ref.id === id)}
+    </div>`;
+  } else if (type === "job") {
+    const j = S.jobs[id]; const c = S.clients[j.client];
+    html = `<div class="dh"><div><div class="meta">${c.name} · work order</div><h2>${id} ${pill(j.status)}</h2><div class="sm mut">${esc(j.title || "")}</div></div><button class="x" data-close aria-label="Close">×</button></div>
+    <div class="db"><table class="lines"><tbody>${j.lines.map(l => `<tr><td>${esc(l.desc)}<br><span class="meta">${l.qty} ${l.unit} × ${fmt(l.unitCents)}${l.costCents ? ` · cost ${fmt(l.costCents)}` : ""}</span></td><td class="num" style="text-align:right">${fmt(Math.round(l.qty * l.unitCents))}</td></tr>`).join("")}
+      <tr><td><b>Would bill</b></td><td class="num" style="text-align:right"><b>${fmt(jobValue(j))}</b></td></tr>
+      ${j.depositCents ? `<tr><td>Deposit held<br><span class="meta">a liability until the invoice applies it</span></td><td class="num" style="text-align:right">−${fmt(j.depositCents)}</td></tr>` : ""}</tbody></table>
+      <div class="actions">${j.status === "closed" ? `<button class="btn primary" data-act="draftFromJob" data-id="${id}">Draft invoice</button>` : j.status === "in progress" ? `<button class="btn" data-act="closeJob" data-id="${id}">Close job</button>` : j.invoice ? `<button class="btn" data-open="invoice:${j.invoice}">Open ${j.invoice}</button>` : ""}</div>
+      ${timeline(e => (e.ref.type === "job" && e.ref.id === id) || e.ref.job === id)}</div>`;
+  } else if (type === "quote") {
+    const q = S.quotes[id]; const c = S.clients[q.client];
+    html = `<div class="dh"><div><div class="meta">${c.name} · quote</div><h2>${id} ${pill(q.status)}</h2><div class="sm mut">${esc(q.title)}</div></div><button class="x" data-close aria-label="Close">×</button></div>
+    <div class="db"><p><b class="money" style="font-size:var(--fs-metric)">${fmt(q.cents)}</b></p><p class="sm mut">Sent ${shortDate(q.sentOn)}${q.expiresOn ? `, expires ${shortDate(q.expiresOn)}` : ""}. ${q.depositPct ? `${q.depositPct}% deposit (${fmt(Math.round(q.cents * q.depositPct / 100))}) on approval, held as a liability, applied on the first invoice.` : "No deposit."}</p>
+      <div class="actions">${q.status === "sent" ? `<button class="btn primary" data-act="approveQuote" data-id="${id}">Mark approved</button>` : q.job ? `<button class="btn" data-open="job:${q.job}">Open ${q.job}</button>` : ""}</div>
+      ${timeline(e => e.ref.job === q.job && q.job)}</div>`;
+  } else if (type === "po") {
+    const p = S.pos[id];
+    html = `<div class="dh"><div><div class="meta">${p.vendor} · purchase order</div><h2>${id} ${pill(p.status)}</h2><div class="sm mut">${esc(p.title)}</div></div><button class="x" data-close aria-label="Close">×</button></div>
+    <div class="db"><p><b class="money" style="font-size:var(--fs-metric)">${fmt(p.cents)}</b></p><p class="sm mut">${p.status === "sent" ? `On order, expected ${shortDate(p.expectedOn)}. A commitment, not yet a cost - nothing posts until it arrives.` : p.status === "received" ? `Received ${shortDate(p.receivedOn)}. Posted as Parts cost against Payable; the vendor is owed.` : `Paid ${shortDate(p.paidOn)}.`}${p.job ? ` Bought for ${p.job}, so it lands in that job's cost.` : " Stock."}</p>
+      <div class="actions">${p.status === "sent" ? `<button class="btn primary" data-act="receivePo" data-id="${id}">Mark received</button>` : p.status === "received" ? `<button class="btn primary" data-act="payPo" data-id="${id}">Pay ${p.vendor}</button>` : ""}</div>
+      ${timeline(e => e.ref.type === "po" && e.ref.id === id)}</div>`;
+  } else if (type === "client") {
+    const c = S.clients[id]; const st = standing(id); const agr = Object.values(S.agreements).find(a => a.client === id);
+    const open = Object.values(S.invoices).filter(i => i.client === id && (i.status === "sent" || i.status === "partial") && balanceOf(i.id) > 0);
+    const hist = S.ledger.filter(e => e.ref.client === id && live(e) && !e.ref.stripe && (e.lines.some(l => l.acct === "ar"))).slice().reverse().slice(0, 8);
+    const portal = ui.portal;
+    html = `<div class="dh"><div><div class="meta">client · ${c.contact}</div><h2>${c.name}</h2><div class="sm"><span class="stand ${st.tone}"><i></i>${st.label}</span> · Net ${c.terms}</div></div><button class="x" data-close aria-label="Close">×</button></div>
+    <div class="db">
+      <div class="seg" role="group"><button aria-pressed="${!portal}" data-portal="0">Our view</button><button aria-pressed="${!!portal}" data-portal="1">What they see</button></div>
+      ${portal ? `<div class="portal"><div class="ph2"><b>Sierra Spectra</b><span class="meta">Statement for ${c.name}</span></div>
+        <table><tbody>${open.map(i => `<tr><td>${i.id}<br><span class="meta">${esc(i.title)} · due ${shortDate(i.dueOn)}${i.dueOn < TODAY ? ' · <span class="pill bad">past due</span>' : ""}${i.dispute ? ' · <span class="pill warn">question open</span>' : ""}</td><td class="num" style="text-align:right">${fmt(balanceOf(i.id))}<br><button class="btn sm primary" data-act="payLink" data-id="${i.id}" data-method="card">Pay by card</button> <button class="btn sm" data-act="payLink" data-id="${i.id}" data-method="ACH">Pay by ACH</button></td></tr>`).join("") || `<tr><td class="mut">Nothing open. Thank you.</td></tr>`}
+        <tr><td><b>Balance due</b></td><td class="num" style="text-align:right"><b>${fmt(st.owed)}</b></td></tr></tbody></table>
+        ${agr ? `<p class="sm" style="margin:10px 0 0"><b>${agr.id}</b> · parts allowance: ${fmt(agr.allowanceCents - agr.allowanceUsed)} remaining of ${fmt(agr.allowanceCents)} this year. Next installment ${shortDate(agr.nextOn)}.</p>` : ""}
+        <p class="meta" style="margin:10px 0 0">Questions about a line go to the shop, not to a form: each invoice has "Ask about this" beside every line. Paying is Stripe Connect; Sierra Spectra never holds the card.</p></div>`
+      : `<table class="lines" style="margin-top:12px"><tbody>${open.map(i => `<tr><td><button class="link-btn doc" data-open="invoice:${i.id}">${i.id}</button><br><span class="meta">${esc(i.title)} · due ${shortDate(i.dueOn)}</span></td><td class="num" style="text-align:right"><span class="${i.dueOn < TODAY ? "fig bad" : ""}">${fmt(balanceOf(i.id))}</span></td></tr>`).join("") || '<tr><td class="mut">Nothing open.</td></tr>'}<tr><td><b>Owes</b></td><td class="num" style="text-align:right"><b>${fmt(st.owed)}</b></td></tr></tbody></table>
+        ${agr ? `<div class="form"><h3>${agr.id} · ${esc(agr.title)}</h3><p class="sm" style="margin:6px 0">${fmt(agr.annualCents)}/yr in ${fmt(agr.installmentCents)} quarterly installments · next ${shortDate(agr.nextOn)}</p><div class="bar"><i style="width:${agr.allowanceUsed / agr.allowanceCents * 100}%"></i></div><p class="meta" style="margin:4px 0 0">Parts allowance ${fmt(agr.allowanceUsed)} used of ${fmt(agr.allowanceCents)} - drawn down by parts on their invoices marked covered. A tracked promise, not held money.</p><div class="actions" style="margin:10px 0 0"><button class="btn sm" data-act="invoiceInstallment" data-id="${agr.id}">Draft next installment</button></div></div>` : ""}
+        <div class="form"><h3>Credit hold</h3><p class="sm" style="margin:6px 0">${st.hold ? `On hold: ${st.worst} days past due. Scheduling new work is blocked until this is paid or overridden.` : st.override ? `Overridden until ${shortDate(st.override.until)} by ${st.override.by}: "${esc(st.override.reason)}"` : st.worst > 0 ? `${st.worst} days past due; hold begins at ${holdDays}.` : "In good standing."}</p>
+          ${st.hold ? `<label>Reason for working anyway</label><input id="ov-reason" placeholder="e.g. PO for the balance received by email"><div class="actions" style="margin:8px 0 0"><button class="btn primary" data-act="overrideHold" data-id="${id}">Override for 14 days</button></div>` : st.override ? `<div class="actions" style="margin:8px 0 0"><button class="btn" data-act="liftOverride" data-id="${id}">Lift override</button></div>` : ""}</div>
+        <h3 style="margin-top:16px">Statement history</h3><ul class="timeline">${hist.map(e => `<li><span class="d">${shortDate(e.on)}</span><span>${esc(e.memo)}</span><span class="n">${fmt(e.lines.reduce((a, l) => a + (l.dr || 0), 0))}</span></li>`).join("")}</ul>
+        <button class="btn sm" style="margin-top:8px" data-ledger='${esc(JSON.stringify({ client: id }))}'>Open in ledger</button>`}
+    </div>`;
+  } else if (type === "export") {
+    const csv = id === "csv"
+      ? "entry,date,memo,document,account,debit,credit\n" + S.ledger.flatMap(e => e.lines.map(l => `${e.id},${e.on},"${e.memo.replace(/"/g, '""')}",${e.ref.id || ""},${ACCOUNTS[l.acct].name},${l.dr ? (l.dr / 100).toFixed(2) : ""},${l.cr ? (l.cr / 100).toFixed(2) : ""}`)).join("\n")
+      : "!TRNS\tTRNSTYPE\tDATE\tACCNT\tAMOUNT\tMEMO\n!SPL\tTRNSTYPE\tDATE\tACCNT\tAMOUNT\tMEMO\n!ENDTRNS\n" + S.ledger.map(e => e.lines.map((l, i) => `${i ? "SPL" : "TRNS"}\tGENERAL JOURNAL\t${e.on.slice(5, 7)}/${e.on.slice(8)}/${e.on.slice(0, 4)}\t${ACCOUNTS[l.acct].name}\t${((l.dr || 0) - (l.cr || 0)) / 100}\t${e.memo}`).join("\n") + "\nENDTRNS").join("\n");
+    html = `<div class="dh"><div><div class="meta">export</div><h2>${id === "csv" ? "Ledger as CSV" : "General journal (IIF) for QuickBooks"}</h2><div class="sm mut">${S.ledger.length} entries · ${S.ledger.reduce((a, e) => a + e.lines.length, 0)} postings</div></div><button class="x" data-close aria-label="Close">×</button></div>
+    <div class="db"><pre class="csv">${esc(csv)}</pre><p class="meta">In the product this downloads. Every line here can be traced back to a row on the Ledger page, which is the point of sending the journal rather than a report.</p></div>`;
+  } else if (type === "report") {
+    const r = S.reports[id];
+    html = `<div class="dh"><div><div class="meta">${r.person} · expense report</div><h2>${id} ${pill(r.status === "paid" ? "paid-r" : r.status)}</h2><div class="sm mut">${esc(r.title)}</div></div><button class="x" data-close aria-label="Close">×</button></div>
+    <div class="db"><p><b class="money" style="font-size:var(--fs-metric)">${fmt(r.cents)}</b></p><p class="sm mut">${r.job ? `Against ${r.job}, so it counts in that job's cost. ` : "Overhead - no job caused it. "}${r.status === "submitted" ? "Waiting on approval; not in the ledger until paid." : r.status === "approved" ? "Approved. Pay it and it posts." : `Paid ${shortDate(r.paidOn)}.`}</p>
+      <div class="actions">${r.status === "submitted" ? `<button class="btn primary" data-act="approveReport" data-id="${id}">Approve</button>` : r.status === "approved" ? `<button class="btn primary" data-act="payReport" data-id="${id}">Pay ${r.person}</button>` : ""}</div>
+      ${timeline(e => e.ref.type === "report" && e.ref.id === id)}</div>`;
+  }
+  d.innerHTML = html; d.classList.add("on"); s.classList.add("on");
+}
+
+/* ── wiring ─────────────────────────────────────────────────────────── */
+let toastT;
+function toast(html) { const t = $("#toast"); t.innerHTML = html; t.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("on"), 3200); }
+
+document.addEventListener("click", (ev) => {
+  const t = ev.target.closest("button, [data-open]"); if (!t) return;
+  if (t.dataset.room) { ui.room = t.dataset.room; ui.openEntry = null; ui.drawer = null; if (ui.room !== "ledger") ui.ledgerFilter = null; render(); window.scrollTo({ top: 0 }); return; }
+  if (t.dataset.p) { ui.period = t.dataset.p; render(); return; }
+  if (t.id === "reset") { seed(); ui.stage = null; ui.ledgerFilter = null; ui.drawer = null; render(); toast("Seed data restored"); return; }
+  if (t.dataset.stage) { ui.stage = ui.stage === t.dataset.stage ? null : t.dataset.stage; render(); return; }
+  if (t.dataset.filter) { ui.ledgerFilter = JSON.parse(t.dataset.filter); ui.room = "ledger"; ui.openEntry = null; ui.drawer = null; render(); window.scrollTo({ top: 0 }); return; }
+  if (t.dataset.ledger) { ui.ledgerFilter = JSON.parse(t.dataset.ledger); ui.room = "ledger"; ui.openEntry = null; ui.drawer = null; render(); window.scrollTo({ top: 0 }); return; }
+  if (t.dataset.open) { const [type, id] = t.dataset.open.split(":"); ui.drawer = { type, id }; ui.portal = false; renderDrawer(); return; }
+  if (t.dataset.portal !== undefined) { ui.portal = t.dataset.portal === "1"; renderDrawer(); return; }
+  if (t.hasAttribute("data-close") || t.id === "scrim") { ui.drawer = null; renderDrawer(); return; }
+  if (t.id === "lf-clear") { ui.ledgerFilter = null; render(); return; }
+  const row = ev.target.closest("tr.entry"); if (row) { const id = Number(row.dataset.entry); ui.openEntry = ui.openEntry === id ? null : id; render(); return; }
+  if (t.dataset.act) {
+    const a = t.dataset.act, id = t.dataset.id;
+    if (a === "recordPayment") { const cents = Math.round(parseFloat($("#pay-amt").value) * 100); if (!(cents > 0)) { toast("Enter an amount"); return; } A.recordPayment(id, cents, $("#pay-m").value, $("#pay-ref").value.trim()); return; }
+    if (a === "waiveFee") { A.waiveFee(id, t.dataset.fee); return; }
+    if (a === "resolveDispute") { A.resolveDispute(id, t.dataset.how); return; }
+    if (a === "reverse") { A.reverse(Number(id)); return; }
+    if (a === "payLink") { A.payLink(id, t.dataset.method); return; }
+    if (a === "matchBank") { A.matchBank(id, t.dataset.entry); return; }
+    if (a === "recordFromBank") { A.recordFromBank(id, t.dataset.inv); return; }
+    if (a === "postFromBank") { A.postFromBank(id, t.dataset.acct, t.dataset.memo); return; }
+    if (a === "overrideHold") { const r = $("#ov-reason").value.trim(); if (!r) { toast("A reason is required - it is kept with the override"); return; } A.overrideHold(id, r); return; }
+    A[a](id); return;
+  }
+});
+document.addEventListener("click", (ev) => { if (ev.target.id === "scrim") { ui.drawer = null; renderDrawer(); } });
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && ui.drawer) { ui.drawer = null; renderDrawer(); } });
+document.addEventListener("change", (ev) => {
+  const F = ui.ledgerFilter || {};
+  if (ev.target.id === "lf-acct") { ui.ledgerFilter = { ...F, acct: ev.target.value || undefined, status: undefined, side: undefined }; render(); }
+  if (ev.target.id === "lf-type") { ui.ledgerFilter = { ...F, type: ev.target.value || undefined, id: undefined }; render(); }
+  if (ev.target.dataset.postsel && ev.target.value) { const t = S.bank.find(x => x.id === Number(ev.target.dataset.postsel)); A.postFromBank(t.id, ev.target.value, t.desc.replace(/\s\d.*$/, "").toLowerCase().replace(/\b\w/g, ch => ch.toUpperCase())); return; }
+  if (ev.target.id === "lf-period") { ui.ledgerFilter = { ...F, period: ev.target.checked || undefined }; render(); }
+});
+document.addEventListener("input", (ev) => {
+  if (ev.target.id === "lf-q") { const F = ui.ledgerFilter || {}; ui.ledgerFilter = { ...F, q: ev.target.value || undefined }; const pos = ev.target.selectionStart; render(); const el = $("#lf-q"); el.focus(); el.setSelectionRange(pos, pos); }
+});
+
+seed(); render();
+</script>
+</body>
+</html>

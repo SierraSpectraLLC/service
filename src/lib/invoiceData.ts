@@ -40,7 +40,6 @@ import { isoDay } from "@/lib/partGroups";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { daysToExpiry, netCents, stale } from "@/lib/quotes";
 import type { BillingPolicy } from "@/lib/billingPolicy";
-import type { MoneyInput } from "@/lib/digestMoney";
 import { shopToday } from "@/lib/shopday";
 
 /** Cached per request: three pages on one render all want the settings row. */
@@ -434,76 +433,6 @@ export async function collectionsBoard(today: string, tenantOrgId: number | null
  * no per-org variant of this, because a client sees their own money through
  * their own portal token and nowhere else.
  */
-export async function moneyDigest(today: string, tenantOrgId: number | null): Promise<MoneyInput> {
-  const [board, jobs, orgRows] = await Promise.all([
-    collectionsBoard(today, tenantOrgId),
-    unbilledJobs(tenantOrgId, 12),
-    db.select({ id: orgs.id, name: orgs.name }).from(orgs),
-  ]);
-  const name = (id: number) => orgRows.find((o) => o.id === id)?.name ?? "";
-  const days = (from: string) => Math.max(0, Math.round(
-    (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000,
-  ));
-
-  const brokenPromises = [];
-  const openDisputes = [];
-  const overdue = [];
-  for (const { invoice: f, view } of board) {
-    const orgName = name(f.row.orgId);
-    for (const p of f.promises) {
-      if (p.keptOn || !p.promisedOn || p.promisedOn >= today) continue;
-      brokenPromises.push({
-        number: f.row.number, orgName, byName: p.byName,
-        promisedOn: p.promisedOn, daysPast: days(p.promisedOn), payableCents: view.payableCents,
-      });
-    }
-    for (const d of f.disputes) {
-      if (d.resolvedOn) continue;
-      openDisputes.push({
-        number: f.row.number, orgName, reason: d.reason,
-        daysOpen: days(d.openedOn), disputedCents: view.disputedCents, restCents: view.payableCents,
-      });
-    }
-    if (view.daysLate > 0) {
-      overdue.push({
-        number: f.row.number, orgName,
-        daysLate: view.daysLate, balanceCents: view.balanceCents,
-      });
-    }
-  }
-
-  const holdOrgIds = [...new Set(board.map((b) => b.invoice.row.orgId))];
-  const standings = await creditForMany(holdOrgIds, today);
-  const onHold = [...standings.entries()]
-    .filter(([, s]) => s.onHold)
-    .map(([id, s]) => ({
-      orgName: name(id), balanceCents: s.balanceCents, oldestDaysLate: s.oldestDaysLate,
-    }));
-
-  // Quotes inside a week of lapsing. A quote nobody answered is revenue that
-  // simply evaporates, and it evaporates quietly - there is no aging report it
-  // ever appears on.
-  const quoteRows = await allQuotes(tenantOrgId);
-  const links = await db.select().from(shareLinks).where(forTenant(shareLinks.tenantOrgId, tenantOrgId));
-  const staleQuotes = stale(quoteRows.map((q) => q.row), today).map((row) => {
-    const f = quoteRows.find((x) => x.row.id === row.id)!;
-    return {
-      number: row.number, orgName: name(row.orgId),
-      daysLeft: daysToExpiry(row.expiresOn, today) ?? 0,
-      valueCents: quoteTotal(f),
-      views: links.find((l) => l.quoteId === row.id)?.openCount ?? 0,
-    };
-  });
-
-  return {
-    staleQuotes,
-    unbilled: jobs.map((j) => ({
-      number: j.number, orgName: j.orgName, daysClosed: j.daysClosed, valueCents: j.valueCents,
-    })).filter((j) => j.valueCents > 0),
-    brokenPromises, openDisputes, overdue, onHold,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Quotes. Same split as invoices: pure rules in lib/quotes, fetching here, and
 // one org-scoped door the share viewer uses.

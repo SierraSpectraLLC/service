@@ -140,7 +140,7 @@ export default async function PurchasingPage({ searchParams }: {
 
   return (
     <FinanceShell
-      rail={fin && { active: "purchasing", amounts: fin.amounts, seesBooks: fin.seesBooks, seesPayroll: fin.seesPayroll }}
+      rail={fin}
       period={fin?.period ?? "month"}
       path="/money/purchasing"
       title="Purchasing"

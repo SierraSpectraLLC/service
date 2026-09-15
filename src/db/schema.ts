@@ -3025,6 +3025,14 @@ export const purchaseOrders = pgTable("purchase_orders", {
   sentAt: timestamp("sent_at"),
   closedAt: timestamp("closed_at"),
   cancelReason: text("cancel_reason").notNull().default(""),
+  /**
+   * When the vendor was paid, and by whom. Blank until payPurchaseOrder: a
+   * received order is a payable until then, which is the figure the Payables
+   * queue exists to show. The ledger carries the money; this is the marker.
+   */
+  paidOn: text("paid_on").notNull().default(""),
+  paidBy: text("paid_by").notNull().default(""),
+  paidRef: text("paid_ref").notNull().default(""),
 }, (t) => [unique("po_number_unique").on(t.number), index("po_status_idx").on(t.status)]);
 
 export const poLines = pgTable("po_lines", {
@@ -3719,6 +3727,8 @@ export const invoiceFees = pgTable("invoice_fees", {
   postedBy: text("posted_by").notNull().default(""),
   waived: boolean("waived").notNull().default(false),
   waivedBy: text("waived_by").notNull().default(""),
+  /** The shop day it was waived - the day the ledger's waiver entry carries. */
+  waivedOn: text("waived_on").notNull().default(""),
   waivedReason: text("waived_reason").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("invoice_fees_invoice_idx").on(t.invoiceId)]);
@@ -4285,6 +4295,13 @@ export const appSettings = pgTable("app_settings", {
    * override the way billing_policy has one. See lib/expensePolicy.
    */
   expensePolicy: jsonb("expense_policy"),
+  /**
+   * The last month whose books are closed, "YYYY-MM"; blank = nothing closed.
+   * lib/ledger/post refuses an entry dated inside it, and a reversal of a
+   * closed-month entry is dated today. One value for the instance, set by an
+   * owner from Reports > Close the books.
+   */
+  booksClosedThrough: text("books_closed_through").notNull().default(""),
 });
 
 /**
@@ -4811,3 +4828,156 @@ export const safetyHolds = pgTable("safety_holds", {
   clearedBy: text("cleared_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("safety_holds_device_idx").on(t.deviceId)]);
+
+// ---------------------------------------------------------------------------
+// The ledger. Every dollar on every money screen is SUM() over these rows.
+// Nothing stores a balance. Actions post entries; pages read sums. See
+// lib/ledger for the four invariants and docs/design/LEDGER-VERIFY.md for
+// how it was staged in.
+//
+// The audit log records THAT somebody did something; this records WHAT IT
+// DID TO THE MONEY. Different tables, and they stay different.
+// ---------------------------------------------------------------------------
+
+/**
+ * One journal entry: a dated, balanced set of lines.
+ *
+ * Append-only. There is deliberately no code path that updates or deletes a
+ * row here - a correction is a reversing entry carrying `reverses_id`, the
+ * same discipline audit_log follows. `ref_type`/`ref_id` tie the entry to the
+ * document that caused it (see lib/ledger/accounts.REF_TYPES), and the two
+ * optional pointers let the client and job screens find their own money
+ * without parsing memos.
+ */
+export const ledgerEntries = pgTable("ledger_entries", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** The shop day the money moved, YYYY-MM-DD. */
+  postedOn: text("posted_on").notNull().default(""),
+  memo: text("memo").notNull().default(""),
+  /** opening | invoice | job | po | bill | report | payroll | bank | payout | tax | referral */
+  refType: text("ref_type").notNull().default(""),
+  refId: text("ref_id").notNull().default(""),
+  /** The client whose money this is about, when it is about one. */
+  refOrgId: integer("ref_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  refWorkOrderId: integer("ref_work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
+  /** The entry this one mirrors. Set on the mirror, never on the original. */
+  reversesId: integer("reverses_id").references((): AnyPgColumn => ledgerEntries.id, { onDelete: "set null" }),
+  /**
+   * A second key for idempotence: `ref_type:ref_id:kind`, unique per tenant.
+   * The backfill and the dual-writing actions both use it so a re-run, a
+   * retry, or the two of them meeting cannot post the same money twice.
+   * Blank on entries that carry no natural key (a bank line posted by hand).
+   */
+  postingKey: text("posting_key").notNull().default(""),
+  postedBy: text("posted_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("ledger_entries_tenant_on_idx").on(t.tenantOrgId, t.postedOn),
+  index("ledger_entries_ref_idx").on(t.refType, t.refId),
+  index("ledger_entries_org_idx").on(t.refOrgId),
+  index("ledger_entries_wo_idx").on(t.refWorkOrderId),
+]);
+
+/**
+ * One side of an entry. Exactly one of debit/credit is above zero - the CHECK
+ * lives in drizzle/schema-sync.sql, where every constraint does. `account` is a
+ * key from lib/ledger/accounts, never free text: if a posting does not fit the
+ * chart, the code is wrong, not the chart.
+ */
+export const ledgerLines = pgTable("ledger_lines", {
+  id: serial("id").primaryKey(),
+  entryId: integer("entry_id").notNull().references((): AnyPgColumn => ledgerEntries.id, { onDelete: "cascade" }),
+  account: text("account").notNull(),
+  debitCents: integer("debit_cents").notNull().default(0),
+  creditCents: integer("credit_cents").notNull().default(0),
+}, (t) => [
+  index("ledger_lines_entry_idx").on(t.entryId),
+  index("ledger_lines_account_idx").on(t.account),
+]);
+
+/**
+ * What the bank says happened, independent of the books. Pulled by the feed
+ * (lib/bank/sync), never typed. `matched_entry_id` is the reconciliation: a
+ * bank line with an entry and an entry with a bank line are the two halves
+ * of "reconciled", and an entry that has been matched cannot be reversed on
+ * our side alone - the bank saw it.
+ */
+export const bankTransactions = pgTable("bank_transactions", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** plaid | teller | stripe | manual */
+  provider: text("provider").notNull().default(""),
+  providerTxnId: text("provider_txn_id").notNull().default(""),
+  /** The day the bank posted it, YYYY-MM-DD. */
+  on: text("on").notNull().default(""),
+  description: text("description").notNull().default(""),
+  /** Signed: money in is positive, money out negative. */
+  amountCents: integer("amount_cents").notNull().default(0),
+  matchedEntryId: integer("matched_entry_id").references((): AnyPgColumn => ledgerEntries.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("bank_transactions_tenant_on_idx").on(t.tenantOrgId, t.on),
+  unique("bank_transactions_provider_txn_unique").on(t.provider, t.providerTxnId),
+]);
+
+/**
+ * A month of payroll, run. The register (payroll) says what a month costs;
+ * this says the month was actually paid, once, on a day - so the ledger can
+ * carry the cost and the cash page can stop projecting it. One per month per
+ * workspace by the unique index.
+ */
+export const payrollRuns = pgTable("payroll_runs", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** YYYY-MM */
+  ym: text("ym").notNull(),
+  grossCents: integer("gross_cents").notNull().default(0),
+  postedOn: text("posted_on").notNull().default(""),
+  postedBy: text("posted_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [unique("payroll_runs_month_unique").on(t.tenantOrgId, t.ym)]);
+
+/**
+ * One figure of one parity run: the legacy arithmetic beside the ledger's,
+ * per workspace, per run. Written by the hourly cron and by "Run now" on the
+ * Ledger parity view; read by nothing else. The dual-write period's record,
+ * and the evidence gate 4 is decided on. See lib/ledger/parity.
+ */
+export const ledgerParity = pgTable("ledger_parity", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  runAt: timestamp("run_at").notNull().defaultNow(),
+  figure: text("figure").notNull(),
+  label: text("label").notNull().default(""),
+  legacyCents: integer("legacy_cents").notNull().default(0),
+  ledgerCents: integer("ledger_cents").notNull().default(0),
+  note: text("note").notNull().default(""),
+}, (t) => [index("ledger_parity_tenant_run_idx").on(t.tenantOrgId, t.runAt)]);
+
+/**
+ * A workspace's connection to its bank feed. One per workspace; the access
+ * token is the provider's, sealed like every other secret this app keeps
+ * (see lib/secretBox), and the cursor is where the sync last got to. The
+ * opening balance is what the account held the day before the feed's first
+ * line, so "bank says" can be a statement balance rather than a sum of
+ * movements since some Tuesday.
+ */
+export const bankConnections = pgTable("bank_connections", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** plaid | teller | manual */
+  provider: text("provider").notNull().default("plaid"),
+  /** The provider's own id for the connection (Plaid's item_id). */
+  providerItemId: text("provider_item_id").notNull().default(""),
+  accessToken: text("access_token").notNull().default(""),
+  cursor: text("cursor").notNull().default(""),
+  institution: text("institution").notNull().default(""),
+  /** The balance before the feed's first line, and its day. */
+  openingCents: integer("opening_cents").notNull().default(0),
+  openingOn: text("opening_on").notNull().default(""),
+  lastSyncAt: timestamp("last_sync_at"),
+  lastError: text("last_error").notNull().default(""),
+  connectedBy: text("connected_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [unique("bank_connections_tenant_unique").on(t.tenantOrgId)]);

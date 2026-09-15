@@ -2565,3 +2565,165 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 }
 .recv-row .rcut { position: absolute; top: 4px; right: 4px; }
 .recv-row-err { font-size: var(--fs-small); color: var(--t-bad-fg); margin-top: 4px; }
+
+/* ── The ledger and the seven rooms ─────────────────────────────────────────
+   Every dollar on every money screen is a sum over journal rows, and these
+   are the shapes that say so: a figure is a button into the ledger, a
+   posting is a pair of columns, an entry expands to its lines. Tokens and
+   type scale only - the prototype's CSS was a sketch, this is the house. */
+
+/* A money figure that opens the rows behind it. Underline only on hover, so
+   a page reads as figures rather than as a wall of links. */
+.fig { color: inherit; text-decoration: none; border-bottom: 1px dotted transparent; cursor: pointer; }
+.fig:hover { border-bottom-color: currentColor; text-decoration: none; }
+.fig.bad { color: var(--t-bad-fg); } .fig.warn { color: var(--t-warn-fg); } .fig.good { color: var(--t-good-fg); }
+.fig.big { font-size: var(--fs-figure); letter-spacing: -0.03em; line-height: 1; border-bottom-width: 2px; color: var(--navy); }
+.fig.big.neg { color: var(--t-bad-fg); }
+
+/* The cash line: the one big number, and beside it the runway. */
+.cashline { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: end; padding: 20px 24px; }
+.cashline .since { color: var(--mut); margin-top: 6px; font-size: var(--fs-body); }
+.cashline .since b { color: var(--ink); }
+.cashline .runway { text-align: right; }
+.cashline .runway .n { font-size: var(--fs-metric); font-weight: 700; line-height: 1.1; font-family: var(--mono); }
+@media (max-width: 640px) { .cashline { grid-template-columns: 1fr; } .cashline .runway { text-align: left; } }
+
+/* Owed, owes, and the difference: three cells that perform the subtraction. */
+.position { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+.position > div { padding: 14px 24px; min-width: 0; }
+.position > div + div { border-left: 1px solid var(--line); }
+.position .k { font-size: var(--fs-small); color: var(--mut); }
+.position .v { font-size: var(--fs-hero); font-weight: 700; margin-top: 2px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.position .d { font-size: var(--fs-small); color: var(--mut); margin-top: 2px; }
+.position.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 900px) {
+  .position.four { grid-template-columns: 1fr 1fr; }
+  .position.four > div:nth-child(3) { border-left: 0; }
+  .position.four > div:nth-child(n+3) { border-top: 1px solid var(--line); }
+}
+@media (max-width: 640px) {
+  .position, .position.four { grid-template-columns: 1fr; }
+  .position > div + div { border-left: 0; border-top: 1px solid var(--line); }
+}
+
+/* A panel whose head, body and note follow the ledger's own rhythm. */
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); margin-bottom: 16px; }
+.panel .ph { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.panel .ph h2 { margin: 0; font-size: var(--fs-title); font-weight: 700; }
+.panel .pb { padding: 12px 16px; }
+.panel .note { font-size: var(--fs-small); color: var(--mut); padding: 10px 16px; border-top: 1px solid var(--line); }
+.panel.ghost { border-style: dashed; background: transparent; box-shadow: none; }
+.panel.ghost .pb { color: var(--mut); font-size: var(--fs-small); }
+.panel.ghost .pb b { color: var(--ink); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.two .panel { margin-bottom: 0; }
+@media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+
+/* The money table: doc numbers mono, amounts right and tabular. */
+.tblwrap { overflow-x: auto; }
+table.list { width: 100%; border-collapse: collapse; }
+table.list th { text-align: left; font-size: var(--fs-meta); color: var(--mut); font-weight: 600; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+table.list td { padding: 10px 16px; border-bottom: 1px solid var(--line); vertical-align: middle; font-size: var(--fs-body); }
+table.list tr:last-child td { border-bottom: 0; }
+table.list tr.row:hover td { background: #F4F7FB; }
+table.list .r { text-align: right; }
+table.list .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.list .doc { font-family: var(--mono); font-size: var(--fs-small); font-weight: 600; }
+table.list .title { font-weight: 600; }
+table.list .title .meta, table.list .meta { font-weight: 400; display: block; font-size: var(--fs-meta); color: var(--mut); }
+table.list .empty { padding: 28px 16px; text-align: center; color: var(--mut); }
+table.list .acts { text-align: right; white-space: nowrap; }
+table.list .acts .btn + .btn { margin-left: 6px; }
+
+/* The six stages: left to right is the order money moves. */
+.stages { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.stages a { display: block; color: inherit; text-decoration: none; border-right: 1px solid var(--line); padding: 12px 14px; position: relative; min-width: 0; }
+.stages a:last-child { border-right: 0; }
+.stages a:hover { background: #F4F7FB; }
+.stages a[aria-current="true"] { background: #E9EEF6; }
+.stages a[aria-current="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; background: var(--navy); }
+.stages .k { font-size: var(--fs-small); color: var(--mut); }
+.stages .v { font-size: var(--fs-hero); font-weight: 700; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.stages .c { font-size: var(--fs-meta); color: var(--mut); }
+.stages .v.bad { color: var(--t-bad-fg); } .stages .v.warn { color: var(--t-warn-fg); } .stages .v.good { color: var(--t-good-fg); }
+@media (max-width: 900px) { .stages { grid-template-columns: repeat(3, 1fr); } .stages a { border-bottom: 1px solid var(--line); } }
+@media (max-width: 480px) { .stages { grid-template-columns: repeat(2, 1fr); } }
+
+/* The decision list: why, how much, the button that posts. */
+.decide ul { list-style: none; margin: 0; padding: 0; }
+.decide li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 14px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.decide li:last-child { border-bottom: 0; }
+.decide .why { font-weight: 600; min-width: 0; }
+.decide .why a { color: inherit; text-decoration: none; }
+.decide .why a:hover { text-decoration: underline; }
+.decide .why .meta { display: block; font-weight: 400; font-size: var(--fs-meta); color: var(--mut); }
+.decide .amt { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+.decide .amt.bad { color: var(--t-bad-fg); } .decide .amt.warn { color: var(--t-warn-fg); }
+@media (max-width: 640px) { .decide li { grid-template-columns: minmax(0, 1fr) auto; } .decide li > :last-child { grid-column: 1 / -1; } }
+
+/* The journal: an entry, and its postings when opened. */
+.ledger-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ledger-filters { flex: 1 1 auto; }
+.ledger-filters select, .ledger-filters input[type="text"], .ledger-filters input[type="date"] {
+  border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: var(--radius);
+  padding: 5px 8px; font: inherit; width: auto; flex: 0 1 auto; max-width: 100%;
+}
+.ledger-filters label.check { display: inline-flex; gap: 6px; align-items: center; font-size: var(--fs-small); color: var(--mut); }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--t-accent-bg); color: var(--t-accent-fg); font-size: var(--fs-meta); font-weight: 700; }
+.chip a { color: inherit; text-decoration: none; font-weight: 800; }
+.balanced { font-family: var(--mono); font-size: var(--fs-meta); color: var(--mut); }
+.balanced.ok { color: var(--t-good-fg); }
+details.entry { border-bottom: 1px solid var(--line); }
+details.entry:last-child { border-bottom: 0; }
+details.entry > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 44px 76px minmax(0, 1fr) 110px 110px; gap: 10px; align-items: baseline; padding: 9px 16px; font-size: var(--fs-body); }
+details.entry > summary::-webkit-details-marker { display: none; }
+details.entry > summary:hover { background: #F4F7FB; }
+details.entry[open] > summary { background: #E9EEF6; }
+details.entry > summary .memo { min-width: 0; }
+details.entry > summary .memo .meta { display: block; font-size: var(--fs-meta); color: var(--mut); }
+details.entry.reversed > summary .memo { text-decoration: line-through; color: var(--mut); }
+details.entry .lines { background: var(--t-faint-bg); padding: 8px 16px 12px 130px; }
+.postings { display: grid; grid-template-columns: max-content max-content max-content; gap: 2px 18px; font-family: var(--mono); font-size: var(--fs-small); }
+.postings .cr { padding-left: 24px; }
+.postings .in { padding-left: 18px; }
+.entry-acts { display: flex; gap: 10px; align-items: center; margin-top: 8px; font-size: var(--fs-meta); color: var(--mut); flex-wrap: wrap; }
+@media (max-width: 760px) {
+  details.entry > summary { grid-template-columns: 44px minmax(0, 1fr) 100px; }
+  details.entry > summary .on, details.entry > summary .cr-col { display: none; }
+  details.entry .lines { padding-left: 16px; }
+}
+
+/* Reports: the P&L's indented rows and totals. */
+table.pl td.ind { padding-left: 32px; }
+table.pl tr.tot td { font-weight: 700; border-top: 2px solid var(--line); }
+
+/* Cash: books, bank, difference, Stripe; the feed; the eight weeks. */
+.recon { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.recon > div { padding: 14px 20px; min-width: 0; }
+.recon > div + div { border-left: 1px solid var(--line); }
+.recon .k { font-size: var(--fs-small); color: var(--mut); }
+.recon .v { font-size: var(--fs-hero); font-weight: 700; margin-top: 2px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.recon .d { font-size: var(--fs-small); color: var(--mut); margin-top: 2px; }
+@media (max-width: 900px) { .recon { grid-template-columns: 1fr 1fr; } .recon > div:nth-child(3) { border-left: 0; } .recon > div:nth-child(n+3) { border-top: 1px solid var(--line); } }
+@media (max-width: 480px) { .recon { grid-template-columns: 1fr; } .recon > div + div { border-left: 0; border-top: 1px solid var(--line); } }
+table.fc td.wk { white-space: nowrap; }
+table.fc tr.low td { background: var(--t-warn-bg); }
+table.fc tr.neg td { background: var(--t-bad-bg); }
+table.fc .in { color: var(--t-good-fg); } table.fc .out { color: var(--t-bad-fg); }
+table.fc .why { font-size: var(--fs-meta); color: var(--mut); display: block; font-family: var(--mono); }
+
+/* Standing: a dot and a word. */
+.stand { display: inline-flex; align-items: center; gap: 6px; }
+.stand i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--t-neutral-fg); }
+.stand.good i { background: var(--t-good-fg); } .stand.warn i { background: var(--t-warn-fg); } .stand.bad i { background: var(--t-bad-fg); }
+
+/* The client's own view, framed as theirs. */
+.portal { border: 2px solid var(--sky); border-radius: var(--radius); padding: 14px 16px; margin-top: 12px; background: var(--bg); }
+.portal .ph2 { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.portal .ph2 b { font-size: var(--fs-lead); }
+.portal .ph2 .meta { color: var(--t-info-fg); font-weight: 700; font-size: var(--fs-meta); }
+
+/* An inline form that appears when a button is pressed: pay this, remit this. */
+.inline-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.inline-form label { display: grid; gap: 4px; font-size: var(--fs-meta); color: var(--mut); }
+.inline-form input, .inline-form select { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: var(--radius); padding: 6px 8px; font: inherit; }

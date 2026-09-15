@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { orgs, shareLinks } from "@/db/schema";
+import { disputes, orgs, shareLinks } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { maySeeOrgMoney } from "@/lib/tenancy";
 import { isStaffRole } from "@/lib/tenants";
@@ -14,6 +14,7 @@ import { invoiceView, METHOD_LABEL } from "@/lib/statement";
 import { invoiceOrderStatus, invoiceSteps } from "@/lib/clientOrders";
 import OrderSteps from "@/components/OrderSteps";
 import { Id, PageHead, Panel, Pill } from "@/components/ui";
+import AskAboutLine from "@/components/money/AskAboutLine";
 
 export const dynamic = "force-dynamic";
 
@@ -43,8 +44,16 @@ export default async function ClientOrderPage({ params }: { params: Promise<{ id
   const v = invoiceView(asStatementRow(full), today);
   const status = invoiceOrderStatus(row, v);
   const placedOn = shopMonthDay(row.createdAt);
-  const [link] = await db.select({ token: shareLinks.token }).from(shareLinks)
-    .where(and(eq(shareLinks.invoiceId, id), isNull(shareLinks.revokedAt)));
+  const [[link], asked] = await Promise.all([
+    db.select({ token: shareLinks.token }).from(shareLinks)
+      .where(and(eq(shareLinks.invoiceId, id), isNull(shareLinks.revokedAt))),
+    db.select().from(disputes).where(eq(disputes.invoiceId, id)),
+  ]);
+  // A question is theirs to ask while the bill is open, and once per line
+  // while the shop still owes an answer. Read-only accounts read.
+  const mayAsk = user.role !== "client_viewer" && v.balanceCents > 0 && row.status !== "draft" && row.status !== "void";
+  const askedOn = (lineId: number | null) => asked.find((d) => d.lineId === lineId && !d.resolvedOn) ?? null;
+  const answered = (lineId: number | null) => asked.filter((d) => d.lineId === lineId && d.resolvedOn).sort((a, b) => b.id - a.id)[0] ?? null;
 
   return (
     <div className="container">
@@ -93,6 +102,15 @@ export default async function ClientOrderPage({ params }: { params: Promise<{ id
                 ? <span className="t-small" style={{ color: "var(--t-good-fg)" }}>covered</span>
                 : formatCents(Math.round(qtyOf(l) * l.unitCents))}
             </b>
+            {/* The question, or its state. A line under question is not
+                chased; an answered one says what the shop decided. */}
+            <span style={{ flexBasis: "100%" }}>
+              {askedOn(l.id)
+                ? <span className="pill warn">asked {askedOn(l.id)!.openedOn} · waiting on the shop</span>
+                : answered(l.id)
+                  ? <span className="mut t-meta">{answered(l.id)!.resolution === "credited" ? "credited" : "answered"} {answered(l.id)!.resolvedOn}</span>
+                  : mayAsk && !l.covered && <AskAboutLine invoiceId={id} lineId={l.id} />}
+            </span>
           </div>
         ))}
         <div className="row-2" style={{ alignItems: "baseline", padding: "9px 0 0", borderTop: "2px solid var(--line)" }}>
@@ -101,6 +119,13 @@ export default async function ClientOrderPage({ params }: { params: Promise<{ id
           </span>
           <b className="mono t-body">{formatCents(v.linesCents + v.feesCents)}</b>
         </div>
+        {(askedOn(null) || mayAsk) && (
+          <div style={{ paddingTop: 8 }}>
+            {askedOn(null)
+              ? <span className="pill warn">question on the whole bill, asked {askedOn(null)!.openedOn} · waiting on the shop</span>
+              : <AskAboutLine invoiceId={id} lineId={null} label="Ask about this bill" />}
+          </div>
+        )}
       </Panel>
 
       {full.payments.length > 0 && (

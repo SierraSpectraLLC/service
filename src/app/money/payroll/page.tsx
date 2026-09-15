@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { asc, eq, inArray, and, gte, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { clientAllowlist, expenses, houseMembers, orgs, payroll, timeEntries, users } from "@/db/schema";
+import { clientAllowlist, expenses, houseMembers, orgs, payroll, payrollRuns, timeEntries, users } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import FinanceShell from "@/components/FinanceShell";
@@ -16,6 +16,9 @@ import {
 } from "@/lib/payroll";
 import { payrollViewerFor } from "@/lib/hr";
 import PayrollPanel from "@/components/PayrollPanel";
+import { PayrollRunButton } from "@/components/money/LedgerTools";
+import { monthWord } from "@/lib/ledger/postings";
+import { formatCents } from "@/lib/money";
 import { EmptyState, PageHead } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -128,6 +131,16 @@ export default async function PayrollPage({ searchParams }: {
       ])
     : [[], []];
 
+  // The months this owner has put on the books, so the register can say
+  // which ended months are still to run. One posting a month; a wrong one is
+  // reversed on the Ledger page, never re-run.
+  const canRun = isHouseOfThis && whole && user.role === "owner" && mayEditPayroll(viewer, mine);
+  const runs = canRun
+    ? await db.select({ ym: payrollRuns.ym, postedOn: payrollRuns.postedOn, grossCents: payrollRuns.grossCents })
+        .from(payrollRuns).where(eq(payrollRuns.tenantOrgId, mine))
+    : [];
+  const runOf = new Map(runs.map((r) => [r.ym, r]));
+
   const monthly = months.map((ym) => {
     const pay = payrollForMonth(rows, ym);
     const otherCents = overheadRows
@@ -154,17 +167,38 @@ export default async function PayrollPage({ searchParams }: {
 
   return (
     <FinanceShell
-      rail={inSection && fin
-        ? { active: "payroll", amounts: fin.amounts, seesBooks: fin.seesBooks, seesPayroll: fin.seesPayroll }
-        : null}
+      rail={inSection ? fin : null}
       period={fin?.period ?? "month"}
       path="/money/payroll"
       title="Payroll"
       sub={whole
         ? <>What {org?.name ?? "this organization"} pays its people, and what that makes a month cost.
-            {isHouseOfThis && <> Running costs with a receipt live in <Link href="/money/expenses">Overhead</Link>.</>}</>
+            {isHouseOfThis && <> Running costs with a receipt live in <Link href="/money/payables">Payables</Link>.</>}</>
         : <>Your own pay, as it is recorded. Nobody else&apos;s is shown here.</>}
     >
+      {canRun && all.length > 0 && (
+        <div className="panel">
+          <div className="ph"><h2>Run payroll</h2><span className="t-meta mut">gross to payroll and out of the bank, one posting a month</span></div>
+          <div className="tblwrap"><table className="list">
+            <thead><tr><th>Month</th><th className="r">Gross</th><th></th></tr></thead>
+            <tbody>
+              {months.filter((ym) => ym < today.slice(0, 7) || runOf.has(ym)).map((ym) => {
+                const run = runOf.get(ym);
+                const gross = payrollForMonth(rows, ym).totalCents;
+                return (
+                  <tr key={ym}>
+                    <td>{monthWord(ym)}</td>
+                    <td className="num">{formatCents(run?.grossCents ?? gross)}</td>
+                    <td className="r">{run
+                      ? <span className="t-meta mut">ran {run.postedOn} · <Link className="plain" href={`/money/ledger?type=payroll&id=${ym}`}>on the ledger</Link></span>
+                      : gross > 0 ? <PayrollRunButton ym={ym} label={monthWord(ym)} grossLabel={formatCents(gross)} /> : <span className="t-meta mut">nothing to run</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table></div>
+        </div>
+      )}
       {all.length === 0 && whole ? (
         <EmptyState title="Nobody on the payroll yet"
           body="Add the first person below. Pay is dated, so a raise later does not rewrite what this month cost." />

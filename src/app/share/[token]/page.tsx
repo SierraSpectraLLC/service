@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { attachments, orgs, shareLinks, shareLinkFiles, shareLinkSystems } from "@/db/schema";
 import { brandForTenant, getBrand } from "@/lib/brand";
@@ -14,7 +14,7 @@ import {
 } from "@/lib/quotes";
 import { stripeMode } from "@/lib/stripe";
 import { feeClause } from "@/lib/billingPolicy";
-import { statementFor } from "@/lib/statement";
+import { invoiceView, statementFor } from "@/lib/statement";
 import ClientInvoice from "@/components/ClientInvoice";
 import ClientQuote from "@/components/ClientQuote";
 import { EmptyState, Panel, Pill, PublicShell } from "@/components/ui";
@@ -211,11 +211,17 @@ async function QuoteShare({ link }: { link: typeof shareLinks.$inferSelect }) {
     billingContext(orgId),
   ]);
   const quoteOff = discountOf(quoteSubtotal(full), full.row);
+  // Approved with a deposit: the deposit invoice's own pay link, so the
+  // answer and the payment are one visit. Nothing unless the quote raised one.
+  const depositPay = full.row.depositInvoiceId !== null
+    ? await depositLinkFor(full.row.depositInvoiceId, orgId)
+    : null;
 
   return (
     <PublicShell brandName={name} tagline={brand.tagline} width={640}>
       <ClientQuote
         token={link.token}
+        depositPay={depositPay}
         quoteId={full.row.id}
         number={full.row.number}
         title={full.row.title}
@@ -250,6 +256,17 @@ async function QuoteShare({ link }: { link: typeof shareLinks.$inferSelect }) {
   );
 }
 
+
+/** The deposit invoice's live pay link and what is still owed on it. */
+async function depositLinkFor(invoiceId: number, orgId: number): Promise<{ token: string; cents: number } | null> {
+  const full = await invoiceForOrg(invoiceId, orgId);
+  if (!full) return null;
+  const v = invoiceView(asStatementRow(full), shopToday());
+  if (v.payableCents <= 0) return null;
+  const [l] = await db.select({ token: shareLinks.token }).from(shareLinks)
+    .where(and(eq(shareLinks.invoiceId, invoiceId), isNull(shareLinks.revokedAt)));
+  return l ? { token: l.token, cents: v.payableCents } : null;
+}
 
 /**
  * A client's fleet, shown to a peer service company with no login here.

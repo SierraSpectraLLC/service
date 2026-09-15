@@ -19,13 +19,14 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { invoices, payments, referralFees } from "@/db/schema";
+import { invoices, orgs, payments, referralFees } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { formatCents } from "@/lib/money";
 import { shopToday } from "@/lib/shopday";
 import { asStatementRow, creditFor, invoiceById } from "@/lib/invoiceData";
 import { invoiceView } from "@/lib/statement";
 import { accruedCents } from "@/lib/referral";
+import { postInvoicePayment, postPayout, postProcessingFee, postReferralPaid } from "@/lib/ledger/postings";
 
 /** Both surfaces an invoice shows up on. Mirrors app/actions' revInvoice. */
 const revInvoice = (inv: { id: number; orgId: number }) => {
@@ -41,6 +42,8 @@ const revInvoice = (inv: { id: number; orgId: number }) => {
  */
 export async function recordStripePayment(input: {
   invoiceId: number; amountCents: number; reference: string; method: string;
+  /** Stripe's cut, when the event carried it. Its own cost row. */
+  feeCents?: number;
 }): Promise<void> {
   const [inv] = await db.select().from(invoices).where(eq(invoices.id, input.invoiceId));
   if (!inv) return;
@@ -48,12 +51,18 @@ export async function recordStripePayment(input: {
     .where(and(eq(payments.invoiceId, input.invoiceId), eq(payments.reference, input.reference)));
   if (already.length) return;   // Stripe retries; a payment is not recorded twice.
 
-  await db.insert(payments).values({
+  const [row] = await db.insert(payments).values({
     tenantOrgId: inv.tenantOrgId, invoiceId: input.invoiceId,
     method: input.method === "card" ? "card" : "ach",
     amountCents: input.amountCents, reference: input.reference,
     receivedOn: shopToday(), recordedBy: "stripe",
-  });
+  }).returning();
+  // The gross lands in the Stripe balance, not the bank - nothing reaches the
+  // bank until a payout - and the processing fee is its own cost row.
+  await postInvoicePayment({ inv, payment: row });
+  if (input.feeCents && input.feeCents > 0) {
+    await postProcessingFee({ inv, reference: input.reference, feeCents: input.feeCents, on: row.receivedOn });
+  }
 
   const full = await invoiceById(input.invoiceId);
   const view = full ? invoiceView(asStatementRow(full), shopToday()) : null;
@@ -104,9 +113,45 @@ export async function recordReferralPayment(input: {
       ? isNull(referralFees.tenantOrgId)
       : eq(referralFees.tenantOrgId, fee.tenantOrgId),
   ));
+  // The payer's books: a fee paid to another shop is a cost of the work.
+  await postReferralPaid({
+    tenantOrgId: fee.tenantOrgId, feeId: input.feeId, cents: Math.max(0, Math.round(input.amountCents)),
+    reference: input.reference, on: shopToday(),
+  });
   await audit({
     actor: "stripe", entityType: "referral_fee", entityId: input.feeId, tenantOrgId: fee.tenantOrgId,
     action: `referral fee payment of ${formatCents(input.amountCents)} received (${input.reference})`,
   });
   revalidatePath("/network");
+}
+
+/**
+ * Stripe paid the operator's balance out to their bank. Called only by the
+ * verified webhook, for a connected account's `payout.paid`.
+ *
+ * The account id on the event is what says WHOSE books this is: it is the
+ * operator's own Connect account (lib/stripe), kept on their org row, and a
+ * payout for an account nobody here owns is ignored rather than posted to
+ * whoever is first. The posting is stripe down, bank down-and-up - the money
+ * was already ours; it moved rooms - and it lands with a payout id the Cash
+ * page matches the bank line against by amount and date, so a payout is the
+ * one bank line that arrives pre-matched.
+ */
+export async function recordStripePayout(input: {
+  account: string; payoutId: string; amountCents: number; arrivalDate: string;
+}): Promise<{ posted: boolean; reason?: string }> {
+  if (!input.account || !input.payoutId || input.amountCents <= 0) return { posted: false, reason: "nothing to post" };
+  const [org] = await db.select({ id: orgs.id }).from(orgs).where(eq(orgs.stripeAccountId, input.account));
+  if (!org) return { posted: false, reason: "no workspace owns that account" };
+  const on = /^\d{4}-\d{2}-\d{2}$/.test(input.arrivalDate) ? input.arrivalDate : shopToday();
+  const res = await postPayout({ tenantOrgId: org.id, payoutId: input.payoutId, cents: input.amountCents, on });
+  if (res?.created) {
+    await audit({
+      actor: "stripe", entityType: "ledger_entry", entityId: res.id, tenantOrgId: org.id,
+      action: `Stripe paid out ${formatCents(input.amountCents)} to the bank (${input.payoutId})`,
+    });
+    revalidatePath("/money/cash");
+    revalidatePath("/money");
+  }
+  return { posted: Boolean(res?.created) };
 }

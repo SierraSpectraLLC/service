@@ -96,7 +96,7 @@ describe("one operator's staff cannot read another's money", () => {
     // was not, so one operator's morning mail listed every other operator's
     // clients and balances - and a preview showed the same thing to anybody
     // holding a login on the newer workspace.
-    const { moneyDigest } = await import("@/lib/invoiceData");
+    const { moneyDigest } = await import("@/lib/money/digest");
     const mine = JSON.stringify(await moneyDigest(TODAY, 1));
     expect(mine).toContain("Lab Zen");
     expect(mine).not.toContain("Ellison BioLabs");

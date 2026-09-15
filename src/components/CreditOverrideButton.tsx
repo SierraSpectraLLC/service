@@ -5,7 +5,8 @@ import { useTransition } from "react";
 import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 import { formatCents } from "@/lib/money";
-import { overrideCreditHold, requestDeposit } from "@/app/actions";
+import { overrideCreditHold } from "@/app/actions";
+import { requestDeposit } from "@/app/money/actions";
 
 /**
  * The two ways a held account gets moving: ask for enough to clear it, or

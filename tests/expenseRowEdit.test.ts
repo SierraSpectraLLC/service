@@ -261,7 +261,8 @@ describe("what it refuses", () => {
   });
 
   it("refuses a row on a paid claim", async () => {
-    const { payExpenseReport, submitDraftReport } = await import("@/app/actions");
+    const { submitDraftReport } = await import("@/app/actions");
+    const { payExpenseReport } = await import("@/app/money/actions");
     const id = await openReport();
     const row = await logParking(id);
     await submitDraftReport(id);
@@ -398,7 +399,8 @@ describe("the rulebook is asked again", () => {
      * colour, "approve it, then edit it up" would be the documented way round
      * the reviewer.
      */
-    const { approveExpenseAllowance, payExpenseReport, submitDraftReport } = await import("@/app/actions");
+    const { approveExpenseAllowance, submitDraftReport } = await import("@/app/actions");
+    const { payExpenseReport } = await import("@/app/money/actions");
     who = HR;
     const id = await openReport();
     const row = await logPerDiem(id);

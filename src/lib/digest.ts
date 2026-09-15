@@ -51,7 +51,7 @@ import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
 import {
   dayLabelOfShopDay, digestDayEnabled, digestGapDays, weekdayOfShopDay, windowLabel,
 } from "@/lib/digestDays";
-import { moneyDigest } from "@/lib/invoiceData";
+import { moneyDigest } from "@/lib/money/digest";
 import { renderMoneySection } from "@/lib/digestMoney";
 import {
   partnerPreheader, partnerView, renderPartnerDigest, renderPartnerDigestText,

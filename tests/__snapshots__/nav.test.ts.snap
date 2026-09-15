@@ -13,9 +13,7 @@ exports[`buildNav, per persona > builds one tree for a HR who administers the pe
     {
       "Financial → /money": [
         "Financial home (home)",
-        "Purchasing → /money/purchasing",
-        "Reimbursements → /money/reimbursements",
-        "Payroll → /money/payroll",
+        "Payroll register → /money/payroll",
       ],
     },
     {
@@ -26,6 +24,8 @@ exports[`buildNav, per persona > builds one tree for a HR who administers the pe
         "Maintenance → /maintenance",
         "Restoration queue → /restorations",
         "Clients → /clients",
+        "Purchasing → /money/purchasing",
+        "Reimbursements → /money/reimbursements",
         "Remote support → /remote",
         "Metrics → /metrics",
         "Archived → /archive",
@@ -82,9 +82,7 @@ exports[`buildNav, per persona > builds one tree for a HR with payroll 1`] = `
     {
       "Financial → /money": [
         "Financial home (home)",
-        "Purchasing → /money/purchasing",
-        "Reimbursements → /money/reimbursements",
-        "Payroll → /money/payroll",
+        "Payroll register → /money/payroll",
       ],
     },
     {
@@ -95,6 +93,8 @@ exports[`buildNav, per persona > builds one tree for a HR with payroll 1`] = `
         "Maintenance → /maintenance",
         "Restoration queue → /restorations",
         "Clients → /clients",
+        "Purchasing → /money/purchasing",
+        "Reimbursements → /money/reimbursements",
         "Remote support → /remote",
         "Metrics → /metrics",
         "Archived → /archive",
@@ -276,16 +276,12 @@ exports[`buildNav, per persona > builds one tree for a staff owner 1`] = `
     {
       "Financial → /money": [
         "Financial home (home)",
-        "Quotes → /money/quotes",
-        "Invoices → /money/invoices",
-        "Collections → /money/collections",
-        "Contracts → /money/contracts",
-        "Purchasing → /money/purchasing",
-        "Reimbursements → /money/reimbursements",
-        "Overhead → /money/expenses",
-        "Bills → /money/bills",
-        "Payroll → /money/payroll",
-        "Job costing → /money/costing",
+        "Cash → /money/cash",
+        "Receivables → /money/receivables",
+        "Payables → /money/payables",
+        "Clients → /money/clients",
+        "Ledger → /money/ledger",
+        "Reports → /money/reports",
       ],
     },
     {
@@ -297,9 +293,12 @@ exports[`buildNav, per persona > builds one tree for a staff owner 1`] = `
         "Restoration queue → /restorations",
         "Clients → /clients",
         "Service companies → /network",
+        "Purchasing → /money/purchasing",
+        "Reimbursements → /money/reimbursements",
         "Remote support → /remote",
         "Metrics → /metrics",
         "Sheet parity [3] → /parity",
+        "Ledger parity → /parity/ledger",
         "Archived → /archive",
       ],
     },

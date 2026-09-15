@@ -117,6 +117,10 @@ import { canSeeCosts } from "@/lib/redact";
 import { fits, fmtBytes, overQuotaMessage, MB } from "@/lib/storage";
 import { storeFiles, storeQuota, storeTenantFor, storeUsedBytes } from "@/lib/storeUsage";
 import { audit } from "@/lib/audit";
+import { requireReason } from "@/lib/reason";
+import { postExpenseLogged, postInvoicePayment, postInvoiceSent, postPoReceipt } from "@/lib/ledger/postings";
+import { entries as ledgerEntriesFor, reverse as reverseEntry } from "@/lib/ledger";
+import { cleanExpenseKind as cleanKind, tenantCategories } from "@/lib/expenseKind";
 import {
   canMoveFolder, cleanFolderName, depthOf, descendantIds, MAX_DEPTH, nameTaken,
 } from "@/lib/folders";
@@ -467,17 +471,6 @@ async function resolveTarget(
     workOrderId = wo.id;
   }
   return { instrumentId: t.instrumentId, assetId: asset?.id ?? null, externalId, asset, tenantOrgId, workOrderId, settledWo };
-}
-
-/**
- * 21 CFR Part 11 discipline: destroying a record requires a stated reason,
- * captured in the append-only audit trail alongside who and when. Server-side
- * so no client can skip it.
- */
-function requireReason(reason: string | undefined): string | { error: string } {
-  const r = (reason ?? "").trim();
-  if (r.length < 3) return { error: "A reason is required for this action (21 CFR 11)" };
-  return r;
 }
 
 /** Distinguish "you can't touch it" from "it isn't yours to know about". */
@@ -8489,25 +8482,6 @@ export async function logTime(
  * night in a motel. Against the work order, because that is what it bills and
  * costs against.
  */
-/** This workspace's expense vocabulary, in picker order. */
-async function tenantCategories(tenant: number | null) {
-  return db.select().from(expenseCategories)
-    .where(forTenant(expenseCategories.tenantOrgId, tenant))
-    .orderBy(asc(expenseCategories.sortOrder), asc(expenseCategories.id));
-}
-
-/**
- * A kind fit to store: one of this workspace's own category names, or one of
- * the canonical slugs the app itself writes (the travel strip logs
- * "per_diem"), else "other". Free text never lands in the column - a
- * vocabulary that grows by typo is not a vocabulary.
- */
-async function cleanKind(kind: string, tenant: number | null): Promise<string> {
-  if ((EXPENSE_KINDS as readonly string[]).includes(kind)) return kind;
-  const match = (await tenantCategories(tenant)).find((c) => categoryKey(c.name) === categoryKey(kind));
-  return match ? match.name : "other";
-}
-
 /**
  * The engineer's own point zero: where the stipend radius measures from and
  * where a routed trip starts. Self-service on purpose - it is their home
@@ -8717,6 +8691,9 @@ export async function logExpense(
     kind, description: data.description.trim(), amountCents: cents,
     incurredOn: date, billable: data.billable ?? true, loggedBy: u.email,
   }).returning();
+  // Nobody to reimburse, so the company paid it: the job's field cost up,
+  // bank down, the day it was incurred.
+  await postExpenseLogged({ expense: row, orgId: wo.orgId, by: u.email });
   await audit({
     actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
     entityType: "expense", entityId: row.id,
@@ -8742,6 +8719,11 @@ export async function deleteExpense(id: number, reason: string): Promise<{ error
     [wo] = await db.select().from(workOrders).where(eq(workOrders.id, row.workOrderId));
     if (wo) await assertWorkEditable(u, wo);
   }
+  // What it posted is reversed, dated today - the row goes, the ledger
+  // keeps both halves.
+  for (const e of await ledgerEntriesFor({ tenant: row.tenantOrgId, refType: "expense", refId: String(id), liveOnly: true })) {
+    await reverseEntry({ entryId: e.id, reason: why, postedBy: u.email, today: shopToday() });
+  }
   await db.delete(expenses).where(eq(expenses.id, id));
   await audit({
     actor: u.email, instrumentId: wo?.instrumentId ?? null, assetId: wo?.assetId ?? null,
@@ -8750,43 +8732,6 @@ export async function deleteExpense(id: number, reason: string): Promise<{ error
     field: "reason", newValue: why,
   });
   revalidatePath(row.workOrderId === null ? "/money/expenses" : `/work/${row.workOrderId}`);
-  return {};
-}
-
-/**
- * Money the business spent that no job caused - an engineer's internet bill,
- * a software seat, the shop's own postage. It lands in the same table as job
- * expenses with NULL where the work order would be, which is the entire
- * difference: overhead never reaches an invoice draft (those are built from a
- * work order's expenses) and never joins a job's margin. What it feeds is the
- * monthly ledger at /money/expenses.
- *
- * `person` is who gets reimbursed, validated against the directory like every
- * other field that names somebody - see logOffSystemWork for the argument.
- */
-export async function logOverheadExpense(
-  data: { kind: string; description: string; amount: string; incurredOn: string; person: string },
-): Promise<{ error?: string }> {
-  const u = await requireStaff();
-  const cents = parseMoney(data.amount);
-  if (cents === null || cents <= 0) return { error: "Enter an amount like 43.00" };
-  const date = data.incurredOn.trim();
-  if (!isIsoDay(date)) return { error: "Pick the date it was incurred" };
-  const description = data.description.trim();
-  if (!description) return { error: "Say what it was - a bare amount is unreadable in a month" };
-  const person = data.person.trim();
-  if (person && !(await assignableNames(u)).has(person)) return { error: "Unknown person" };
-  const kind = await cleanKind(data.kind, readTenant(u));
-  const [row] = await db.insert(expenses).values({
-    tenantOrgId: readTenant(u), workOrderId: null,
-    kind, description, amountCents: cents,
-    incurredOn: date, billable: false, person, loggedBy: u.email,
-  }).returning();
-  await audit({
-    actor: u.email, entityType: "expense", entityId: row.id, tenantOrgId: row.tenantOrgId,
-    action: `logged ${formatCents(cents)} of overhead - ${description}${person ? ` (${person})` : ""}`,
-  });
-  revalidatePath("/money/expenses");
   return {};
 }
 
@@ -9497,43 +9442,6 @@ export async function updateStipend(
 
 // ---------------- Cash on hand ----------------
 
-/**
- * Tell the books what is in the bank.
- *
- * OWNER ONLY, on their own company's row. The app cannot know this number -
- * see the schema note on orgs.cash_opening_on - so the owner types it, once,
- * and lib/cash carries it forward from the flows the app does record.
- * Typing it again on a later day is the correction for drift: the newer
- * opening wins and the older flows stop counting, which is also why the two
- * columns are overwritten rather than appended.
- */
-export async function setCashOpening(
-  data: { amount: string; on: string },
-): Promise<{ error?: string }> {
-  const u = await requireOwner();
-  const mine = myTenantOrgId(u);
-  if (mine === null) return { error: "Your company is not set up" };
-  const cents = parseMoney(data.amount);
-  if (cents === null) return { error: "Enter the balance like 24,310.00" };
-  const on = data.on.trim();
-  if (!isIsoDay(on)) return { error: "Pick the day the balance is from" };
-  if (on > shopToday()) return { error: "That day has not happened yet" };
-  const [org] = await db.select().from(orgs).where(eq(orgs.id, mine));
-  if (!org) return { error: "Not found" };
-  await db.update(orgs).set({ cashOpeningCents: cents, cashOpeningOn: on }).where(eq(orgs.id, mine));
-  await audit({
-    actor: u.email, entityType: "org", entityId: mine, tenantOrgId: mine,
-    action: `set the bank balance to ${formatCents(cents)} as of ${on}`
-      + (org.cashOpeningOn ? ` (was ${formatCents(org.cashOpeningCents)} as of ${org.cashOpeningOn})` : ""),
-    field: "cash_opening",
-    oldValue: org.cashOpeningOn ? `${org.cashOpeningCents} @ ${org.cashOpeningOn}` : "",
-    newValue: `${cents} @ ${on}`,
-  });
-  revalidatePath("/money");
-  revalidatePath("/owner");
-  return {};
-}
-
 // ---------------- Bills ----------------
 // Standing overhead - the liability policy, the health plan, the phone line.
 // See the note on the `bills` table for what one is and is not, lib/bills for
@@ -9969,58 +9877,6 @@ export async function withdrawExpenseReport(id: number): Promise<{ error?: strin
   await audit({
     actor: u.email, entityType: "expense_report", entityId: id, tenantOrgId: report.tenantOrgId,
     action: `withdrew ${report.person}'s expense report back to draft`,
-  });
-  revalidatePath("/money/reimbursements");
-  revalidatePath(`/money/reimbursements/${id}`);
-  return {};
-}
-
-/**
- * Pay a report. Owner only: this is the company writing a check.
- *
- * It marks, it does not move money - the check or the payroll run happens
- * wherever it happens, and this records that it did, with the reference the
- * engineer can chase it by.
- */
-export async function payExpenseReport(
-  id: number, data: { paidOn: string; reference: string },
-): Promise<{ error?: string }> {
-  const u = await requireOwner();
-  const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, id));
-  if (!report) return { error: "Not found" };
-  // requireOwner is "an owner of some service company", and expense_reports is
-  // one instance-wide table - so without this an owner could mark another
-  // workspace's report paid, closing a claim their engineer is still waiting
-  // on and writing the payout against a company that never paid it.
-  if (!houseOf(u, report.tenantOrgId)) return { error: "Not found" };
-  if (report.status !== "submitted") return { error: `This report is ${report.status}, not awaiting payout` };
-  const day = data.paidOn.trim();
-  if (!isIsoDay(day)) return { error: "Pick the date it was paid" };
-  if (day > shopToday()) return { error: "That date is in the future" };
-  const rows = await db.select().from(expenses).where(eq(expenses.reportId, id));
-  /* The gate the flag exists for. A row the travel rules queried cannot be
-     paid until a person has said so on the record - otherwise "flagged" is a
-     colour on a screen, and the fourteenth row of a claim is exactly where an
-     unapproved one goes unnoticed. Refusing here rather than at submit is
-     deliberate: the engineer files what they spent, and the judging happens
-     where the money does. */
-  const unapproved = rows.filter(needsApproval);
-  if (unapproved.length) {
-    return {
-      error: `${unapproved.length} row${unapproved.length === 1 ? "" : "s"} on this report `
-        + `${unapproved.length === 1 ? "is" : "are"} outside the travel rules and `
-        + `${unapproved.length === 1 ? "has" : "have"} not been approved. Open the report and approve `
-        + `${unapproved.length === 1 ? "it" : "them"}, or send it back.`,
-    };
-  }
-  const total = reportTotalCents(rows);
-  await db.update(expenseReports).set({
-    status: "paid", paidOn: day, paidBy: u.email, paidRef: data.reference.trim().slice(0, 120),
-  }).where(eq(expenseReports.id, id));
-  await audit({
-    actor: u.email, entityType: "expense_report", entityId: id, tenantOrgId: report.tenantOrgId,
-    action: `paid ${report.person} ${formatCents(total)} for ${rows.length} expense${rows.length === 1 ? "" : "s"}`
-      + (data.reference.trim() ? ` (${data.reference.trim()})` : "") + `, ${day}`,
   });
   revalidatePath("/money/reimbursements");
   revalidatePath(`/money/reimbursements/${id}`);
@@ -13549,6 +13405,12 @@ export async function receivePoLine(lineId: number, qty: number, note?: string):
     }
   }
 
+  // Parts cost up, payable up, for what arrived at the agreed price: the day
+  // the parts land is the day the cost exists and the vendor is owed. A line
+  // with no price yet posts nothing; the backfill catches it up once one is
+  // typed in. Keyed on the running count, so two receipts are two entries.
+  await postPoReceipt({ po, line, qty, receivedAfter: line.qtyReceived + qty, on: shopToday(), by: u.email });
+
   const after = await db.select().from(poLines).where(eq(poLines.poId, line.poId));
   const next = statusAfterReceipt(after);
   if (next !== po.status) {
@@ -16215,347 +16077,10 @@ export async function removeInvoiceLine(lineId: number, reason: string): Promise
   return {};
 }
 
-/**
- * Mark it sent: stamp the date, apply the client's terms, open the client's
- * link.
- *
- * NOTHING IS EMAILED. This used to mail the client a link in the same breath,
- * and the shop sends its invoices itself - the Excel off the template, or the
- * PDF - so a button that also fired an email was a button nobody could press
- * without sending the bill twice. What the app records is the fact: issued
- * today, due per the client's terms, from a draft to a bill the ledger
- * counts. The link still opens, because the client's portal reads the invoice
- * through it and its open event is the Viewed line on the timeline.
- */
-export async function markInvoiceSent(id: number): Promise<{ error?: string; token?: string }> {
-  const u = await requireStaff();
-  const [inv] = await db.select().from(invoices).where(eq(invoices.id, id));
-  if (!inv) return { error: "Not found" };
-  if (inv.status !== "draft") return { error: `${inv.number} has already been sent.` };
-  const lines = await db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, id));
-  if (!lines.length) return { error: "There is nothing on this invoice to send." };
-
-  const [org] = await db.select().from(orgs).where(eq(orgs.id, inv.orgId));
-  const issuedOn = shopToday();
-  const dueOn = dueFor(org ?? null, issuedOn);
-
-  const token = crypto.randomBytes(18).toString("base64url");
-  const [link] = await db.insert(shareLinks).values({
-    token, kind: "invoice", orgId: inv.orgId, invoiceId: inv.id,
-    label: `Invoice ${inv.number}`,
-    // A bill stays readable well past its due date: a link that dies at day 30
-    // is a link that dies exactly when collections starts needing it.
-    expiresOn: addDays(issuedOn, 365),
-    tenantOrgId: inv.tenantOrgId, createdBy: u.email,
-  }).returning();
-
-  await db.update(invoices).set({ status: "sent", issuedOn, dueOn, updatedAt: new Date() })
-    .where(eq(invoices.id, id));
-
-  const total = linesTotal(lines.map((l) => ({
-    kind: "part" as const, description: "", qty: l.qty / 1000,
-    unitCents: l.unitCents, covered: l.covered, sourceId: null,
-  })));
-  await audit({
-    actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: inv.tenantOrgId,
-    action: `marked ${inv.number} sent to ${org?.name ?? "the client"}: ${formatCents(total)}, due ${dueOn}`,
-  });
-  revInvoice(inv);
-  return { token };
-}
-
-/**
- * Money arrived. Never edits a line and never edits another payment: a
- * mistake is corrected by a second row, so the ledger reads as what happened
- * rather than as what somebody last decided it should look like.
- *
- * The status column is nudged to partial or paid for the sake of a list that
- * has not summed anything yet; lib/statement still reconciles it against the
- * rows, and the rows win.
- */
-export async function recordPayment(
-  invoiceId: number,
-  data: { method: string; amount: string; reference: string; receivedOn: string },
-): Promise<{ error?: string }> {
-  const u = await requireStaff();
-  const cents = parseMoney(data.amount);
-  if (cents === null || cents <= 0) return { error: "Enter an amount like 840.00" };
-  const day = data.receivedOn.trim();
-  if (!isIsoDay(day)) return { error: "Pick the date it arrived" };
-  const [inv] = await db.select().from(invoices).where(eq(invoices.id, invoiceId));
-  if (!inv) return { error: "Not found" };
-  if (inv.status === "draft") return { error: `${inv.number} has not been sent yet.` };
-  const method = (PAYMENT_METHODS as readonly string[]).includes(data.method) ? data.method : "other";
-
-  const [row] = await db.insert(payments).values({
-    tenantOrgId: inv.tenantOrgId, invoiceId, method, amountCents: cents,
-    reference: data.reference.trim(), receivedOn: day, recordedBy: u.email,
-  }).returning();
-
-  const full = await invoiceById(invoiceId);
-  const view = full ? invoiceView(asStatementRow(full), shopToday()) : null;
-  if (view && inv.status !== "void" && inv.status !== "referred") {
-    const next = view.balanceCents <= 0 ? "paid" : "partial";
-    if (next !== inv.status) {
-      await db.update(invoices).set({ status: next, updatedAt: new Date() }).where(eq(invoices.id, invoiceId));
-    }
-  }
-  await audit({
-    actor: u.email, entityType: "invoice", entityId: invoiceId, tenantOrgId: inv.tenantOrgId,
-    action: `recorded ${formatCents(cents)} by ${METHOD_LABEL[method].toLowerCase()} on ${inv.number}`
-      + (row.reference ? ` (${row.reference})` : "")
-      + (view ? ` - ${view.balanceCents <= 0 ? "paid in full" : `${formatCents(view.balanceCents)} still open`}` : ""),
-  });
-  revInvoice(inv);
-  return {};
-}
-
-/** Undo a payment that was never really there. Audited with the reason. */
-export async function deletePayment(id: number, reason: string): Promise<{ error?: string }> {
-  const u = await requireStaff();
-  const why = requireReason(reason);
-  if (typeof why !== "string") return why;
-  const [row] = await db.select().from(payments).where(eq(payments.id, id));
-  if (!row) return {};
-  const [inv] = await db.select().from(invoices).where(eq(invoices.id, row.invoiceId));
-  await db.delete(payments).where(eq(payments.id, id));
-  if (inv) {
-    await audit({
-      actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: inv.tenantOrgId,
-      action: `removed a ${formatCents(row.amountCents)} payment from ${inv.number} - reason: ${why}`,
-      field: "reason", newValue: why,
-    });
-    revInvoice(inv);
-  }
-  return {};
-}
-
-/**
- * Void it. The row and its lines stay: an invoice number that vanishes is a
- * gap somebody has to explain to an auditor, and "voided on the 3rd because
- * it was billed to the wrong site" is the explanation.
- */
-export async function voidInvoice(id: number, reason: string): Promise<{ error?: string }> {
-  const u = await requireStaff();
-  const why = requireReason(reason);
-  if (typeof why !== "string") return why;
-  const [inv] = await db.select().from(invoices).where(eq(invoices.id, id));
-  if (!inv) return { error: "Not found" };
-  if (inv.status === "void") return {};
-  const paid = await db.select().from(payments).where(eq(payments.invoiceId, id));
-  if (paid.length) return { error: `${inv.number} has payments against it - remove those first.` };
-  await db.update(invoices).set({ status: "void", updatedAt: new Date() }).where(eq(invoices.id, id));
-  await db.update(shareLinks).set({ revokedAt: new Date() }).where(eq(shareLinks.invoiceId, id));
-  await audit({
-    actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: inv.tenantOrgId,
-    action: `voided ${inv.number} - reason: ${why}`,
-    field: "reason", newValue: why,
-  });
-  revInvoice(inv);
-  return {};
-}
-
 // ---------------- Collections ----------------
 // Fees, promises, disputes, the ladder, and the decision to work for somebody
 // who owes money anyway. Nothing here stores a balance either: a fee is its
 // own row, a waiver flags that row, and what is owed is still summed at render.
-
-/**
- * Post the late charge this invoice has earned.
- *
- * The amount is computed here, not posted from the form: what somebody was
- * shown and what gets charged come from one function, so a page left open
- * cannot charge last week's interest. The basis sentence is stored with it -
- * "1.50% per month on $3,900 undisputed, 31 days past the 10-day grace
- * period" - because a year from now that is the only thing that can explain
- * the number.
- */
-export async function postFee(invoiceId: number): Promise<{ error?: string; amountCents?: number }> {
-  const u = await requireStaff();
-  const full = await invoiceById(invoiceId);
-  if (!full) return { error: "Not found" };
-  const today = shopToday();
-  const view = invoiceView(asStatementRow(full), today);
-  const { policy } = await billingContext(full.row.orgId);
-
-  const quote = feeFor({
-    policy, dueOn: full.row.dueOn, today,
-    payableCents: view.payableCents,
-    partsCents: full.lines.filter((l) => l.kind === "part" && !l.covered)
-      .reduce((n, l) => n + Math.round((l.qty / 1000) * l.unitCents), 0),
-    postedOn: full.fees.filter((f) => !f.waived).map((f) => f.postedOn),
-  });
-  if (quote.amountCents <= 0) return { error: quote.blocked || "There is no fee to post." };
-
-  const [row] = await db.insert(invoiceFees).values({
-    tenantOrgId: full.row.tenantOrgId, invoiceId,
-    amountCents: quote.amountCents, basis: quote.basis,
-    postedOn: today, postedBy: u.email,
-  }).returning();
-  await audit({
-    actor: u.email, entityType: "invoice", entityId: invoiceId, tenantOrgId: full.row.tenantOrgId,
-    action: `posted a late fee of ${formatCents(row.amountCents)} on ${full.row.number} - ${row.basis}`,
-  });
-  revInvoice(full.row);
-  return { amountCents: row.amountCents };
-}
-
-/**
- * Take a fee back off.
- *
- * The row stays and gets flagged, because expecting to waive more than you
- * charge is the honest posture, and the record of having charged and then
- * waived is the part that is worth anything - in a dispute, and in deciding
- * whether the policy is set right at all.
- */
-export async function waiveFee(feeId: number, reason: string): Promise<{ error?: string }> {
-  const u = await requireStaff();
-  const why = requireReason(reason);
-  if (typeof why !== "string") return why;
-  const [fee] = await db.select().from(invoiceFees).where(eq(invoiceFees.id, feeId));
-  if (!fee) return { error: "Not found" };
-  if (fee.waived) return {};
-  const [inv] = await db.select().from(invoices).where(eq(invoices.id, fee.invoiceId));
-  await db.update(invoiceFees).set({ waived: true, waivedBy: u.email, waivedReason: why })
-    .where(eq(invoiceFees.id, feeId));
-  await audit({
-    actor: u.email, entityType: "invoice", entityId: fee.invoiceId, tenantOrgId: fee.tenantOrgId,
-    action: `waived the ${formatCents(fee.amountCents)} late fee on ${inv?.number ?? "the invoice"} - reason: ${why}`,
-    field: "reason", newValue: why,
-  });
-  if (inv) revInvoice(inv);
-  return {};
-}
-
-/**
- * "The check goes out Friday." Worth a row for one reason: the morning after
- * it is broken is when the conversation changes, and nobody remembers the
- * date without one.
- */
-export async function logPromise(
-  invoiceId: number, data: { promisedOn: string; byName: string; note: string },
-): Promise<{ error?: string }> {
-  const u = await requireStaff();
-  const day = data.promisedOn.trim();
-  if (!isIsoDay(day)) return { error: "Pick the day they said" };
-  const who = data.byName.trim();
-  if (!who) return { error: "Who said it? A promise with no name on it is a note." };
-  const [inv] = await db.select().from(invoices).where(eq(invoices.id, invoiceId));
-  if (!inv) return { error: "Not found" };
-  const [row] = await db.insert(promises).values({
-    tenantOrgId: inv.tenantOrgId, invoiceId, promisedOn: day,
-    byName: who, note: data.note.trim(), loggedBy: u.email,
-  }).returning();
-  await audit({
-    actor: u.email, entityType: "invoice", entityId: invoiceId, tenantOrgId: inv.tenantOrgId,
-    action: `logged a promise on ${inv.number}: ${who} says by ${day}${row.note ? ` - ${row.note}` : ""}`,
-  });
-  revInvoice(inv);
-  return {};
-}
-
-/** They paid it. Closes the promise so the ladder stops escalating on it. */
-export async function keepPromise(promiseId: number): Promise<{ error?: string }> {
-  const u = await requireStaff();
-  const [row] = await db.select().from(promises).where(eq(promises.id, promiseId));
-  if (!row) return { error: "Not found" };
-  if (row.keptOn) return {};
-  const [inv] = await db.select().from(invoices).where(eq(invoices.id, row.invoiceId));
-  const today = shopToday();
-  await db.update(promises).set({ keptOn: today }).where(eq(promises.id, promiseId));
-  await audit({
-    actor: u.email, entityType: "invoice", entityId: row.invoiceId, tenantOrgId: row.tenantOrgId,
-    action: `${row.byName || "The client"} kept the promise on ${inv?.number ?? "the invoice"} (${row.promisedOn})`,
-  });
-  if (inv) revInvoice(inv);
-  return {};
-}
-
-/**
- * The client has questioned a line.
- *
- * It pauses what the reminders ASK for on that line alone. The undisputed
- * remainder keeps aging and keeps being chased, because a fair question about
- * one cartridge must not buy ninety quiet days on the rest of the bill - and
- * quoting the whole number at somebody who raised a real question is how the
- * rest of the invoice stops getting paid too.
- */
-export async function openDispute(
-  invoiceId: number, data: { lineId: number | null; reason: string },
-): Promise<{ error?: string }> {
-  const u = await requireStaff();
-  const why = requireReason(data.reason);
-  if (typeof why !== "string") return why;
-  const [inv] = await db.select().from(invoices).where(eq(invoices.id, invoiceId));
-  if (!inv) return { error: "Not found" };
-  let line: typeof invoiceLines.$inferSelect | undefined;
-  if (data.lineId !== null) {
-    [line] = await db.select().from(invoiceLines).where(eq(invoiceLines.id, data.lineId));
-    if (!line || line.invoiceId !== invoiceId) return { error: "That line is not on this invoice" };
-  }
-  const [row] = await db.insert(disputes).values({
-    tenantOrgId: inv.tenantOrgId, invoiceId, lineId: line?.id ?? null,
-    reason: why, openedOn: shopToday(), openedBy: u.email,
-  }).returning();
-  await audit({
-    actor: u.email, entityType: "invoice", entityId: invoiceId, tenantOrgId: inv.tenantOrgId,
-    action: `opened a dispute on ${inv.number}${line ? `, line "${line.description}"` : ""} - ${row.reason}`,
-    field: "reason", newValue: row.reason,
-  });
-  revInvoice(inv);
-  return {};
-}
-
-/**
- * Settle it, one of two ways.
- *
- * "kept" means the line stands and the pause lifts. "credited" issues a
- * NEGATIVE line rather than editing the disputed one, so the invoice still
- * reconciles against the copy in the client's inbox and both facts - what was
- * charged and what was given back - stay on the record.
- */
-export async function resolveDispute(
-  disputeId: number, resolution: "kept" | "credited", note: string,
-): Promise<{ error?: string }> {
-  const u = await requireStaff();
-  const [d] = await db.select().from(disputes).where(eq(disputes.id, disputeId));
-  if (!d) return { error: "Not found" };
-  if (d.resolvedOn) return {};
-  const [inv] = await db.select().from(invoices).where(eq(invoices.id, d.invoiceId));
-  if (!inv) return { error: "Not found" };
-  const today = shopToday();
-
-  let credited = 0;
-  if (resolution === "credited") {
-    const [line] = d.lineId === null ? [undefined]
-      : await db.select().from(invoiceLines).where(eq(invoiceLines.id, d.lineId));
-    if (!line) return { error: "There is no line to credit - resolve it as kept, or credit by hand." };
-    credited = Math.round((line.qty / 1000) * line.unitCents);
-    const [last] = await db.select({ position: invoiceLines.position }).from(invoiceLines)
-      .where(eq(invoiceLines.invoiceId, d.invoiceId)).orderBy(desc(invoiceLines.position)).limit(1);
-    await db.insert(invoiceLines).values({
-      invoiceId: d.invoiceId, kind: "fee_ref",
-      description: `Credit memo - ${line.description}`,
-      detail: note.trim() || `dispute opened ${d.openedOn}`,
-      qty: 1000, unitCents: -credited, covered: false,
-      sourceId: line.id, position: (last?.position ?? 0) + 1,
-    });
-  }
-
-  await db.update(disputes).set({
-    resolvedOn: today, resolution, resolvedBy: u.email,
-    reason: note.trim() ? `${d.reason} | resolved: ${note.trim()}` : d.reason,
-  }).where(eq(disputes.id, disputeId));
-
-  await audit({
-    actor: u.email, entityType: "invoice", entityId: d.invoiceId, tenantOrgId: inv.tenantOrgId,
-    action: resolution === "credited"
-      ? `resolved a dispute on ${inv.number} with a credit of ${formatCents(credited)}${note.trim() ? ` - ${note.trim()}` : ""}`
-      : `resolved a dispute on ${inv.number}: the line stands${note.trim() ? ` - ${note.trim()}` : ""}`,
-  });
-  revInvoice(inv);
-  return {};
-}
 
 /**
  * Work for somebody who owes money anyway.
@@ -17000,11 +16525,24 @@ async function applyQuoteApproval(
           note: `${q.depositPct}% deposit on ${q.number}`,
           createdBy: "client approval",
         }).returning();
-        await db.insert(invoiceLines).values({
+        const depLines = await db.insert(invoiceLines).values({
           invoiceId: inv.id, kind: "fee_ref",
           description: `Deposit on ${q.number}`,
           detail: `${q.depositPct}% of ${formatCents(total)}, due on approval`,
           qty: 1000, unitCents: deposit, covered: false, sourceId: q.id, position: 0,
+        }).returning();
+        // Sent on creation, so it posts on creation - as a liability, not
+        // revenue: the work is not done, and the final invoice applies it.
+        await postInvoiceSent({ inv, lines: depLines, depositFor: q.number, by: actorEmail || "client approval" });
+        // The deposit's own pay link, minted here so the page they just
+        // approved on can say "pay it now" - by card or bank transfer, on the
+        // hosted page, exactly as any sent invoice is paid. Same shape and
+        // life as markInvoiceSent's.
+        await db.insert(shareLinks).values({
+          token: crypto.randomBytes(18).toString("base64url"),
+          kind: "invoice", orgId: q.orgId, invoiceId: inv.id,
+          label: `Invoice ${number}`, expiresOn: addDays(today, 365),
+          tenantOrgId: q.tenantOrgId, createdBy: actorEmail || "client approval",
         });
         depositInvoiceId = inv.id;
         break;
@@ -17431,93 +16969,6 @@ export async function startPayment(
   }
 }
 
-/**
- * Ask a held client for enough to get moving again.
- *
- * Raises a real invoice for the figure lib/credit.depositToClear computes, due
- * immediately - not a note, not an email, an invoice, because "pay us $2,000
- * and we will come out" is only an agreement once there is something to pay
- * against. Recording the payment clears the hold by arithmetic; there is no
- * flag to un-set.
- *
- * It does NOT lift the hold. That is still the owner's decision with a reason,
- * and a deposit that lifted a hold on its own would be a way to work around
- * the override without writing one.
- */
-export async function requestDeposit(orgId: number, note: string): Promise<{ error?: string; id?: number }> {
-  const u = await requireStaff();
-  const today = shopToday();
-  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
-  if (!org) return { error: "Not found" };
-
-  const [standing, ctx] = await Promise.all([creditFor(orgId, today), billingContext(orgId)]);
-  if (!standing.onHold && !standing.override) {
-    return { error: `${org.name} is not on credit hold - there is nothing to clear.` };
-  }
-  const full = await invoicesForOrg(orgId);
-  const open = full.map((f) => invoiceView(asStatementRow(f), today)).filter(isOpen);
-  const cents = depositToClear({
-    policy: ctx.policy,
-    openInvoices: open.map((v) => ({ balanceCents: v.balanceCents, daysLate: v.daysLate })),
-  });
-  if (cents <= 0) return { error: "Nothing would clear it - the hold is on something else." };
-
-  let last: unknown;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const number = await nextDocNumber("invoice", myTenantOrgId(u));
-    try {
-      const [inv] = await db.insert(invoices).values({
-        tenantOrgId: myTenantOrgId(u), orgId, number, status: "sent",
-        issuedOn: today, dueOn: today,          // a deposit that is net 30 is not a deposit
-        poNumber: org.poNumber,
-        note: note.trim() || `Deposit to clear the credit hold on ${org.name}.`,
-        createdBy: u.email,
-      }).returning();
-      await db.insert(invoiceLines).values({
-        invoiceId: inv.id, kind: "fee_ref",
-        description: "Deposit to resume service",
-        detail: `enough to clear the hold on ${org.name}, due on receipt`,
-        qty: 1000, unitCents: cents, covered: false, sourceId: null, position: 0,
-      });
-      await audit({
-        actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: myTenantOrgId(u),
-        action: `raised ${number}, a ${formatCents(cents)} deposit to clear ${org.name}'s credit hold`,
-      });
-      revInvoice(inv);
-      revalidatePath("/work");
-      return { id: inv.id };
-    } catch (e) {
-      last = e;
-    }
-  }
-  throw last;
-}
-
-/**
- * Delete an invoice outright. Owner only, reason required, audited - the row
- * and its lines, fees, payments and share links go with it. Void remains the
- * lighter option when the number should stay on the books.
- */
-export async function deleteInvoice(id: number, reason: string): Promise<{ error?: string }> {
-  const u = await requireOwner();
-  const why = requireReason(reason);
-  if (typeof why !== "string") return why;
-  const [inv] = await db.select().from(invoices).where(eq(invoices.id, id));
-  if (!inv) return {};
-  const paid = await db.select().from(payments).where(eq(payments.invoiceId, id));
-  const total = paid.reduce((n, p) => n + p.amountCents, 0);
-  await db.delete(invoices).where(eq(invoices.id, id));   // children cascade
-  await audit({
-    actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: inv.tenantOrgId,
-    action: `deleted ${inv.number}${total > 0 ? ` (had ${formatCents(total)} in payments)` : ""} - reason: ${why}`,
-    field: "reason", newValue: why,
-  });
-  revalidatePath("/money");
-  revalidatePath("/money/invoices");
-  if (inv.workOrderId) revalidatePath(`/work/${inv.workOrderId}`);
-  return {};
-}
-
 /** Delete a quote. Owner only, reason required, audited. */
 export async function deleteQuote(id: number, reason: string): Promise<{ error?: string }> {
   const u = await requireOwner();
@@ -17776,13 +17227,19 @@ export async function recordHistoricalInvoice(
         issuedOn, dueOn, poNumber: data.poNumber.trim() || (org.poNumber ?? ""),
         note: data.note.trim(), createdBy: u.email,
       }).returning();
-      await db.insert(invoiceLines).values(lines.map((l) => ({ ...l, invoiceId: inv.id })));
+      const written = await db.insert(invoiceLines).values(lines.map((l) => ({ ...l, invoiceId: inv.id }))).returning();
+      // History, but money all the same: it was issued on its day and, if
+      // paid, paid on its day. A voided one posts nothing - it never counted.
+      if (outcome !== "void") {
+        await postInvoiceSent({ inv, lines: written, depositFor: null, by: u.email });
+      }
 
       if (outcome === "paid") {
-        await db.insert(payments).values({
+        const [paidRow] = await db.insert(payments).values({
           tenantOrgId: tenant, invoiceId: inv.id, method, amountCents: total,
           reference: data.reference.trim(), receivedOn: paidOn, recordedBy: u.email,
-        });
+        }).returning();
+        await postInvoicePayment({ inv, payment: paidRow, by: u.email });
         // Let the ledger decide the status, exactly as recordPayment does.
         const full = await invoiceById(inv.id);
         const view = full ? invoiceView(asStatementRow(full), today) : null;

@@ -2,7 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { deleteInvoice, deletePurchaseOrder, deleteQuote } from "@/app/actions";
+import { deletePurchaseOrder, deleteQuote } from "@/app/actions";
+import { deleteInvoice } from "@/app/money/actions";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 import RowActions from "@/components/ui/RowActions";

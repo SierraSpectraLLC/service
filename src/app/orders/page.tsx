@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { orgs, quoteLines as quoteLinesTable, quotes as quotesTable, shareLinks } from "@/db/schema";
+import { agreements, orgs, quoteLines as quoteLinesTable, quotes as quotesTable, shareLinks } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { maySeeOrgMoney } from "@/lib/tenancy";
 import { isStaffRole } from "@/lib/tenants";
@@ -10,7 +10,9 @@ import { descriptionLines } from "@/lib/billing";
 import { formatCents } from "@/lib/money";
 import { shopMonthDay, shopToday } from "@/lib/shopday";
 import { asStatementRow, invoicesForOrg } from "@/lib/invoiceData";
-import { invoiceView } from "@/lib/statement";
+import { invoiceView, statementFor } from "@/lib/statement";
+import { drawdown, standing as agreementStanding, type Allowance } from "@/lib/agreements";
+import { usageFor } from "@/lib/agreementUsage";
 import { quoteStanding } from "@/lib/quotes";
 import {
   facetMatches, invoiceOrderStatus, quoteOrderStatus, type OrderFacet, type OrderStatus,
@@ -47,9 +49,10 @@ export default async function OrdersPage({ searchParams }: {
   const facet: OrderFacet = ["needsyou", "settled", "all"].includes(f) ? (f as OrderFacet) : "open";
 
   const today = shopToday();
-  const [full, myQuotes] = await Promise.all([
+  const [full, myQuotes, papers] = await Promise.all([
     invoicesForOrg(org.id),
     db.select().from(quotesTable).where(eq(quotesTable.orgId, org.id)).orderBy(desc(quotesTable.id)),
+    db.select().from(agreements).where(eq(agreements.orgId, org.id)),
   ]);
   const [invLinks, qLinks, qLines] = await Promise.all([
     full.length
@@ -64,6 +67,32 @@ export default async function OrdersPage({ searchParams }: {
       ? db.select().from(quoteLinesTable).where(inArray(quoteLinesTable.quoteId, myQuotes.map((q) => q.id)))
       : [],
   ]);
+
+  // The statement: what is open, what is payable now, how late the oldest is.
+  // Same arithmetic as the shop's Receivables room, so both sides of the
+  // table read one figure.
+  const statement = statementFor({ orgId: org.id, invoices: full.map(asStatementRow), today });
+
+  /* What is left on the agreement, for the contracts WE hold that are live.
+     Usage is a query per agreement; a failed read is reported as "could not
+     read" rather than folded into a zero, because "0 of 8 visits used" is
+     good news wrongly on the one card that has to be trusted about money. */
+  const live = papers.filter((a) => a.providerOrgId === null && a.kind === "contract")
+    .map((a) => ({ a, state: agreementStanding(a, today) }))
+    .filter((p) => p.state === "active" || p.state === "expiring");
+  const allowances = await Promise.all(live.map(async ({ a }) => {
+    try {
+      const used = await usageFor(a, org.id);
+      return { a, left: drawdown(a, used), failed: false };
+    } catch {
+      return { a, left: null, failed: true };
+    }
+  }));
+  const allowanceLine = (label: string, x: Allowance, fmt: (n: number) => string) => {
+    if (!x.tracked) return null;
+    if (x.unlimited) return `${label}: unlimited (${fmt(x.used)} so far)`;
+    return `${label}: ${fmt(Math.max(0, x.remaining))} of ${fmt(x.included)} left${x.over ? ` - over by ${fmt(-x.remaining)}` : ""}`;
+  };
 
   const summarize = (names: string[]) => {
     // The charge, not its detail. A line item can run to several lines - the
@@ -126,6 +155,54 @@ export default async function OrdersPage({ searchParams }: {
           }))} />
         }
       />
+
+      {(statement.open.length > 0 || allowances.length > 0) && (
+        <div className="two">
+          <div className="panel">
+            <div className="ph"><h2>Your statement</h2><span className="t-meta mut">
+              {statement.oldestDaysLate > 0 ? `oldest unpaid invoice is ${statement.oldestDaysLate} days past its terms` : "nothing is past its terms"}
+            </span></div>
+            <div className="pb">
+              <div className="lanes">
+                <div className="ledger"><div className="mut t-small">Open</div><div className="t-figure">{formatCents(statement.openCents)}</div></div>
+                <div className="ledger"><div className="mut t-small">Payable now</div><div className="t-figure">{formatCents(statement.payableCents)}</div></div>
+                {statement.disputedCents > 0 && (
+                  <div className="ledger"><div className="mut t-small">Under question</div><div className="t-figure">{formatCents(statement.disputedCents)}</div></div>
+                )}
+              </div>
+              <div className="mut t-small" style={{ marginTop: 8 }}>
+                {statement.open.length} open invoice{statement.open.length === 1 ? "" : "s"}.
+                {org.termsDays > 0 ? ` Your terms are net ${org.termsDays}.` : ""}
+                {" "}Pay each from its row below; a question about a line goes on the order itself.
+              </div>
+            </div>
+          </div>
+          {allowances.length > 0 && (
+            <div className="panel">
+              <div className="ph"><h2>Left on your agreement</h2><span className="t-meta mut">what the contract still covers</span></div>
+              <div className="pb">
+                {allowances.map(({ a, left, failed }) => (
+                  <div key={a.id} style={{ paddingBlock: 4 }}>
+                    <div className="t-body" style={{ fontWeight: 600 }}>{a.title || a.number || "Service agreement"}{a.endsOn ? <span className="mut t-meta"> · through {a.endsOn}</span> : null}</div>
+                    {failed || !left ? (
+                      <div className="mut t-small">Usage could not be read just now.</div>
+                    ) : (
+                      [
+                        allowanceLine("Visits", left.visits, (n) => String(n)),
+                        allowanceLine("Parts", left.parts, formatCents),
+                        allowanceLine("Labor", left.labor, (n) => `${Math.round(n / 60)} h`),
+                      ].filter(Boolean).map((line) => <div key={line} className="t-small">{line}</div>)
+                    )}
+                    {!failed && left && !left.visits.tracked && !left.parts.tracked && !left.labor.tracked && (
+                      <div className="mut t-small">No counted allowances on this agreement.</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         {shown.map((r, n) => (

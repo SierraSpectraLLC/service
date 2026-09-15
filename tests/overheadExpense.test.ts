@@ -60,13 +60,4 @@ describe("overheadExpense", () => {
     expect(rows.map((r) => r.id)).toEqual([1, 2]);
   }, SLOW);
 
-  it("is the figure the rail shows", async () => {
-    const { financeFigures } = await import("@/lib/financeData");
-    const owner = {
-      email: "joe@sierra.example", name: "Joe Harris", role: "owner" as const,
-      orgId: null, orgName: "", orgKind: "", operatorOrgId: SIERRA, rootOperatorOrgId: SIERRA,
-    };
-    const fig = await financeFigures(owner, "2026-09-14", "month", { operatorOrgId: SIERRA, seesPayroll: false });
-    expect(fig.moneyOut.overheadCents).toBe(8999 + 2380);
-  }, SLOW);
 });

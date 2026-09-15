@@ -68,6 +68,11 @@ const STAMPED = [
   // argues for, and its systems, tiers and sections hang off it with no stamp
   // of their own - they die with the proposal, the part_kit_lines rule.
   "proposals",
+  // The ledger. An entry takes the stamp of the document that caused it (an
+  // invoice's, a PO's, a report's); a bank line takes the workspace whose
+  // account the feed is connected to; a payroll run the register's. Every
+  // read goes through forTenant() - see lib/ledger/sums.
+  "ledgerEntries", "bankTransactions", "payrollRuns", "ledgerParity", "bankConnections",
 ];
 
 const walk = (dir: string): string[] =>
