@@ -44,6 +44,25 @@ export function periodStart(today: string, p: Period): string {
   return `${year}-${String(firstOfQuarter).padStart(2, "0")}-01`;
 }
 
+/**
+ * The last day of the window - the other end of periodStart.
+ *
+ * Every other figure in the section is "so far": what was paid, what was
+ * posted, up to today. Bills are the one figure that reaches FORWARD, because
+ * "due this month" includes the 28th on the 3rd, so the window needs an end
+ * as well as a start. Year to date ends at the year's end for the same
+ * reason - the question is what the year commits us to, not what it has
+ * charged so far.
+ */
+export function periodEnd(today: string, p: Period): string {
+  const year = today.slice(0, 4);
+  if (p === "ytd") return `${year}-12-31`;
+  const month = Number(today.slice(5, 7));
+  const lastMonth = p === "month" ? month : Math.floor((month - 1) / 3) * 3 + 3;
+  const last = new Date(Date.UTC(Number(year), lastMonth, 0)).getUTCDate();
+  return `${year}-${String(lastMonth).padStart(2, "0")}-${String(last).padStart(2, "0")}`;
+}
+
 /** How the window reads in a sentence, once it is on screen. */
 export function periodSpan(today: string, p: Period): string {
   const start = periodStart(today, p);
@@ -61,7 +80,7 @@ const monthLabel = (day: string): string =>
 export const FINANCE_KEYS = [
   "overview",
   "quotes", "invoices", "collections", "contracts",
-  "purchasing", "reimbursements", "overhead", "payroll",
+  "purchasing", "reimbursements", "overhead", "bills", "payroll",
   "costing",
 ] as const;
 export type FinanceKey = (typeof FINANCE_KEYS)[number];
@@ -96,6 +115,7 @@ const ENTRIES: (FinanceEntry & { group: string })[] = [
   { group: "Money out", key: "purchasing", label: "Purchasing", href: "/money/purchasing" },
   { group: "Money out", key: "reimbursements", label: "Reimbursements", href: "/money/reimbursements", tone: "warn" },
   { group: "Money out", key: "overhead", label: "Overhead", href: "/money/expenses" },
+  { group: "Money out", key: "bills", label: "Bills", href: "/money/bills" },
   { group: "Money out", key: "payroll", label: "Payroll", href: "/money/payroll" },
 
   { group: "Analysis", key: "costing", label: "Job costing", href: "/money/costing" },

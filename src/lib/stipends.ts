@@ -85,6 +85,15 @@ export type StipendTerms = {
  * drift apart. `first` is blank when the terms cannot produce a cycle at all,
  * which every caller already treats as "nothing is due".
  */
+/**
+ * Exported for lib/bills, which runs the same schedule forward over a
+ * calendar window ("what falls due between the 1st and the 30th") rather
+ * than from a cursor. Everything in this file still calls it as `walk`.
+ */
+export function scheduleWalk(s: StipendTerms): { first: string; step: (iso: string) => string } {
+  return walk(s);
+}
+
 function walk(s: StipendTerms): { first: string; step: (iso: string) => string } {
   if (cadenceOf(s.cadence) === "weeks") {
     const every = Math.max(1, Math.round(s.everyWeeks ?? 1));

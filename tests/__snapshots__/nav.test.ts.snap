@@ -283,6 +283,7 @@ exports[`buildNav, per persona > builds one tree for a staff owner 1`] = `
         "Purchasing → /money/purchasing",
         "Reimbursements → /money/reimbursements",
         "Overhead → /money/expenses",
+        "Bills → /money/bills",
         "Payroll → /money/payroll",
         "Job costing → /money/costing",
       ],

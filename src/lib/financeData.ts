@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { and, eq, gte, isNotNull, isNull, notExists, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  agreements, clientAllowlist, expenseReports, expenses, orgs, payments, payroll,
+  agreements, bills, clientAllowlist, expenseReports, expenses, orgs, payments, payroll,
   poLines, purchaseOrders,
 } from "@/db/schema";
 import { myTenantOrgId, type SessionUser } from "@/lib/authz";
@@ -14,13 +14,13 @@ import { poTotals } from "@/lib/po";
 import { shopToday } from "@/lib/shopday";
 import { formatCents } from "@/lib/money";
 import { maySeePayroll, payrollForMonth, type PayRow } from "@/lib/payroll";
+import { billsDueBetween, billsDueSoon } from "@/lib/bills";
 import { payrollViewerFor } from "@/lib/hr";
 import { maySeeBooks, type BooksViewer } from "@/lib/books";
 import {
   CHASE_DAYS, RENEWAL_DAYS, STALE_QUOTE_DAYS,
   addYear, daysBetween, monthlyContractCents, monthsIn, periodFor, periodStart, rankDecisions,
-  type Decision, type FinanceAmounts, type Period,
-} from "@/lib/finance";
+  type Decision, type FinanceAmounts, type Period, periodEnd } from "@/lib/finance";
 import type { UnbilledJob } from "@/lib/invoiceData";
 
 /**
@@ -56,6 +56,11 @@ export type FinanceFigures = {
     reimbursedReports: number;
     /** Null when this reader may not read it - not zero, which would be a lie. */
     overheadCents: number | null;
+    /** What the standing bills come to inside the window, posted or not. */
+    billsDueCents: number;
+    /** The cycles landing in the next DUE_SOON_DAYS days - the ones to go and pay. */
+    billsSoonCents: number;
+    billsSoonCount: number;
     payrollCents: number | null;
   };
   contractsMonthlyCents: number;
@@ -200,7 +205,7 @@ export async function financeFigures(
   const mine = opts.operatorOrgId;
   const mayReadPay = mine !== null && opts.seesPayroll;
 
-  const [invoiceRows, quoteRows, unbilled, paidRows, spend, paidOut, overheadRows, contractRows, orgRows, payRows] =
+  const [invoiceRows, quoteRows, unbilled, paidRows, spend, paidOut, overheadRows, contractRows, orgRows, payRows, billRows] =
     await Promise.all([
       allInvoices(t),
       allQuotes(t),
@@ -221,6 +226,7 @@ export async function financeFigures(
       mayReadPay
         ? db.select().from(payroll).where(eq(payroll.orgId, mine as number))
         : Promise.resolve([]),
+      db.select().from(bills).where(forTenant(bills.tenantOrgId, t)),
     ]);
 
   const views = invoiceRows.map((f) => invoiceView(asStatementRow(f), today));
@@ -236,6 +242,11 @@ export async function financeFigures(
   const { purchasingCents, openPos, reimbursementsCents, reimbursementReports } = spend;
 
   const overheadCents = overheadRows.reduce((n, e) => n + e.amountCents, 0);
+  // Forward-looking, alone among these: "due this month" on the 3rd includes
+  // the 28th. See periodEnd. Cycles, not posted rows, so a bill that has
+  // already posted still counts as this month's commitment.
+  const billsDue = billsDueBetween(billRows, from, periodEnd(today, period));
+  const billsSoon = billsDueSoon(billRows, today);
 
   const payrollCents = mayReadPay
     ? monthsIn(today, period).reduce(
@@ -279,6 +290,7 @@ export async function financeFigures(
       purchasing: purchasingCents,
       reimbursements: reimbursementsCents,
       overhead: overheadCents,
+      bills: billsDue.cents,
       // Absent, not zero: the rail drops the entry entirely for this reader.
       ...(payrollCents === null ? {} : { payroll: payrollCents }),
     },
@@ -297,6 +309,8 @@ export async function financeFigures(
       reimbursedCents: paidOut.reimbursedCents,
       reimbursedReports: paidOut.reimbursedReports,
       overheadCents, payrollCents,
+      billsDueCents: billsDue.cents,
+      billsSoonCents: billsSoon.cents, billsSoonCount: billsSoon.cycles.length,
     },
     contractsMonthlyCents,
     renewal,

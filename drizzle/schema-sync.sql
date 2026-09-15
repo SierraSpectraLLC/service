@@ -4450,3 +4450,35 @@ DO $$ BEGIN
       FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- Standing overhead bills - the liability policy, the health plan, the phone
+-- line. Each cycle posts an overhead expense carrying bill_id. Schedule columns
+-- are the stipends table's, so lib/stipends' date arithmetic runs both.
+CREATE TABLE IF NOT EXISTS "bills" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer REFERENCES "orgs"("id") ON DELETE SET NULL,
+  "name" text NOT NULL DEFAULT '',
+  "payee" text NOT NULL DEFAULT '',
+  "kind" text NOT NULL DEFAULT 'Other',
+  "amount_cents" integer NOT NULL DEFAULT 0,
+  "cadence" text NOT NULL DEFAULT 'months',
+  "every_months" integer NOT NULL DEFAULT 1,
+  "day_of_month" integer NOT NULL DEFAULT 1,
+  "every_weeks" integer NOT NULL DEFAULT 1,
+  "weekday" integer NOT NULL DEFAULT 1,
+  "starts_on" text NOT NULL DEFAULT '',
+  "ends_on" text NOT NULL DEFAULT '',
+  "active" boolean NOT NULL DEFAULT true,
+  "last_on" text NOT NULL DEFAULT '',
+  "portal_url" text NOT NULL DEFAULT '',
+  "account_ref" text NOT NULL DEFAULT '',
+  "person" text NOT NULL DEFAULT '',
+  "autopay" boolean NOT NULL DEFAULT false,
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "bills_tenant_idx" ON "bills" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "bills_person_idx" ON "bills" ("person");
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "bill_id" integer REFERENCES "bills"("id") ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS "expenses_bill_idx" ON "expenses" ("bill_id");

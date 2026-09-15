@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  attachments, expenseCategories, expenseReports, expenses, houseMembers, orgSites, payroll, perks, stipends,
+  attachments, bills, expenseCategories, expenseReports, expenses, houseMembers, orgSites, payroll, perks, stipends,
   stockItems, stockrooms, users,
 } from "@/db/schema";
 import { myTenantOrgId, requireUser } from "@/lib/authz";
@@ -22,6 +22,7 @@ import { navSection } from "@/lib/navData";
 import PeopleDesk, { type RosterRow } from "@/app/people/PeopleDesk";
 import StipendsCard, { type StipendRow } from "@/components/StipendsCard";
 import { nextStipendCycle, stipendCadenceLabel } from "@/lib/stipends";
+import { billCadence, nextBillCycle } from "@/lib/bills";
 import { worksiteChoicesFor } from "@/lib/worksiteData";
 
 export const dynamic = "force-dynamic";
@@ -58,7 +59,7 @@ export default async function PeoplePage() {
   const today = shopToday();
   const isOwner = user.role === "owner";
 
-  const [members, reportRows, expenseRows, seesPay, stipendRows, categoryRows, kitRooms, siteChoices] = await Promise.all([
+  const [members, reportRows, expenseRows, seesPay, stipendRows, benefitRows, categoryRows, kitRooms, siteChoices] = await Promise.all([
     db.select().from(houseMembers)
       .where(and(forTenant(houseMembers.orgId, t), ne(houseMembers.role, "none")))
       .orderBy(asc(houseMembers.name), asc(houseMembers.email)),
@@ -71,6 +72,11 @@ export default async function PeoplePage() {
        by the owner, which the card enforces and the action re-checks. */
     db.select().from(stipends).where(forTenant(stipends.tenantOrgId, t))
       .orderBy(asc(stipends.person), asc(stipends.label)),
+    /* Benefits: the standing bills that name a person - their health plan,
+       their phone. Read with the stipends because the file shows them
+       together, as "what else this person costs". */
+    db.select().from(bills).where(and(forTenant(bills.tenantOrgId, t), ne(bills.person, "")))
+      .orderBy(asc(bills.person), asc(bills.name)),
     db.select().from(expenseCategories).where(forTenant(expenseCategories.tenantOrgId, t))
       .orderBy(asc(expenseCategories.sortOrder), asc(expenseCategories.id)),
     /* The vans and field kits, so a person's file can answer "what of ours is
@@ -181,6 +187,15 @@ export default async function PeoplePage() {
         id: x.id, label: x.label, amountCents: x.amountCents, cadence: stipendCadenceLabel(x),
         active: x.active, nextOn: nextStipendCycle(x, today),
       })),
+      /* Their benefits, gated like pay: what the company pays a carrier for
+         somebody is a figure about them, and a reader who may not see a wage
+         may not see it either. */
+      benefits: seesPay
+        ? benefitRows.filter((x) => m.name && x.person === m.name).map((x) => ({
+          id: x.id, name: x.name, payee: x.payee, amountCents: x.amountCents,
+          cadence: billCadence(x), active: x.active, nextOn: nextBillCycle(x, today),
+        }))
+        : [],
       /* Their pay row in force today, matched the way addPayrollEntry matches
          its supersede - by address first, name as the fallback for rows from
          before addresses were recorded. Null when the reader may not see pay,

@@ -37,6 +37,10 @@
       "schedule": "0 13 * * *"
     },
     {
+      "path": "/api/cron/bills",
+      "schedule": "0 13 * * *"
+    },
+    {
       "path": "/api/cron/notices",
       "schedule": "0 * * * *"
     },

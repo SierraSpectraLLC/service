@@ -26,6 +26,7 @@ const STAMPED = [
   "rateCards", "expenses", "invoices", "payments", "invoiceFees", "promises",
   "disputes", "dunningEvents", "creditOverrides", "quotes", "expenseCategories", "expenseReports",
   "awards",
+  "bills",
   // Which workspace filed a problem report. Their staff read their own;
   // platform staff read every workspace's, because the software is theirs to
   // fix - see lib/bugData.reportsFor.

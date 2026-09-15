@@ -92,7 +92,9 @@ describe("the two rooms that are not the books", () => {
     // lands on the open side of the wall is how this leaks back.
     expect(books).toEqual([
       "overview", "quotes", "invoices", "collections", "contracts",
-      "overhead", "payroll", "costing",
+      // Bills names what the shop pays for insurance and what each person's
+      // benefits cost - the position, not something an engineer does.
+      "overhead", "bills", "payroll", "costing",
     ]);
   });
 });

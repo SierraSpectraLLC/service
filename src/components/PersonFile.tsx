@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
@@ -45,6 +47,11 @@ export type StipendLine = {
   id: number; label: string; amountCents: number; cadence: string; active: boolean; nextOn: string;
 };
 
+/** One standing bill that is theirs - their health plan, their phone - worded as the Bills desk words it. */
+export type BenefitLine = {
+  id: number; name: string; payee: string; amountCents: number; cadence: string; active: boolean; nextOn: string;
+};
+
 /** What a paper on the file can be called. Free text on the row; these are the offers. */
 const PAPER_KINDS = ["Contract", "Offer letter", "Certification", "Other"] as const;
 
@@ -66,7 +73,7 @@ export type KitRow = { id: number; name: string; lines: number; units: number; s
 
 export default function PersonFile({
   email, name, role, profile, pay, perks, kits, seesPay, orgId, today, onClose,
-  sites = [], ownSites = [], papers = [], stipends = [], canManage = false, isMe = false, categories = [],
+  sites = [], ownSites = [], papers = [], stipends = [], benefits = [], canManage = false, isMe = false, categories = [],
 }: {
   email: string;
   name: string;
@@ -85,6 +92,8 @@ export default function PersonFile({
   papers?: PaperRow[];
   /** Their standing reimbursements. Set up here by the owner, or on the roster's card. */
   stipends?: StipendLine[];
+  /** The standing bills that are theirs, from the Bills desk. Empty when the reader may not see pay. */
+  benefits?: BenefitLine[];
   /** Expense categories, for a standing reimbursement set up from here. */
   categories?: string[];
   seesPay: boolean;
@@ -394,6 +403,34 @@ export default function PersonFile({
           )}
         </div>
       ))}
+
+      {/* What the company pays a carrier for them - the health plan, the
+          phone line. Read from the Bills desk, where the owner sets them up;
+          shown here so "what does this person cost" is answered in one place.
+          Absent, not zeroed, for a reader who may not see pay. */}
+      {seesPay && (
+        <>
+          <div className="dialog-section" style={{ marginTop: 16 }}>Benefits</div>
+          {benefits.length === 0 && (
+            <div className="mut t-small" style={{ marginBottom: 8 }}>
+              No standing bills are theirs.{canManage ? <> Set one up at <Link href="/money/bills">Bills</Link> and pick them under Whose.</> : ""}
+            </div>
+          )}
+          {benefits.map((x) => (
+            <div key={x.id} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
+              <span className="t-body" style={{ flex: 1, minWidth: 0 }}>
+                {x.name}
+                <span className="mut t-meta">
+                  {x.payee ? ` · ${x.payee}` : ""}{` · ${formatCents(x.amountCents)} ${x.cadence}`}
+                </span>
+              </span>
+              {x.active
+                ? <span className="mut t-meta">{x.nextOn ? `next ${x.nextOn}` : "no further cycles"}</span>
+                : <Pill tone="faint">paused</Pill>}
+            </div>
+          ))}
+        </>
+      )}
       {canManage && !stipOpen && (
         name.trim()
           ? <button className="btn sm" style={{ marginTop: 8 }} onClick={() => { setStipDraft(blankStipend()); setStipOpen(true); }}>

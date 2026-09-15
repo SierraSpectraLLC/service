@@ -4,17 +4,20 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
-import { deleteInvoice, recordPayment, sendInvoice, voidInvoice } from "@/app/actions";
+import { deleteInvoice, markInvoiceSent, recordPayment, voidInvoice } from "@/app/actions";
 import { PAYMENT_METHODS, METHOD_LABEL } from "@/lib/statement";
 import { formatCents } from "@/lib/money";
 
 /**
- * The three things somebody does to an invoice from its own page: issue it,
- * record what arrived, or void it.
+ * The three things somebody does to an invoice from its own page: mark it
+ * sent, record what arrived, or void it.
  *
- * Sending is a confirm rather than a plain click because it is the moment the
- * bill leaves the building - and because the PO warning, if there is one, is
- * the last chance anybody has to read it.
+ * MARK AS SENT, not send. The shop sends its invoices itself - the Excel off
+ * the template, the PDF - so the app records that it went rather than
+ * sending it a second time. It is still a confirm rather than a plain click,
+ * because it is the moment a draft becomes a bill the ledger counts, and
+ * because the PO warning, if there is one, is the last chance anybody has to
+ * read it.
  */
 export default function InvoiceActions({ id, number, status, balanceCents, today, poWarning, canDelete = false }: {
   id: number;
@@ -33,15 +36,17 @@ export default function InvoiceActions({ id, number, status, balanceCents, today
 
   const send = async () => {
     const ok = await confirmDialog({
-      title: `Send ${number}?`,
-      body: poWarning || "The client gets a link to the invoice, and its open event becomes the Viewed line on this timeline.",
-      action: "Send invoice",
+      title: `Mark ${number} as sent?`,
+      body: (poWarning ? `${poWarning} ` : "")
+        + "Stamps today as the issue date and sets the due date from the client's terms. "
+        + "Nothing is emailed - send the Excel or the PDF yourself. The client's link opens, and its open event becomes the Viewed line on this timeline.",
+      action: "Mark as sent",
     });
     if (!ok) return;
     startTransition(async () => {
-      const res = await sendInvoice(id);
+      const res = await markInvoiceSent(id);
       if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
-      toast({ message: res.warning || `Sent ${number}`, ...(res.warning ? { tone: "bad" as const } : {}) });
+      toast({ message: `Marked ${number} sent` });
       router.refresh();
     });
   };
@@ -76,7 +81,7 @@ export default function InvoiceActions({ id, number, status, balanceCents, today
     <>
       <div className="row-2">
         {status === "draft" && (
-          <button className="btn sm accent" disabled={pending} onClick={send}>Send invoice</button>
+          <button className="btn sm accent" disabled={pending} onClick={send}>Mark as sent</button>
         )}
         {status !== "draft" && status !== "void" && balanceCents > 0 && (
           <button className="btn sm accent" disabled={pending} onClick={() => setPaying((v) => !v)}>
