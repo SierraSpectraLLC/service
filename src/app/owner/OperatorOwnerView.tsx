@@ -4,7 +4,7 @@ import { readTenant, visibleOrgs } from "@/lib/tenancy";
 import { brandForTenant } from "@/lib/brand";
 import { formatCents, formatDollars } from "@/lib/money";
 import { periodSpan, withPeriod } from "@/lib/finance";
-import { booksContext } from "@/lib/financeData";
+import { booksContext, cashFigures } from "@/lib/financeData";
 import { allInvoices, asStatementRow } from "@/lib/invoiceData";
 import { aging, invoiceView } from "@/lib/statement";
 import { coverageBoard } from "@/lib/pmPlanData";
@@ -61,12 +61,13 @@ export default async function OperatorOwnerView({ user, periodParam }: {
   // thing /money does to them.
   const { period, today, seesPayroll, figures: fig } = await booksContext(user, periodParam);
   const tenant = readTenant(user);
-  const [brand, invoices, orgRows] = await Promise.all([
+  const [brand, invoices, orgRows, { cash: bank }] = await Promise.all([
     brandForTenant(myTenantOrgId(user)),
     // Already cache()d and already fetched by financeFigures on this render,
     // so this is the same rows, not a second read.
     allInvoices(tenant),
     visibleOrgs(user),
+    cashFigures(user, today),
   ]);
 
   const { moneyIn: mIn, moneyOut: mOut } = fig;
@@ -183,8 +184,29 @@ export default async function OperatorOwnerView({ user, periodParam }: {
           drawn as four bars would be a bar chart that says nothing the numbers
           do not say louder and smaller. */}
       <div className="stat-grid" style={{ marginBottom: 12 }}>
+        {/* The hero is what is in the bank, once the owner has told the books
+            what that was on a day - the question this page was opened to
+            answer. Until then the hero is what is owed, and the tile beside
+            it says where to type the balance in. See lib/cash. */}
+        {bank ? (
+          <StatTile
+            hero
+            label="Cash on hand"
+            value={formatDollars(bank.cents)}
+            sub={`From ${formatDollars(bank.openingCents)} on ${bank.openingOn} · payroll at month end · not purchase orders`}
+            tone={bank.cents < 0 ? "bad" : undefined}
+            href="/money"
+          />
+        ) : (
+          <StatTile
+            label="Cash on hand"
+            value="Not set"
+            sub="Tell Financial what is in the bank and it carries the figure forward"
+            href="/money"
+          />
+        )}
         <StatTile
-          hero
+          hero={!bank}
           label="Owed to you"
           value={formatDollars(owed)}
           sub={`${openInvoices.length} invoice${openInvoices.length === 1 ? "" : "s"} open`}

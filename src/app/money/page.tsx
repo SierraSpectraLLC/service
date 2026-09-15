@@ -6,7 +6,8 @@ import { isStaffRole } from "@/lib/tenants";
 import { formatCents, formatDollars } from "@/lib/money";
 import { brandForTenant } from "@/lib/brand";
 import { costingBoard } from "@/lib/invoiceData";
-import { booksContext } from "@/lib/financeData";
+import { booksContext, cashFigures } from "@/lib/financeData";
+import CashOpeningForm from "@/components/CashOpeningForm";
 import { periodDays, periodSpan } from "@/lib/finance";
 import { DUE_SOON_DAYS } from "@/lib/bills";
 import FinanceShell from "@/components/FinanceShell";
@@ -40,9 +41,10 @@ export default async function MoneyPage({ searchParams }: {
   // from the rail beside it is the leak this whole section is built around.
   const { period, today, seesPayroll, figures: fig } =
     await booksContext(user, (await searchParams).period);
-  const [brand, board] = await Promise.all([
+  const [brand, board, { cash }] = await Promise.all([
     brandForTenant(myTenantOrgId(user)),
     costingBoard(today, periodDays(today, period), readTenant(user)),
+    cashFigures(user, today),
   ]);
 
   const { moneyIn: mIn, moneyOut: mOut } = fig;
@@ -166,6 +168,39 @@ export default async function MoneyPage({ searchParams }: {
         <div className="lane net">
           <h3>Where you stand</h3>
           <div className="inner">
+            {/* THE number: what is in the bank, as far as the app can tell.
+                Nothing here is a bank feed, so it is carried forward from a
+                balance the owner typed - see lib/cash for what counts. Absent
+                until one is set, with the form in its place: a $0 here would
+                read as broke, and a page that quietly showed the position
+                instead would leave the owner's actual question unanswered. */}
+            {cash ? (
+              <>
+                <div className={`bignum${cash.cents < 0 ? " neg" : ""}`}>{formatCents(cash.cents)}</div>
+                <div className="biglab">
+                  cash on hand · from {formatDollars(cash.openingCents)} on {cash.openingOn},
+                  {" "}plus {formatDollars(cash.receivedCents)} collected, less
+                  {" "}{formatDollars(cash.reimbursedCents + cash.overheadCents + cash.payrollCents)} out
+                  {cash.payrollMonths.length
+                    ? ` (payroll counted at month end, ${cash.payrollMonths.length} month${cash.payrollMonths.length === 1 ? "" : "s"})`
+                    : ""}
+                  {" · "}purchase orders and anything paid outside the app are not counted
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  <CashOpeningForm today={today} compact canSet={user.role === "owner"} />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="biglab" style={{ fontWeight: 600 }}>Cash on hand</div>
+                <div className="mut t-small" style={{ marginBottom: 8 }}>
+                  What is in the bank is the one figure the books cannot work out. Tell it once and it
+                  carries the number forward: plus what arrives, less claims paid, overhead and payroll.
+                </div>
+                <CashOpeningForm today={today} canSet={user.role === "owner"} />
+              </>
+            )}
+            <div className="rule" />
             <div className={`bignum${net < 0 ? " neg" : ""}`}>{formatCents(net)}</div>
             <div className="biglab">
               outstanding position · receivable less payable

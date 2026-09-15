@@ -9495,6 +9495,45 @@ export async function updateStipend(
   return {};
 }
 
+// ---------------- Cash on hand ----------------
+
+/**
+ * Tell the books what is in the bank.
+ *
+ * OWNER ONLY, on their own company's row. The app cannot know this number -
+ * see the schema note on orgs.cash_opening_on - so the owner types it, once,
+ * and lib/cash carries it forward from the flows the app does record.
+ * Typing it again on a later day is the correction for drift: the newer
+ * opening wins and the older flows stop counting, which is also why the two
+ * columns are overwritten rather than appended.
+ */
+export async function setCashOpening(
+  data: { amount: string; on: string },
+): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const mine = myTenantOrgId(u);
+  if (mine === null) return { error: "Your company is not set up" };
+  const cents = parseMoney(data.amount);
+  if (cents === null) return { error: "Enter the balance like 24,310.00" };
+  const on = data.on.trim();
+  if (!isIsoDay(on)) return { error: "Pick the day the balance is from" };
+  if (on > shopToday()) return { error: "That day has not happened yet" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, mine));
+  if (!org) return { error: "Not found" };
+  await db.update(orgs).set({ cashOpeningCents: cents, cashOpeningOn: on }).where(eq(orgs.id, mine));
+  await audit({
+    actor: u.email, entityType: "org", entityId: mine, tenantOrgId: mine,
+    action: `set the bank balance to ${formatCents(cents)} as of ${on}`
+      + (org.cashOpeningOn ? ` (was ${formatCents(org.cashOpeningCents)} as of ${org.cashOpeningOn})` : ""),
+    field: "cash_opening",
+    oldValue: org.cashOpeningOn ? `${org.cashOpeningCents} @ ${org.cashOpeningOn}` : "",
+    newValue: `${cents} @ ${on}`,
+  });
+  revalidatePath("/money");
+  revalidatePath("/owner");
+  return {};
+}
+
 // ---------------- Bills ----------------
 // Standing overhead - the liability policy, the health plan, the phone line.
 // See the note on the `bills` table for what one is and is not, lib/bills for

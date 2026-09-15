@@ -318,6 +318,18 @@ export const orgs = pgTable("orgs", {
   /** Where invoices and statements go. Blank falls back to the digest list. */
   apEmail: text("ap_email").notNull().default(""),
   /**
+   * What was in the bank on a day, for the OPERATOR's own row - the one
+   * number the money side could never derive, because nothing in here is a
+   * bank feed. The owner types it once; lib/cash rolls it forward from the
+   * flows the app does record (payments in, claims paid, company overhead,
+   * payroll at month end) to "cash on hand" today. Re-entering it on a later
+   * day is how a drift from the real statement gets corrected - the older
+   * flows simply stop counting. Blank date = never set, and the figure is
+   * absent rather than zero.
+   */
+  cashOpeningCents: integer("cash_opening_cents").notNull().default(0),
+  cashOpeningOn: text("cash_opening_on").notNull().default(""),   // YYYY-MM-DD
+  /**
    * The blanket PO an invoice must reference, and what is left on it. Both
    * blank/zero means no PO on file - which is one of the two silent rejections
    * (the other is an exhausted PO), so a draft invoice checks and WARNS rather
