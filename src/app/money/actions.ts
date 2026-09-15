@@ -173,6 +173,34 @@ export async function recordPayment(
 }
 
 /**
+ * Take a card at face value on this invoice, or stop doing so.
+ *
+ * The client who pays with a pre-loaded purchasing card holding exactly the
+ * invoice amount cannot run that amount plus a fee, so on that one bill the
+ * card is offered whatever their policy says and the surcharge is not added.
+ * The processing cost still lands in the books as a cost row when the
+ * payment settles - it is absorbed, not made to vanish.
+ */
+export async function setAbsorbCardFee(id: number, absorb: boolean): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, id));
+  if (!inv || !houseOf(u, inv.tenantOrgId)) return { error: "Not found" };
+  if (inv.status === "void") return { error: `${inv.number} is void.` };
+  if (inv.absorbCardFee === absorb) return {};
+  await db.update(invoices).set({ absorbCardFee: absorb, updatedAt: new Date() })
+    .where(and(eq(invoices.id, id), eq(invoices.tenantOrgId, inv.tenantOrgId as number)));
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: inv.tenantOrgId,
+    action: absorb
+      ? `set ${inv.number} to take a card at face value - no surcharge, the processing fee absorbed`
+      : `set ${inv.number} back to the client's card policy`,
+    field: "absorbCardFee", oldValue: String(inv.absorbCardFee), newValue: String(absorb),
+  });
+  revInvoice(inv);
+  return {};
+}
+
+/**
  * The one-click Record on a Stripe payment the webhook could not place.
  *
  * The suggestion row carries everything the payment needs - the amount, the

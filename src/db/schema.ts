@@ -3657,6 +3657,14 @@ export const invoices = pgTable("invoices", {
   title: text("title").notNull().default(""),
   /** The shop's words under the total, on the client's copy. */
   note: text("note").notNull().default(""),
+  /**
+   * Take a card at face value on THIS invoice: the card is offered whatever
+   * the client's policy says, and the surcharge is not added. For the client
+   * who pays with a pre-loaded card carrying exactly the invoice amount - a
+   * university purchasing card for $24,000 cannot run $24,000 plus a fee -
+   * so the operator absorbs the processing cost on that one bill.
+   */
+  absorbCardFee: boolean("absorb_card_fee").notNull().default(false),
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

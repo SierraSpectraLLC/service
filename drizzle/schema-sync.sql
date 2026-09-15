@@ -4441,6 +4441,9 @@ ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "booked_until" text NOT NULL 
 
 -- What an invoice is for, in one line, printed under its number on every copy.
 ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "title" text NOT NULL DEFAULT '';
+-- A card taken at face value on this one invoice: offered regardless of the
+-- client's policy, and no surcharge added.
+ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "absorb_card_fee" boolean NOT NULL DEFAULT false;
 
 -- The client an expense report is for when there is no job: spend the shop
 -- absorbs on a partner's account. See the column in schema.ts.

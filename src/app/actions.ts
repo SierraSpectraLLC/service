@@ -16936,12 +16936,15 @@ export async function startPayment(
   }
   const [settings] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
   const { policy } = await billingContext(full.row.orgId);
-  if (method === "card" && !policy.cardsEnabled) return { error: "Card payments are not offered on this account." };
+  // A card at face value on this one invoice (setAbsorbCardFee): offered
+  // whatever the policy says, and asked for without the surcharge.
+  const absorb = full.row.absorbCardFee;
+  if (method === "card" && !policy.cardsEnabled && !absorb) return { error: "Card payments are not offered on this account." };
 
   const amount = payAmount({
     balanceCents: view.payableCents, method,
-    cardSurchargeBps: policy.cardSurchargeBps,
-    cardSurchargeFlatCents: policy.cardSurchargeFlatCents,
+    cardSurchargeBps: absorb ? 0 : policy.cardSurchargeBps,
+    cardSurchargeFlatCents: absorb ? 0 : policy.cardSurchargeFlatCents,
   });
   const base = appUrl() || "";
   try {
@@ -16956,7 +16959,7 @@ export async function startPayment(
     await audit({
       actor: "client", entityType: "invoice", entityId: invoiceId, tenantOrgId: full.row.tenantOrgId,
       action: `opened a ${method === "ach" ? "bank transfer" : "card"} payment for ${formatCents(amount.amountCents)}`
-        + ` on ${full.row.number} (${stripeMode()} mode)`,
+        + ` on ${full.row.number}${method === "card" && absorb ? " at face value, fee absorbed" : ""} (${stripeMode()} mode)`,
     });
     return { url };
   } catch (e) {

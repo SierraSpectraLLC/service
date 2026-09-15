@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
-import { deleteInvoice, markInvoiceSent, recordPayment, voidInvoice } from "@/app/money/actions";
+import { deleteInvoice, markInvoiceSent, recordPayment, setAbsorbCardFee, voidInvoice } from "@/app/money/actions";
 import { PAYMENT_METHODS, METHOD_LABEL } from "@/lib/statement";
 import { formatCents } from "@/lib/money";
 
@@ -19,7 +19,7 @@ import { formatCents } from "@/lib/money";
  * because the PO warning, if there is one, is the last chance anybody has to
  * read it.
  */
-export default function InvoiceActions({ id, number, status, balanceCents, today, poWarning, canDelete = false }: {
+export default function InvoiceActions({ id, number, status, balanceCents, today, poWarning, canDelete = false, absorbCardFee = false }: {
   id: number;
   number: string;
   status: string;
@@ -27,6 +27,8 @@ export default function InvoiceActions({ id, number, status, balanceCents, today
   today: string;
   poWarning: string;
   canDelete?: boolean;
+  /** A card taken at face value on this invoice - no surcharge. */
+  absorbCardFee?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -61,6 +63,23 @@ export default function InvoiceActions({ id, number, status, balanceCents, today
     router.refresh();
   });
 
+  const cardAtFaceValue = async () => {
+    const ok = await confirmDialog({
+      title: absorbCardFee ? `Charge the card fee again on ${number}?` : `Take a card at face value on ${number}?`,
+      body: absorbCardFee
+        ? "The client's card policy applies again: the surcharge, if they have one, goes back on the pay page."
+        : "For a pre-loaded purchasing card holding exactly the invoice amount. A card is offered on this invoice whatever the client's policy says, and no surcharge is added - the processing fee is absorbed and lands in the books as a cost when it settles.",
+      action: absorbCardFee ? "Charge the fee" : "Face value",
+    });
+    if (!ok) return;
+    startTransition(async () => {
+      const res = await setAbsorbCardFee(id, !absorbCardFee);
+      if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
+      toast({ message: absorbCardFee ? `${number} is back on the card policy` : `${number} takes a card at face value` });
+      router.refresh();
+    });
+  };
+
   const kill = async () => {
     const why = await confirmReason({
       title: `Void ${number}?`,
@@ -86,6 +105,11 @@ export default function InvoiceActions({ id, number, status, balanceCents, today
         {status !== "draft" && status !== "void" && balanceCents > 0 && (
           <button className="btn sm accent" disabled={pending} onClick={() => setPaying((v) => !v)}>
             Record payment
+          </button>
+        )}
+        {status !== "void" && status !== "paid" && (
+          <button className="btn sm" disabled={pending} onClick={cardAtFaceValue}>
+            {absorbCardFee ? "Charge card fee" : "Card at face value"}
           </button>
         )}
         {status !== "void" && (
