@@ -4929,6 +4929,57 @@ export const bankTransactions = pgTable("bank_transactions", {
 ]);
 
 /**
+ * Every Stripe event this instance has acted on, by Stripe's own id.
+ *
+ * Stripe retries a webhook until it gets a 2xx and may deliver one twice
+ * regardless, and the route answers a duplicate before it reads a byte of the
+ * payload. The row is written first and removed if the handling fails, so a
+ * retry after a 500 is processed and a retry after a 200 is not.
+ */
+export const stripeEvents = pgTable("stripe_events", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  eventId: text("event_id").notNull(),
+  type: text("type").notNull().default(""),
+  /** The connected account the event came from, when it came from one. */
+  account: text("account").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [unique("stripe_events_event_id_unique").on(t.eventId)]);
+
+/**
+ * Money that arrived at Stripe with nothing on it saying which invoice it
+ * was for - a payment made outside a pay link, or one whose metadata was
+ * lost. Nothing is recorded on its own: the row names the one open invoice
+ * whose balance matches, when there is exactly one, and the money overview
+ * offers a one-click Record. Keyed on the Stripe reference so a redelivered
+ * event cannot suggest the same money twice.
+ */
+export const paymentSuggestions = pgTable("payment_suggestions", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** stripe */
+  provider: text("provider").notNull().default("stripe"),
+  /** The payment intent (or Stripe invoice) id - what the payment row will carry. */
+  reference: text("reference").notNull(),
+  amountCents: integer("amount_cents").notNull().default(0),
+  /** ach | card */
+  method: text("method").notNull().default("card"),
+  receivedOn: text("received_on").notNull().default(""),
+  /** The one open invoice whose balance matches, or null when none or several do. */
+  invoiceId: integer("invoice_id").references((): AnyPgColumn => invoices.id, { onDelete: "set null" }),
+  /** What the overview shows: "Stripe payment $X on date matches open invoice INV-... for client". */
+  description: text("description").notNull().default(""),
+  /** open | recorded | dismissed */
+  status: text("status").notNull().default("open"),
+  /** The payment row Record wrote, once it did. */
+  paymentId: integer("payment_id").references((): AnyPgColumn => payments.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  unique("payment_suggestions_reference_unique").on(t.provider, t.reference),
+  index("payment_suggestions_tenant_status_idx").on(t.tenantOrgId, t.status),
+]);
+
+/**
  * A month of payroll, run. The register (payroll) says what a month costs;
  * this says the month was actually paid, once, on a day - so the ledger can
  * carry the cost and the cash page can stop projecting it. One per month per

@@ -23,7 +23,8 @@ export type DecisionAction =
   | { kind: "send-invoice"; id: number; label: string }
   | { kind: "pay-po"; id: number; label: string }
   | { kind: "run-payroll"; ym: string; label: string }
-  | { kind: "draft-invoice"; workOrderId: number; number: string; label: string };
+  | { kind: "draft-invoice"; workOrderId: number; number: string; label: string }
+  | { kind: "record-suggestion"; id: number; label: string };
 
 export type Decision = {
   key: string;
@@ -55,6 +56,12 @@ export type DecisionSources = {
   staleQuotes: { id: number; number: string; orgName: string; daysUnanswered: number; totalCents: number; daysLeft: number; views: number }[];
   brokenPromises: { number: string; orgName: string; byName: string; promisedOn: string; daysPast: number; payableCents: number }[];
   openDisputes: { number: string; orgName: string; reason: string; daysOpen: number; disputedCents: number; restCents: number }[];
+  /**
+   * Money that reached Stripe with no invoice named on it (lib/stripeSettle
+   * .suggestStripePayment). One button records it on the invoice it matches;
+   * with no single match the row leads to receivables to be matched by hand.
+   */
+  stripeSuggestions?: { id: number; description: string; cents: number; invoiceId: number | null; invoiceNumber: string }[];
 };
 
 const shortDate = (s: string) =>
@@ -69,6 +76,20 @@ export function rankDecisions(list: Decision[]): Decision[] {
 export function decisionsFrom(s: DecisionSources): Decision[] {
   const out: Decision[] = [];
   const t = s.today;
+
+  // Money already in the Stripe balance and not yet on any invoice: the one
+  // decision on this list where the cash is real and the books are behind.
+  for (const p of s.stripeSuggestions ?? []) {
+    out.push({
+      key: `stripe-suggest-${p.id}`, tone: "warn",
+      title: p.invoiceId !== null ? `Record Stripe payment on ${p.invoiceNumber}` : "Match a Stripe payment",
+      detail: p.description, cents: p.cents,
+      href: p.invoiceId !== null ? `/money/invoices/${p.invoiceId}` : "/money/receivables",
+      action: p.invoiceId !== null
+        ? { kind: "record-suggestion", id: p.id, label: "Record" }
+        : { kind: "link", href: "/money/receivables", label: "Receivables" },
+    });
+  }
 
   for (const d of s.drafts) {
     out.push({

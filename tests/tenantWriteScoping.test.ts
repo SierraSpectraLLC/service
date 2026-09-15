@@ -115,6 +115,12 @@ function unguardedWrites(tables: string[]): Site[] {
  */
 const REVIEWED: Record<string, string> = {
   "payExpenseReport": "Guarded as of this commit - houseOf(u, report.tenantOrgId).",
+  "forgetEvent":
+    "Not a server action - lib/stripeSettle, reachable only from the webhook "
+    + "route after the Stripe signature check. It releases the idempotence "
+    + "claim on ONE event id when handling it failed, so Stripe's retry is "
+    + "processed; the id is Stripe's own, globally unique, never a caller's "
+    + "choice, and the row it deletes holds nothing but that id.",
   "recordReferralPayment":
     "Not a server action. It lives in lib/stripeSettle precisely so that it is "
     + "not reachable over the network: its only caller is the webhook route, "

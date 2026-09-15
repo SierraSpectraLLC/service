@@ -57,6 +57,10 @@ const STAMPED = [
   // The lease a shipped system enforces on itself offline. Device stamp,
   // like its siblings: the lease belongs to the machine's workspace.
   "deviceLeases",
+  // Stripe's side of the books. An event takes the workspace whose connected
+  // account it came from; a suggestion the same, because the money reached
+  // THAT account and only that workspace's invoices can be offered for it.
+  "stripeEvents", "paymentSuggestions",
   // A dated note somebody wrote onto the calendar. Written by a CLIENT as
   // often as by the shop, so the stamp is taken from the note's organization
   // rather than from the writer: a client has no workspace of their own, and
