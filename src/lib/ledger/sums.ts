@@ -211,6 +211,51 @@ export async function entries(f: LedgerFilter, limit = 500): Promise<LedgerEntry
     });
 }
 
+/**
+ * One account's balance per document - every open invoice's balance in one
+ * query, rather than balanceOf() once per row. Keyed by ref_id.
+ */
+export async function balancesByRef(tenant: number | null, account: AccountKey, refType: RefType): Promise<Map<string, number>> {
+  const rows = await db.select({
+    refId: ledgerEntries.refId,
+    debit: sql<number>`coalesce(sum(${ledgerLines.debitCents}), 0)`,
+    credit: sql<number>`coalesce(sum(${ledgerLines.creditCents}), 0)`,
+  }).from(ledgerLines)
+    .innerJoin(ledgerEntries, eq(ledgerLines.entryId, ledgerEntries.id))
+    .where(and(forTenant(ledgerEntries.tenantOrgId, tenant), eq(ledgerEntries.refType, refType), eq(ledgerLines.account, account)))
+    .groupBy(ledgerEntries.refId);
+  return new Map(rows.map((r) => [r.refId, balanceFrom(account, Number(r.debit), Number(r.credit))]));
+}
+
+export type OrgSums = { orgId: number; revenueCents: number; partsCostCents: number; fieldCostCents: number };
+
+/**
+ * Revenue and direct cost per client inside a window, from the entries that
+ * name one - margin by client, straight off the journal.
+ */
+export async function sumsByOrg(tenant: number | null, from: string, to: string): Promise<OrgSums[]> {
+  const rows = await db.select({
+    orgId: ledgerEntries.refOrgId,
+    account: ledgerLines.account,
+    debit: sql<number>`coalesce(sum(${ledgerLines.debitCents}), 0)`,
+    credit: sql<number>`coalesce(sum(${ledgerLines.creditCents}), 0)`,
+  }).from(ledgerLines)
+    .innerJoin(ledgerEntries, eq(ledgerLines.entryId, ledgerEntries.id))
+    .where(and(whereFor({ tenant, from, to }), sql`${ledgerEntries.refOrgId} is not null`))
+    .groupBy(ledgerEntries.refOrgId, ledgerLines.account);
+  const out = new Map<number, OrgSums>();
+  for (const r of rows) {
+    if (r.orgId === null || !isAccountKey(r.account)) continue;
+    const o = out.get(r.orgId) ?? { orgId: r.orgId, revenueCents: 0, partsCostCents: 0, fieldCostCents: 0 };
+    const bal = balanceFrom(r.account, Number(r.debit), Number(r.credit));
+    if (ACCOUNTS[r.account].group === "revenue") o.revenueCents += bal;
+    else if (r.account === "cost_parts") o.partsCostCents += bal;
+    else if (r.account === "cost_field_expenses") o.fieldCostCents += bal;
+    out.set(r.orgId, o);
+  }
+  return [...out.values()];
+}
+
 /** Every entry that names one document, oldest first - a drawer's money timeline. */
 export async function timelineFor(tenant: number | null, refType: RefType, refId: string | number): Promise<LedgerEntry[]> {
   return (await entries({ tenant, refType, refId: String(refId) })).reverse();

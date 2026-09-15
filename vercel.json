@@ -51,6 +51,10 @@
     {
       "path": "/api/cron/ledger-parity",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/bank-sync",
+      "schedule": "0 * * * *"
     }
   ]
 }

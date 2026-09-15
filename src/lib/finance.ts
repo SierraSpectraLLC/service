@@ -1,15 +1,16 @@
 // The shape of the financial section: what is in it, who may see each part,
 // and over what window.
 //
-// Billing, Purchasing, Reimbursements, Overhead and Payroll were five nav
-// entries over one subject. A purchase order and an invoice are the same
-// question asked from opposite ends - what is committed, and what is owed -
-// and nothing in the app added them up, so the number an owner actually wants
-// ("what is left") did not exist on any screen.
+// Seven rooms over one journal. Every dollar on every one of them is SUM()
+// over rows in lib/ledger; the rooms differ in which rows they show and how
+// they are grouped, never in how a figure is computed. Position is the stocks
+// (Home, Cash), Money is the two directions and the people at the other end
+// (Receivables, Payables, Clients), Record is the journal itself and what is
+// derived from it (Ledger, Reports).
 //
 // Pure, and separate from the components, because two things have to agree
-// about it: the rail decides what to show, and the overview decides what to
-// SUM. If those two ever disagree the lane totals leak a figure the rail was
+// about it: the rail decides what to show, and the pages decide what to SUM.
+// If those two ever disagree the lane totals leak a figure the rail was
 // hiding, which is the one bug this file exists to make impossible.
 
 export const PERIODS = ["month", "quarter", "ytd"] as const;
@@ -69,6 +70,11 @@ export function periodSpan(today: string, p: Period): string {
   return p === "month" ? monthLabel(start) : `${monthLabel(start)} to date`;
 }
 
+/** "this month" / "this quarter" / "this year" - the window inside a sentence. */
+export function periodWord(p: Period): string {
+  return p === "month" ? "this month" : p === "quarter" ? "this quarter" : "this year";
+}
+
 const MONTHS = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
 
@@ -78,142 +84,117 @@ const monthLabel = (day: string): string =>
 // ── The rail ────────────────────────────────────────────────────────────────
 
 export const FINANCE_KEYS = [
-  "overview",
-  "quotes", "invoices", "collections", "contracts",
-  "purchasing", "reimbursements", "overhead", "bills", "payroll",
-  "costing",
+  "overview", "cash",
+  "receivables", "payables", "clients",
+  "ledger", "reports",
 ] as const;
 export type FinanceKey = (typeof FINANCE_KEYS)[number];
 
-/** Cents per section, for the rail's badge. Absent means "no figure to show". */
+/** Cents per room, for the rail's badge. Absent means "no figure to show". */
 export type FinanceAmounts = Partial<Record<FinanceKey, number>>;
+/** A badge that is not a dollar figure - "2 on hold" beside Clients. */
+export type FinanceLabels = Partial<Record<FinanceKey, string>>;
+/** A badge coloured because the figure is itself the problem. */
+export type FinanceTones = Partial<Record<FinanceKey, "warn" | "bad">>;
 
 export type FinanceEntry = {
   key: FinanceKey;
   label: string;
   href: string;
-  /** Colours the badge when the figure is itself the problem. */
-  tone?: "warn" | "bad";
 };
 
 export type FinanceGroup = { label: string; entries: FinanceEntry[] };
 
-/**
- * Every room in the section, in the order money moves through it, at the paths
- * they live at TODAY. Purchasing, reimbursements and payroll still sit outside
- * /money; the rail reaches them anyway, which is the whole point of shipping
- * the section before the route moves.
- */
+/** Every room in the section, in the order the prototype draws them. */
 const ENTRIES: (FinanceEntry & { group: string })[] = [
-  { group: "Position", key: "overview", label: "Overview", href: "/money" },
+  { group: "Position", key: "overview", label: "Home", href: "/money" },
+  { group: "Position", key: "cash", label: "Cash", href: "/money/cash" },
 
-  { group: "Money in", key: "quotes", label: "Quotes", href: "/money/quotes" },
-  { group: "Money in", key: "invoices", label: "Invoices", href: "/money/invoices" },
-  { group: "Money in", key: "collections", label: "Collections", href: "/money/collections", tone: "bad" },
-  { group: "Money in", key: "contracts", label: "Contracts", href: "/money/contracts" },
+  { group: "Money", key: "receivables", label: "Receivables", href: "/money/receivables" },
+  { group: "Money", key: "payables", label: "Payables", href: "/money/payables" },
+  { group: "Money", key: "clients", label: "Clients", href: "/money/clients" },
 
-  { group: "Money out", key: "purchasing", label: "Purchasing", href: "/money/purchasing" },
-  { group: "Money out", key: "reimbursements", label: "Reimbursements", href: "/money/reimbursements", tone: "warn" },
-  { group: "Money out", key: "overhead", label: "Overhead", href: "/money/expenses" },
-  { group: "Money out", key: "bills", label: "Bills", href: "/money/bills" },
-  { group: "Money out", key: "payroll", label: "Payroll", href: "/money/payroll" },
-
-  { group: "Analysis", key: "costing", label: "Job costing", href: "/money/costing" },
+  { group: "Record", key: "ledger", label: "Ledger", href: "/money/ledger" },
+  { group: "Record", key: "reports", label: "Reports", href: "/money/reports" },
 ];
 
-const GROUP_ORDER = ["Position", "Money in", "Money out", "Analysis"];
+const GROUP_ORDER = ["Position", "Money", "Record"];
 
 /**
  * The two rooms that are not the books.
  *
  * Raising a purchase order and claiming back a hotel are things an engineer
  * DOES, not facts about how the business is doing, and both were doors of
- * their own before this section existed. Closing them along with the rest
- * would take a tech's own expense report away from the tech, which is not a
- * confidentiality rule, it is a broken app. Everything else here is the shop's
- * position and belongs to whoever owns the shop - see lib/books.
- *
- * So they are in every reader's rail and every reader's Financial menu. A
- * reader who has NO Financial menu - an ordinary engineer, who has neither the
- * books nor the register - reaches them from Operations instead, which is the
- * one place the app names them twice-over and it never names them twice to the
- * same person. See src/app/layout.tsx, where that fork is drawn.
+ * their own before this section existed. They live in Operations, for
+ * everybody - they were never rooms of this section for an engineer, and a
+ * books reader reaches them from the same menu. See src/lib/nav.
  */
-export const WORKING_ROOMS: readonly FinanceKey[] = ["purchasing", "reimbursements"] as const;
+export const WORKING_ROOMS: readonly { href: string; label: string }[] = [
+  { href: "/money/purchasing", label: "Purchasing" },
+  /* "Reimbursements", not "Expenses": Overhead is also expenses, and two
+     things by one name in one section is the confusion the financial merge
+     exists to remove. */
+  { href: "/money/reimbursements", label: "Reimbursements" },
+] as const;
 
-export const isWorkingRoom = (key: FinanceKey): boolean => WORKING_ROOMS.includes(key);
-
-/**
- * The section as a NAV group - the same rooms in the same order as the rail,
- * because a menu that drifts from the rail is two answers to "what is in
- * here".
- *
- * Payroll leaves entirely for a reader who may not read one, on the same
- * reasoning as financeRail below: an entry naming a thing somebody cannot
- * have is worse than no entry.
- *
- * The two WORKING_ROOMS are always here, for every reader who gets this menu
- * at all. They are in Operations for everybody else - see WORKING_ROOMS above.
- * The split used to run the other way, listing them in both menus on the
- * reasoning that this one was owner-only and the two readerships never
- * overlapped. HR broke that: somebody who reads the register but not the books
- * has this menu too, and would have read the same two rooms twice.
- */
 /** What a reader is allowed to be shown, as the two independent privileges. */
 export type Visibility = {
   /** Whether this reader may read the shop's position at all - see lib/books. */
   seesBooks: boolean;
-  /** Whether they may read the payroll register - see lib/payroll. Not implied by the books. */
+  /**
+   * Whether they may read the payroll register - see lib/payroll. Not implied
+   * by the books. It gates no room now: it gates the payroll rows inside
+   * Payables and the payroll cost line in Reports. On its own it earns the
+   * register, which is a page in the section but not a room of it.
+   */
   seesPayroll: boolean;
 };
 
 /**
- * Which rooms exist for this reader. ONE predicate, shared by the menu and the
- * rail, because the comment on financeNavItems promises they cannot drift and
- * two copies of a filter is how that promise gets broken.
- *
- * Three independent answers, not a ladder:
- *   - the two WORKING_ROOMS are everybody's, because they are things an
- *     engineer DOES;
- *   - Payroll is its own privilege. It used to require the books as well,
- *     which was true while the owner was the only person who could read a
- *     register and false the moment an owner could appoint HR - somebody who
- *     runs the payout without reading what the shop invoiced;
- *   - everything else is the books.
+ * Where the old rooms went. Every old path answers with the room that
+ * absorbed it, so a bookmark, a digest link or a muscle memory still lands.
  */
-const visible = (key: FinanceKey, opts: Visibility): boolean =>
-  isWorkingRoom(key) ? true : key === "payroll" ? opts.seesPayroll : opts.seesBooks;
+export const RETIRED_ROUTES: Record<string, string> = {
+  "/money/quotes": "/money/receivables?stage=quoted",
+  "/money/invoices": "/money/receivables",
+  "/money/collections": "/money/receivables?stage=pastdue",
+  "/money/expenses": "/money/payables",
+  "/money/bills": "/money/payables",
+  "/money/costing": "/money/reports",
+  "/money/contracts": "/money/clients",
+};
 
+/**
+ * The section as a NAV group - the same rooms in the same order as the rail,
+ * because a menu that drifts from the rail is two answers to "what is in
+ * here". Every room is the books; a reader who may not read them gets none,
+ * and HR - the register without the books - gets the one page that is theirs.
+ */
 export function financeNavItems(opts: Visibility): { href: string; label: string }[] {
-  return ENTRIES.filter((e) => visible(e.key, opts)).map((e) => ({ href: e.href, label: e.label }));
+  if (opts.seesBooks) return ENTRIES.map((e) => ({ href: e.href, label: e.label }));
+  return opts.seesPayroll ? [{ href: "/money/payroll", label: "Payroll register" }] : [];
 }
 
 /** What each room is called, wherever it is named - rail, crumb or title. */
 export const FINANCE_LABEL: Record<FinanceKey, string> =
   Object.fromEntries(ENTRIES.map((e) => [e.key, e.label])) as Record<FinanceKey, string>;
 
+export const FINANCE_HREF: Record<FinanceKey, string> =
+  Object.fromEntries(ENTRIES.map((e) => [e.key, e.href])) as Record<FinanceKey, string>;
+
 /**
- * The rail this reader gets.
- *
- * Payroll leaves entirely for anyone who may not read one - not greyed out,
- * not showing a figure with the label removed. An entry that names a thing
- * somebody cannot have is worse than no entry, and a rail badge is a figure:
- * "Payroll $18,600" leaks the number whether or not the link works.
- *
- * The books collapse the same way, and for the same reason. A reader who is
- * not the owner still reaches Purchasing and Reimbursements, so they still get
- * a rail; what they get is a rail of the two rooms that are theirs, with no
- * "Invoices $84,000" beside it. Dropping the LINKS while keeping the badges
- * would have been the leak this file exists to make impossible - the number is
- * the secret, not the anchor tag.
+ * The rail this reader gets: every room for a books reader, nothing for
+ * anybody else. Not greyed out, not a figure with the label removed - a rail
+ * badge is a figure, and "Receivables $84,000" leaks the number whether or not
+ * the link works.
  */
 export function financeRail(opts: Visibility & { period?: Period }): FinanceGroup[] {
+  if (!opts.seesBooks) return [];
   const period = opts.period ?? "month";
-  const rooms = ENTRIES.filter((e) => visible(e.key, opts));
   return GROUP_ORDER
     .map((label) => ({
       label,
-      entries: rooms.filter((e) => e.group === label)
+      entries: ENTRIES.filter((e) => e.group === label)
         .map(({ group: _group, ...e }) => ({ ...e, href: withPeriod(e.href, period) })),
     }))
     .filter((g) => g.entries.length > 0);
@@ -245,36 +226,12 @@ export function positionTone(owedCents: number, pastDueCents: number): "good" | 
   return "warn";
 }
 
-/**
- * One thing somebody has to decide, from whichever ledger raised it.
- *
- * The argument for the whole section in one list. Every item here was already
- * visible somewhere before - an overdue invoice on Collections, an unanswered
- * quote on Quotes, a closed job on the overview, a renewal on Contracts, an
- * unapproved receipt on Reimbursements - on five pages, with nothing that put
- * them in one place or ranked them against each other.
- */
-export type Decision = {
-  key: string;
-  /** Red is costing money today; amber is going to. */
-  tone: "bad" | "warn";
-  title: string;
-  detail: string;
-  href: string;
-};
-
 /** An invoice past this many days has stopped being late and become a problem. */
 export const CHASE_DAYS = 45;
 /** A quote unanswered this long is not being considered, it is being ignored. */
 export const STALE_QUOTE_DAYS = 10;
 /** Close enough to a renewal that terms have to be drafted now. */
 export const RENEWAL_DAYS = 90;
-
-/** Red first, then by size: the biggest thing you can fix today goes on top. */
-export function rankDecisions(list: Decision[]): Decision[] {
-  const weight = (d: Decision) => (d.tone === "bad" ? 0 : 1);
-  return [...list].sort((a, b) => weight(a) - weight(b));
-}
 
 /** The window as a day count, for anything that measures backwards from today. */
 export function periodDays(today: string, p: Period): number {
@@ -285,6 +242,19 @@ export function periodDays(today: string, p: Period): number {
 export function daysBetween(from: string, to: string): number {
   const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
   return Number.isFinite(ms) ? Math.max(0, Math.round(ms / 86400000)) : 0;
+}
+
+/** Signed days from one shop day to another - negative when `to` is earlier. */
+export function daysFrom(from: string, to: string): number {
+  const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
+  return Number.isFinite(ms) ? Math.round(ms / 86400000) : 0;
+}
+
+/** A shop day plus some days. */
+export function plusDays(day: string, n: number): string {
+  const t = Date.parse(`${day}T00:00:00Z`);
+  if (!Number.isFinite(t)) return day;
+  return new Date(t + n * 86400000).toISOString().slice(0, 10);
 }
 
 /**

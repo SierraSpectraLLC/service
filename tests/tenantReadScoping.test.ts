@@ -27,6 +27,9 @@ import { describe, expect, it } from "vitest";
  * this guard out quietly, which is the failure mode it exists to prevent.
  */
 const ALLOWED: Record<string, string> = {
+  "src/lib/bank/sync.ts::bankConnections":
+    "The hourly bank-feed cron. Every connection is pulled into its OWN workspace's " +
+    "bank_transactions - each row takes conn.tenantOrgId - and nothing is rendered to a person.",
   "src/app/api/cron/renewals/route.ts::agreements":
     "The platform's weekly sweep. Every agreement is chased by its OWN operator - " +
     "the loop mails houseEmails(a.tenantOrgId) - and nothing is rendered to a person.",

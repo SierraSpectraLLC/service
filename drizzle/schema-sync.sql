@@ -4629,3 +4629,28 @@ DO $$ BEGIN
       FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- A workspace's bank feed connection: the provider's token, the sync cursor,
+-- the balance before the feed's first line. One per workspace.
+CREATE TABLE IF NOT EXISTS "bank_connections" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "provider" text NOT NULL DEFAULT 'plaid',
+  "provider_item_id" text NOT NULL DEFAULT '',
+  "access_token" text NOT NULL DEFAULT '',
+  "cursor" text NOT NULL DEFAULT '',
+  "institution" text NOT NULL DEFAULT '',
+  "opening_cents" integer NOT NULL DEFAULT 0,
+  "opening_on" text NOT NULL DEFAULT '',
+  "last_sync_at" timestamp,
+  "last_error" text NOT NULL DEFAULT '',
+  "connected_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "bank_connections_tenant_unique" UNIQUE ("tenant_org_id")
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'bank_connections_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "bank_connections" ADD CONSTRAINT "bank_connections_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;

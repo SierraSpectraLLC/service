@@ -866,3 +866,238 @@ export async function runLedgerParity(): Promise<{ error?: string; nonzero?: num
   revalidatePath("/parity/ledger");
   return { nonzero: own?.figures.filter((f) => f.diffCents !== 0).length ?? 0 };
 }
+
+// ---------------- The bank feed and reconciliation ----------------
+// The bank is somebody else's; the books are ours; reconciling is how the
+// two agree. A bank line gets a home one of three ways - matched to an entry
+// already on the books, recorded as the payment it plainly is, or posted as
+// a cost the books had not seen - and each way writes matched_entry_id in
+// the same breath as the entry, so a line is never half-reconciled.
+
+/** The feed's connection for this workspace, if any. */
+async function myBank(u: Awaited<ReturnType<typeof requireOwner>>) {
+  const mine = myTenantOrgId(u);
+  if (mine === null) return { mine: null, conn: null };
+  const { bankConnections } = await import("@/db/schema");
+  const [conn] = await db.select().from(bankConnections).where(eq(bankConnections.tenantOrgId, mine));
+  return { mine, conn: conn ?? null };
+}
+
+/** A Link token for the owner's browser. Owner only; nothing is stored yet. */
+export async function bankLinkToken(): Promise<{ error?: string; token?: string }> {
+  const u = await requireOwner();
+  const mine = myTenantOrgId(u);
+  if (mine === null) return { error: "Your company is not set up" };
+  const { linkToken, plaidConfigured } = await import("@/lib/bank/sync");
+  if (!plaidConfigured()) return { error: "The bank feed is not configured on this instance. Set PLAID_CLIENT_ID and PLAID_SECRET." };
+  try {
+    return { token: await linkToken(mine, u.email) };
+  } catch (e) { return { error: (e as Error).message }; }
+}
+
+/** Link succeeded in the browser: keep the connection, sealed, and pull the first page. */
+export async function connectBank(data: { publicToken: string; institution: string }): Promise<{ error?: string; added?: number }> {
+  const u = await requireOwner();
+  const { mine, conn } = await myBank(u);
+  if (mine === null) return { error: "Your company is not set up" };
+  const { exchangePublicToken, syncConnection } = await import("@/lib/bank/sync");
+  const { seal } = await import("@/lib/secretBox");
+  const { bankConnections } = await import("@/db/schema");
+  let token: { accessToken: string; itemId: string };
+  try { token = await exchangePublicToken(data.publicToken); } catch (e) { return { error: (e as Error).message }; }
+  const row = {
+    provider: "plaid", providerItemId: token.itemId, accessToken: seal(token.accessToken),
+    cursor: "", institution: data.institution.trim().slice(0, 120), connectedBy: u.email, lastError: "",
+  };
+  const [saved] = conn
+    ? await db.update(bankConnections).set(row).where(eq(bankConnections.id, conn.id)).returning()
+    : await db.insert(bankConnections).values({ ...row, tenantOrgId: mine }).returning();
+  await audit({
+    actor: u.email, entityType: "bank", entityId: saved.id, tenantOrgId: mine,
+    action: `connected the bank feed${row.institution ? ` (${row.institution})` : ""}`,
+  });
+  const r = await syncConnection({ ...saved, accessToken: token.accessToken }).catch((e: Error) => ({ added: 0, error: e.message }));
+  revMoney();
+  return { added: r.added, ...("error" in r ? { error: r.error } : {}) };
+}
+
+/** Pull the feed now rather than waiting for the hour. */
+export async function syncBankNow(): Promise<{ error?: string; added?: number }> {
+  const u = await requireOwner();
+  const { conn } = await myBank(u);
+  if (!conn) return { error: "No bank feed is connected." };
+  if (conn.provider === "manual") return { error: "This feed is imported by hand - paste a statement instead." };
+  const { syncConnection } = await import("@/lib/bank/sync");
+  const { open } = await import("@/lib/secretBox");
+  const accessToken = open(conn.accessToken);
+  if (!accessToken) return { error: "The connection's token could not be read. Connect the bank again." };
+  try {
+    const r = await syncConnection({ ...conn, accessToken });
+    revMoney();
+    return { added: r.added };
+  } catch (e) { return { error: (e as Error).message }; }
+}
+
+/**
+ * The balance before the feed's first line, so "bank says" is a statement
+ * balance and not a sum of movements since some Tuesday.
+ */
+export async function setBankOpening(data: { amount: string; on: string }): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const { mine, conn } = await myBank(u);
+  if (mine === null) return { error: "Your company is not set up" };
+  const cents = parseMoney(data.amount);
+  if (cents === null) return { error: "Enter the balance like 24,310.00" };
+  const on = data.on.trim();
+  if (!isIsoDay(on)) return { error: "Pick the day the balance is from" };
+  const { bankConnections } = await import("@/db/schema");
+  if (conn) {
+    await db.update(bankConnections).set({ openingCents: cents, openingOn: on }).where(eq(bankConnections.id, conn.id));
+  } else {
+    await db.insert(bankConnections).values({ tenantOrgId: mine, provider: "manual", openingCents: cents, openingOn: on, connectedBy: u.email });
+  }
+  await audit({ actor: u.email, entityType: "bank", entityId: mine, tenantOrgId: mine, action: `set the bank's opening balance to ${formatCents(cents)} as of ${on}` });
+  revMoney();
+  return {};
+}
+
+/**
+ * A statement pasted in: one line per transaction, "date, description,
+ * amount" with money in positive. The fallback for a bank the feed cannot
+ * reach, and the way dev:local gets a feed at all. Idempotent on the line's
+ * own content, so pasting a statement twice adds nothing.
+ */
+export async function importBankLines(text: string): Promise<{ error?: string; added?: number; skipped?: number }> {
+  const u = await requireOwner();
+  const { mine, conn } = await myBank(u);
+  if (mine === null) return { error: "Your company is not set up" };
+  const { bankConnections, bankTransactions } = await import("@/db/schema");
+  if (!conn) await db.insert(bankConnections).values({ tenantOrgId: mine, provider: "manual", connectedBy: u.email });
+  let added = 0, skipped = 0;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || /^date/i.test(line)) continue;
+    const parts = line.split(/\t|,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((p) => p.trim().replace(/^"|"$/g, ""));
+    if (parts.length < 3) { skipped++; continue; }
+    const [on, description] = parts;
+    const amount = parseFloat(parts[parts.length - 1].replace(/[$,]/g, ""));
+    if (!isIsoDay(on) || !Number.isFinite(amount)) { skipped++; continue; }
+    const cents = Math.round(amount * 100);
+    const key = crypto.createHash("sha256").update(`${mine}|${on}|${description}|${cents}`).digest("hex").slice(0, 32);
+    const [dup] = await db.select({ id: bankTransactions.id }).from(bankTransactions)
+      .where(and(eq(bankTransactions.provider, "manual"), eq(bankTransactions.providerTxnId, key)));
+    if (dup) { skipped++; continue; }
+    await db.insert(bankTransactions).values({ tenantOrgId: mine, provider: "manual", providerTxnId: key, on, description: description.slice(0, 200), amountCents: cents });
+    added++;
+  }
+  await audit({ actor: u.email, entityType: "bank", entityId: mine, tenantOrgId: mine, action: `imported ${added} bank line${added === 1 ? "" : "s"} from a pasted statement${skipped ? ` (${skipped} skipped)` : ""}` });
+  revMoney();
+  return { added, skipped };
+}
+
+async function bankLine(u: Awaited<ReturnType<typeof requireStaff>>, txnId: number) {
+  const { bankTransactions } = await import("@/db/schema");
+  const [line] = await db.select().from(bankTransactions).where(eq(bankTransactions.id, txnId));
+  if (!line || !houseOf(u, line.tenantOrgId)) return null;
+  return line;
+}
+
+/** A bank line and a cash entry are the same money: say so. */
+export async function matchBankLine(txnId: number, entryId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const line = await bankLine(u, txnId);
+  if (!line) return { error: "Not found" };
+  if (line.matchedEntryId !== null) return { error: "That bank line already has an entry." };
+  const [entry] = await db.select().from(ledgerEntries).where(eq(ledgerEntries.id, entryId));
+  if (!entry || entry.tenantOrgId !== line.tenantOrgId) return { error: "Not found" };
+  const { ledgerLines } = await import("@/db/schema");
+  const cash = (await db.select().from(ledgerLines).where(eq(ledgerLines.entryId, entryId))).find((l) => l.account === "bank");
+  if (!cash) return { error: "That entry does not touch the bank." };
+  if (cash.debitCents - cash.creditCents !== line.amountCents) return { error: "The amounts differ. Match a line to an entry of the same amount." };
+  const { bankTransactions } = await import("@/db/schema");
+  await db.update(bankTransactions).set({ matchedEntryId: entryId })
+    .where(and(eq(bankTransactions.id, txnId), eq(bankTransactions.tenantOrgId, line.tenantOrgId as number)));
+  await audit({ actor: u.email, entityType: "bank", entityId: txnId, tenantOrgId: line.tenantOrgId, action: `matched bank line "${line.description}" (${formatCents(line.amountCents)}) to ledger entry #${entryId}` });
+  revMoney();
+  return {};
+}
+
+/** A credit that equals an open invoice's balance: record it as that payment, matched. */
+export async function recordBankPayment(txnId: number, invoiceId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const line = await bankLine(u, txnId);
+  if (!line) return { error: "Not found" };
+  if (line.matchedEntryId !== null) return { error: "That bank line already has an entry." };
+  if (line.amountCents <= 0) return { error: "Money out is not a payment on an invoice." };
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, invoiceId));
+  if (!inv || !houseOf(u, inv.tenantOrgId) || inv.tenantOrgId !== line.tenantOrgId) return { error: "Not found" };
+  if (inv.status === "draft") return { error: `${inv.number} has not been sent yet.` };
+  const [row] = await db.insert(payments).values({
+    tenantOrgId: inv.tenantOrgId, invoiceId, method: "ach", amountCents: line.amountCents,
+    reference: `bank feed - ${line.description}`.slice(0, 120), receivedOn: line.on, recordedBy: u.email,
+  }).returning();
+  let posted;
+  try {
+    posted = await postInvoicePayment({ inv, payment: row, by: u.email });
+  } catch (e) {
+    await db.delete(payments).where(and(eq(payments.id, row.id), eq(payments.tenantOrgId, inv.tenantOrgId as number)));
+    return ledgerRefusal(e);
+  }
+  const { bankTransactions } = await import("@/db/schema");
+  if (posted) {
+    await db.update(bankTransactions).set({ matchedEntryId: posted.id })
+      .where(and(eq(bankTransactions.id, txnId), eq(bankTransactions.tenantOrgId, line.tenantOrgId as number)));
+  }
+  await settleStatus(inv);
+  await audit({ actor: u.email, entityType: "invoice", entityId: invoiceId, tenantOrgId: inv.tenantOrgId, action: `recorded ${formatCents(line.amountCents)} on ${inv.number} from the bank feed ("${line.description}", ${line.on}) - matched` });
+  revInvoice(inv);
+  revMoney();
+  return {};
+}
+
+/** Nothing on the books explains this line: post it as a cost (or other income), matched. */
+export async function postBankLine(txnId: number, data: { account: string; memo: string }): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const line = await bankLine(u, txnId);
+  if (!line) return { error: "Not found" };
+  if (line.matchedEntryId !== null) return { error: "That bank line already has an entry." };
+  const { isAccountKey, ACCOUNTS, post } = await import("@/lib/ledger");
+  if (!isAccountKey(data.account)) return { error: "Pick an account." };
+  const account = data.account;
+  const group = ACCOUNTS[account].group;
+  if (line.amountCents < 0 && group !== "cost") return { error: "Money out posts to a cost account." };
+  if (line.amountCents > 0 && group !== "revenue") return { error: "Money in posts to a revenue account." };
+  const cents = Math.abs(line.amountCents);
+  if (cents === 0) return { error: "A zero line has nothing to post." };
+  const memo = (data.memo.trim() || line.description).slice(0, 200);
+  let posted;
+  try {
+    posted = await post({
+      on: line.on, memo,
+      ref: { type: "bank", id: `BK-${line.id}` }, kind: "posted",
+      lines: line.amountCents < 0
+        ? [{ account, debitCents: cents }, { account: "bank", creditCents: cents }]
+        : [{ account: "bank", debitCents: cents }, { account, creditCents: cents }],
+      postedBy: u.email, tenantOrgId: line.tenantOrgId,
+    });
+  } catch (e) { return ledgerRefusal(e); }
+  const { bankTransactions } = await import("@/db/schema");
+  await db.update(bankTransactions).set({ matchedEntryId: posted.id })
+    .where(and(eq(bankTransactions.id, txnId), eq(bankTransactions.tenantOrgId, line.tenantOrgId as number)));
+  await audit({ actor: u.email, entityType: "bank", entityId: txnId, tenantOrgId: line.tenantOrgId, action: `posted bank line "${line.description}" (${formatCents(line.amountCents)}) to ${ACCOUNTS[account].name} - matched` });
+  revMoney();
+  return {};
+}
+
+/** Take a match back off. The entry stays; the bank line is unmatched again. */
+export async function unmatchBankLine(txnId: number): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const line = await bankLine(u, txnId);
+  if (!line) return { error: "Not found" };
+  const { bankTransactions } = await import("@/db/schema");
+  await db.update(bankTransactions).set({ matchedEntryId: null })
+    .where(and(eq(bankTransactions.id, txnId), eq(bankTransactions.tenantOrgId, line.tenantOrgId as number)));
+  await audit({ actor: u.email, entityType: "bank", entityId: txnId, tenantOrgId: line.tenantOrgId, action: `unmatched bank line "${line.description}" from entry #${line.matchedEntryId}` });
+  revMoney();
+  return {};
+}

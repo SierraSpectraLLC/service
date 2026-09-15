@@ -72,7 +72,7 @@ const STAMPED = [
   // invoice's, a PO's, a report's); a bank line takes the workspace whose
   // account the feed is connected to; a payroll run the register's. Every
   // read goes through forTenant() - see lib/ledger/sums.
-  "ledgerEntries", "bankTransactions", "payrollRuns", "ledgerParity",
+  "ledgerEntries", "bankTransactions", "payrollRuns", "ledgerParity", "bankConnections",
 ];
 
 const walk = (dir: string): string[] =>

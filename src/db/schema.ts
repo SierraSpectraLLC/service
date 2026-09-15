@@ -4954,3 +4954,30 @@ export const ledgerParity = pgTable("ledger_parity", {
   ledgerCents: integer("ledger_cents").notNull().default(0),
   note: text("note").notNull().default(""),
 }, (t) => [index("ledger_parity_tenant_run_idx").on(t.tenantOrgId, t.runAt)]);
+
+/**
+ * A workspace's connection to its bank feed. One per workspace; the access
+ * token is the provider's, sealed like every other secret this app keeps
+ * (see lib/secretBox), and the cursor is where the sync last got to. The
+ * opening balance is what the account held the day before the feed's first
+ * line, so "bank says" can be a statement balance rather than a sum of
+ * movements since some Tuesday.
+ */
+export const bankConnections = pgTable("bank_connections", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** plaid | teller | manual */
+  provider: text("provider").notNull().default("plaid"),
+  /** The provider's own id for the connection (Plaid's item_id). */
+  providerItemId: text("provider_item_id").notNull().default(""),
+  accessToken: text("access_token").notNull().default(""),
+  cursor: text("cursor").notNull().default(""),
+  institution: text("institution").notNull().default(""),
+  /** The balance before the feed's first line, and its day. */
+  openingCents: integer("opening_cents").notNull().default(0),
+  openingOn: text("opening_on").notNull().default(""),
+  lastSyncAt: timestamp("last_sync_at"),
+  lastError: text("last_error").notNull().default(""),
+  connectedBy: text("connected_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [unique("bank_connections_tenant_unique").on(t.tenantOrgId)]);

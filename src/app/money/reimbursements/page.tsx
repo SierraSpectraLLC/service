@@ -42,7 +42,8 @@ export default async function ExpensesPage({ searchParams }: {
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
   const sp = await searchParams;
-  const { period, seesBooks, seesPayroll, amounts } = await railContext(user, sp.period);
+  const rail = await railContext(user, sp.period);
+  const { period } = rail;
   const isOwner = user.role === "owner";
   /* HR reads the desk too - somebody has to chase the claims sitting on it -
      and may open one in a colleague's name. Paying stays the owner's, which is
@@ -121,7 +122,7 @@ export default async function ExpensesPage({ searchParams }: {
 
   return (
     <FinanceShell
-      rail={{ active: "reimbursements", amounts, seesBooks, seesPayroll }}
+      rail={rail}
       period={period}
       path="/money/reimbursements"
       title="Reimbursements"

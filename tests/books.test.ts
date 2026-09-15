@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { maySeeBooks, type BooksViewer } from "@/lib/books";
-import { WORKING_ROOMS, isWorkingRoom, FINANCE_KEYS } from "@/lib/finance";
+import { WORKING_ROOMS, FINANCE_KEYS } from "@/lib/finance";
 
 /**
  * Who may read an organization's books.
@@ -81,20 +81,16 @@ describe("who reads a client organization's money", () => {
 });
 
 describe("the two rooms that are not the books", () => {
-  it("is exactly purchasing and reimbursements", () => {
-    expect([...WORKING_ROOMS]).toEqual(["purchasing", "reimbursements"]);
+  it("is exactly purchasing and reimbursements, and they live in Operations", () => {
+    expect(WORKING_ROOMS.map((r) => r.href)).toEqual(["/money/purchasing", "/money/reimbursements"]);
   });
 
-  it("counts every other room in the section as the books", () => {
-    const books = FINANCE_KEYS.filter((k) => !isWorkingRoom(k));
+  it("counts every room of the section as the books", () => {
     // Named one by one rather than by subtraction, so a room ADDED to the
     // section has to be classified here on purpose. A new key that silently
-    // lands on the open side of the wall is how this leaks back.
-    expect(books).toEqual([
-      "overview", "quotes", "invoices", "collections", "contracts",
-      // Bills names what the shop pays for insurance and what each person's
-      // benefits cost - the position, not something an engineer does.
-      "overhead", "bills", "payroll", "costing",
-    ]);
+    // lands on the open side of the wall is how this leaks back. Seven rooms
+    // over one journal, and every one of them is the shop's position.
+    expect([...FINANCE_KEYS]).toEqual(["overview", "cash", "receivables", "payables", "clients", "ledger", "reports"]);
+    for (const k of FINANCE_KEYS) expect(WORKING_ROOMS.some((r) => r.href.endsWith(k))).toBe(false);
   });
 });

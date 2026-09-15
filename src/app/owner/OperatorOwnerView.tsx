@@ -1,92 +1,57 @@
 import Link from "next/link";
 import { myTenantOrgId, type SessionUser } from "@/lib/authz";
-import { readTenant, visibleOrgs } from "@/lib/tenancy";
+import { visibleOrgs } from "@/lib/tenancy";
 import { brandForTenant } from "@/lib/brand";
 import { formatCents, formatDollars } from "@/lib/money";
-import { periodSpan, withPeriod } from "@/lib/finance";
-import { booksContext, cashFigures } from "@/lib/financeData";
+import { periodSpan, positionTone, withPeriod } from "@/lib/finance";
+import { booksContext } from "@/lib/financeData";
 import { allInvoices, asStatementRow } from "@/lib/invoiceData";
 import { aging, invoiceView } from "@/lib/statement";
 import { coverageBoard } from "@/lib/pmPlanData";
 import { coverageRollup } from "@/lib/pmPlan";
 import { ladder } from "@/lib/chartPalette";
 import { bands, cashByMonth, lastMonths, runningCosts, topDebtors } from "@/lib/ownerCharts";
-import PositionLine from "@/components/PositionLine";
 import TrendChart from "@/components/charts/TrendChart";
 import SplitBar from "@/components/charts/SplitBar";
 import RankBars from "@/components/charts/RankBars";
 import StatTile from "@/components/charts/StatTile";
 import Meter from "@/components/charts/Meter";
+import StatusLine from "@/components/ui/StatusLine";
 import { DataTable, Id, PageHead, Panel, Pill } from "@/components/ui";
 
 /**
  * The operator's owner: the business, on one page.
  *
- * Deliberately a summary. Every number here is one lib/financeData already
- * computes for /money, read through the same booksContext so the two pages
- * cannot disagree, and every one of them links to the room that owns it. The
- * failure this avoids is a second set of totals - two pages answering "what
- * are we owed" with different numbers because one of them grew its own query.
+ * Deliberately a summary. Every dollar here is one lib/money/figures already
+ * computed for /money - a sum over the ledger, read through the same
+ * booksContext - so the two pages cannot disagree, and every one of them
+ * links to the room that owns it.
  *
- * THE CHARTS ADD NO QUERIES. Every shape below is derived from rows this render
- * already had: allInvoices is cache()d and financeFigures fetched it moments
- * ago, so the twelve-month cash line, the ageing ladder and the debtor ranking
- * are three views of one set of rows rather than three trips to Postgres. The
- * one exception is the maintenance meter, which is its own reader and says so.
- *
- * WHY EACH FORM IS THE FORM. lib/dataviz's heuristic, applied:
- *   - the position is four numbers, so it is four stat tiles and one hero
- *     figure, not a four-bar bar chart;
- *   - billed against collected is two series of the same unit over time, so it
- *     is two lines on ONE axis - the gap between them IS the collection lag,
- *     and a second y-scale would let that gap say whatever was convenient;
- *   - ageing and the pipeline are ordered bands of one whole, so they are
- *     stacked bars in a validated ordinal ramp, and so is the period's cost -
- *     payroll and overhead are the two parts of "what it took to exist";
- *   - clients have no natural order, so the debtor chart is one series in one
- *     colour, its length carrying the only thing it knows.
- *
- * AND WHY THE LATE MONEY IS NOT RED. Severity is carried by the status tones -
- * the sentence at the top and the "Past terms" tile - and the ageing ladder
- * beside them is a SERIES, drawn in the sequential ramp. Reusing the status red
- * for a band of a chart would leave the page with one colour meaning two
- * things, which is the fastest way to make both of them mean nothing.
+ * THE CHARTS ADD NO QUERIES beyond the invoice rows: allInvoices is cache()d
+ * and the figures loader fetched it moments ago, so the twelve-month cash
+ * line, the ageing ladder and the debtor ranking are three views of one set
+ * of rows. The one exception is the maintenance meter, which is its own
+ * reader and says so.
  */
 export default async function OperatorOwnerView({ user, periodParam }: {
   user: SessionUser;
   periodParam?: string;
 }) {
-  // The window, the permission and every figure, asked the one way. This
-  // redirects a staff member who may not read the books, which is the same
-  // thing /money does to them.
-  const { period, today, seesPayroll, figures: fig } = await booksContext(user, periodParam);
-  const tenant = readTenant(user);
-  const [brand, invoices, orgRows, { cash: bank }] = await Promise.all([
+  const { period, today, mine, seesPayroll, figures: f } = await booksContext(user, periodParam);
+  const [brand, invoices, orgRows] = await Promise.all([
     brandForTenant(myTenantOrgId(user)),
-    // Already cache()d and already fetched by financeFigures on this render,
-    // so this is the same rows, not a second read.
-    allInvoices(tenant),
+    allInvoices(mine),
     visibleOrgs(user),
-    cashFigures(user, today),
   ]);
 
-  const { moneyIn: mIn, moneyOut: mOut } = fig;
-  const owed = mIn.currentCents + mIn.pastDueCents;
-  const owes = mOut.purchasingCents + mOut.reimbursementsCents;
+  const owed = f.positions.receivable;
+  const owes = f.owes.totalCents;
+  const pastDue = f.stages.pastDue;
+  const net = owed - owes;
+  const tone = positionTone(owed, pastDue.cents);
+  const share = owed > 0 ? Math.round((pastDue.cents / owed) * 100) : 0;
 
-  /*
-   * Every invoice, priced once. invoiceView is the authority on what an invoice
-   * is worth and how late it is; the three charts below are three groupings of
-   * this one list, so they cannot disagree with each other or with /money.
-   */
-  const priced = invoices.map((f) => ({ orgId: f.row.orgId, f, view: invoiceView(asStatementRow(f), today) }));
-
-  /*
-   * How late the late money is. aging() buckets by daysLate and bucketOf
-   * returns `current` for anything not yet past its terms, so d30 + d60 + d90
-   * is pastDueCents by construction - this split cannot disagree with the
-   * figure above it.
-   */
+  const priced = invoices.map((x) => ({ orgId: x.row.orgId, f: x, view: invoiceView(asStatementRow(x), today) }));
   const buckets = aging(priced.map((p) => p.view)).buckets;
   const ageRamp = ladder(4);
   const age = bands([
@@ -95,70 +60,35 @@ export default async function OperatorOwnerView({ user, periodParam }: {
     { key: "d60", label: "31-60", cents: buckets.d60 },
     { key: "d90", label: "60+", cents: buckets.d90 },
   ]);
-
-  /*
-   * Twelve months of billing against twelve months of collection. Two dates,
-   * not one: an invoice counts when it was ISSUED and a payment when it
-   * ARRIVED, so the space between the lines is the lag. See lib/ownerCharts.
-   */
   const months = lastMonths(today, 12);
   const cash = cashByMonth(
     priced.map((p) => ({
-      issuedOn: p.f.row.issuedOn,
-      status: p.f.row.status,
+      issuedOn: p.f.row.issuedOn, status: p.f.row.status,
       billedCents: p.view.linesCents + p.view.feesCents,
       payments: p.f.payments.map((x) => ({ receivedOn: x.receivedOn, amountCents: x.amountCents })),
     })),
     months,
   );
-
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
-  const openInvoices = priced.filter((p) =>
-    p.view.balanceCents > 0 && !["draft", "void", "paid"].includes(p.view.standing));
+  const openInvoices = priced.filter((p) => p.view.balanceCents > 0 && !["draft", "void", "paid"].includes(p.view.standing));
   const debtors = topDebtors(
     openInvoices.map((p) => ({ orgId: p.orgId, balanceCents: p.view.balanceCents })),
     (id) => orgName.get(id) ?? "an organization",
   );
-
-  /*
-   * The pipeline as three DISJOINT stocks: money quoted and not answered, work
-   * done and not billed, bills sent and not paid. Collected is deliberately not
-   * a fourth band - it is a flow through a window rather than a stock sitting
-   * somewhere, and stacking it with the others would add a length to a bar
-   * whose whole is supposed to be "money that has not landed yet".
-   */
   const pipeRamp = ladder(3);
   const pipe = bands([
-    { key: "quoted", label: "Quoted", cents: mIn.quotedCents },
-    { key: "unbilled", label: "Not billed", cents: mIn.unbilledCents },
+    { key: "quoted", label: "Quoted", cents: f.stages.quoted.cents },
+    { key: "unbilled", label: "Not billed", cents: f.stages.unbilled.cents },
     { key: "open", label: "Invoiced", cents: owed },
   ]);
-
-  /*
-   * The maintenance promise, as one ratio. Its own reader - lib/pmPlanData -
-   * because it is the only thing on this page that is not money, and the only
-   * thing here that costs a query the render did not already have.
-   */
   const pm = coverageRollup(
     (await coverageBoard({
-      tenantOrgId: tenant, today,
+      tenantOrgId: mine, today,
       orgs: orgRows.filter((o) => o.kind === "client" && !o.isOperator).map((o) => ({ id: o.id, name: o.name })),
     })).flatMap((c) => c.rows.map((r) => r.coverage)),
   );
-
   const collected = cash.map((m) => m.collectedCents);
-  const pastDueShare = owed > 0 ? Math.round((mIn.pastDueCents / owed) * 100) : 0;
-
-  /*
-   * What it cost to run the shop this period, and what collecting left. The
-   * same two lines /money subtracts for its "this period" figure, read from the
-   * same booksContext, so the two pages cannot disagree about it. Payroll is
-   * null for a reader who may not see the register and stays ABSENT here - the
-   * bar loses a band and the copy says "before payroll", rather than a $0 line
-   * that would be a lie. Overhead is always filled in for a books reader; the
-   * fallback is for the type.
-   */
-  const costs = runningCosts(mIn.paidCents, mOut.payrollCents, mOut.overheadCents ?? 0);
+  const costs = runningCosts(f.collected.cents, seesPayroll ? f.flow.cost.payroll : null, f.flow.cost.overhead);
   const costBands = bands(costs.rows);
   const costRamp = ladder(2);
   const costLabel = costs.complete ? "payroll and overhead" : "overhead, before payroll";
@@ -168,83 +98,59 @@ export default async function OperatorOwnerView({ user, periodParam }: {
       <PageHead
         title="Owner view"
         sub={`${brand.operatorName} · what is owed, what is going out, and what needs you · ${periodSpan(today, period)}`}
-        /* The way back. These two pages are one person's two questions - what
-           is the shop doing today, and how is the business doing - so each
-           carries the door to the other and neither needs a nav word. */
         actions={<Link className="btn sm" href="/">Switch to dashboard</Link>}
       />
 
-      <PositionLine
-        owedCents={owed} owesCents={owes}
-        pastDueCents={mIn.pastDueCents} pastDueCount={mIn.pastDueCount}
-        period={period}
-      />
+      <StatusLine tone={tone} actions={<>
+        {pastDue.cents > 0 && <Link className="btn sm accent" href={withPeriod("/money/receivables?stage=pastdue", period)}>Work collections</Link>}
+        <Link className="btn sm" href={withPeriod("/money/receivables", period)}>Receivables</Link>
+      </>}>
+        You are owed <span className="fig">{formatDollars(owed)}</span> and owe{" "}
+        <span className="fig">{formatDollars(owes)}</span>. Net <span className="fig">{formatDollars(net)}</span>
+        {pastDue.cents > 0
+          ? <> — but <span className="fig">{formatDollars(pastDue.cents)}</span> of what you are owed is past terms (<b>{share}%</b>, across {pastDue.n} invoice{pastDue.n === 1 ? "" : "s"}).</>
+          : <>. Nothing is past terms.</>}
+      </StatusLine>
 
-      {/* One hero figure on the page, and three tiles around it. Four numbers
-          drawn as four bars would be a bar chart that says nothing the numbers
-          do not say louder and smaller. */}
       <div className="stat-grid" style={{ marginBottom: 12 }}>
-        {/* The hero is what is in the bank, once the owner has told the books
-            what that was on a day - the question this page was opened to
-            answer. Until then the hero is what is owed, and the tile beside
-            it says where to type the balance in. See lib/cash. */}
-        {bank ? (
-          <StatTile
-            hero
-            label="Cash on hand"
-            value={formatDollars(bank.cents)}
-            sub={`From ${formatDollars(bank.openingCents)} on ${bank.openingOn} · payroll at month end · not purchase orders`}
-            tone={bank.cents < 0 ? "bad" : undefined}
-            href="/money"
-          />
-        ) : (
-          <StatTile
-            label="Cash on hand"
-            value="Not set"
-            sub="Tell Financial what is in the bank and it carries the figure forward"
-            href="/money"
-          />
-        )}
         <StatTile
-          hero={!bank}
+          hero
+          label="Cash on hand"
+          value={formatDollars(f.cashCents)}
+          sub={f.runway.months === null ? "bank plus Stripe, from the ledger" : `bank plus Stripe · ${f.runway.months} months of runway at ${formatDollars(f.runway.burnCents)}/mo`}
+          tone={f.cashCents < 0 ? "bad" : undefined}
+          href="/money/cash"
+        />
+        <StatTile
           label="Owed to you"
           value={formatDollars(owed)}
           sub={`${openInvoices.length} invoice${openInvoices.length === 1 ? "" : "s"} open`}
-          href="/money/invoices"
+          href="/money/receivables"
         />
         <StatTile
           label="Past terms"
-          value={formatDollars(mIn.pastDueCents)}
-          sub={mIn.pastDueCents > 0
-            ? `${pastDueShare}% of the book, across ${mIn.pastDueCount} invoice${mIn.pastDueCount === 1 ? "" : "s"}`
-            : "Nothing is late"}
-          tone={mIn.pastDueCents === 0 ? "good" : pastDueShare >= 25 ? "bad" : "warn"}
-          href="/money/collections"
+          value={formatDollars(pastDue.cents)}
+          sub={pastDue.cents > 0 ? `${share}% of the book, across ${pastDue.n} invoice${pastDue.n === 1 ? "" : "s"}` : "Nothing is late"}
+          tone={pastDue.cents === 0 ? "good" : share >= 25 ? "bad" : "warn"}
+          href="/money/receivables?stage=pastdue"
         />
         <StatTile
           label="You owe out"
           value={formatDollars(owes)}
-          sub={`${mOut.openPos} order${mOut.openPos === 1 ? "" : "s"} · ${mOut.reimbursementReports} claim${mOut.reimbursementReports === 1 ? "" : "s"}`}
-          href="/money/purchasing"
+          sub={`${formatDollars(f.owes.vendorsCents)} vendors · ${formatDollars(f.owes.reimbDueCents)} people · ${formatDollars(f.owes.taxCents)} tax`}
+          href="/money/payables"
         />
         <StatTile
-          /* The window's own words, not "this " + a label that already says
-             "This month". PERIOD_LABEL is written for a rail, where the label
-             stands alone. */
           label={period === "ytd" ? "Collected this year" : period === "quarter" ? "Collected this quarter" : "Collected this month"}
-          value={formatDollars(mIn.paidCents)}
+          value={formatDollars(f.collected.cents)}
           sub="Money that actually arrived"
           spark={collected}
         />
         <StatTile
-          /* The other half of the collected figure beside it. Not a state, so
-             no tone: a big payroll is not a problem, it is a business. The
-             verdict - whether the period paid for itself - is drawn below,
-             where the subtraction is shown rather than implied. */
           label={period === "ytd" ? "Spent this year" : period === "quarter" ? "Spent this quarter" : "Spent this month"}
           value={formatDollars(costs.totalCents)}
           sub={costs.complete ? "Payroll and overhead" : "Overhead only - the register is not yours to read"}
-          href={withPeriod("/money/expenses", period)}
+          href={withPeriod("/money/reports", period)}
         />
       </div>
 
@@ -264,14 +170,10 @@ export default async function OperatorOwnerView({ user, periodParam }: {
         <Panel
           title="Going out"
           hint={`What it costs to exist, whether or not a job happens: ${costLabel}, ${periodSpan(today, period)}.`}
-          empty={costs.complete
-            ? "Nothing has gone out to payroll or overhead this period."
-            : "No overhead has been recorded this period."}
+          empty={costs.complete ? "Nothing has gone out to payroll or overhead this period." : "No overhead has been recorded this period."}
           actions={<>
-            {seesPayroll && (
-              <Link className="btn sm" href={withPeriod("/money/payroll", period)}>Payroll</Link>
-            )}
-            <Link className="btn sm" href={withPeriod("/money/expenses", period)}>Overhead</Link>
+            {seesPayroll && <Link className="btn sm" href={withPeriod("/money/payroll", period)}>Payroll</Link>}
+            <Link className="btn sm" href={withPeriod("/money/payables", period)}>Payables</Link>
           </>}
         >
           {costBands.shown.length > 0 && (
@@ -287,9 +189,6 @@ export default async function OperatorOwnerView({ user, periodParam }: {
           title="After costs"
           hint="Collected, less what it cost to be open while collecting it. Open orders and unpaid claims are not in here - they have not moved yet, and the position line above already counts them."
         >
-          {/* The subtraction, performed and shown. A figure with nothing under
-              it is a figure somebody has to take on trust; the three lines
-              are its working. */}
           <div className={`bignum${costs.leftCents < 0 ? " neg" : ""}`}>{formatCents(costs.leftCents)}</div>
           <div className="biglab">
             left {costs.complete ? "after payroll and overhead" : "after overhead, before payroll"}
@@ -298,17 +197,17 @@ export default async function OperatorOwnerView({ user, periodParam }: {
           <div className="rule" />
           <div className="ledger">
             <span className="grow">Collected<span className="sub">money that actually arrived</span></span>
-            <span className="money">{formatCents(mIn.paidCents)}</span>
+            <span className="money">{formatCents(f.collected.cents)}</span>
           </div>
-          {mOut.payrollCents !== null && (
+          {seesPayroll && (
             <div className="ledger">
               <span className="grow">Payroll<span className="sub">gross, employer costs included</span></span>
-              <span className="money">&minus;{formatCents(mOut.payrollCents)}</span>
+              <span className="money">&minus;{formatCents(f.flow.cost.payroll)}</span>
             </div>
           )}
           <div className="ledger">
             <span className="grow">Overhead<span className="sub">runs whether or not anyone works</span></span>
-            <span className="money">&minus;{formatCents(mOut.overheadCents ?? 0)}</span>
+            <span className="money">&minus;{formatCents(f.flow.cost.overhead)}</span>
           </div>
           <div className="ledger total">
             <span className="grow">Left this period</span>
@@ -322,9 +221,7 @@ export default async function OperatorOwnerView({ user, periodParam }: {
           title="How late"
           hint="Everything open, by how long it has been waiting."
           empty="Nothing is outstanding."
-          actions={mIn.pastDueCents > 0
-            ? <Link className="btn sm" href="/money/collections">Collections</Link>
-            : undefined}
+          actions={pastDue.cents > 0 ? <Link className="btn sm" href="/money/receivables?stage=pastdue">Collections</Link> : undefined}
         >
           {age.shown.length > 0 && (
             <SplitBar
@@ -339,25 +236,19 @@ export default async function OperatorOwnerView({ user, periodParam }: {
           count={debtors.top.length || undefined}
           hint="Open balance by client, largest first."
           empty="Nobody owes you anything."
-          actions={<Link className="btn sm" href="/money/invoices">Invoices</Link>}
+          actions={<Link className="btn sm" href="/money/clients">Clients</Link>}
         >
           {debtors.top.length > 0 && (
             <RankBars
               rows={[
                 ...debtors.top.map((d) => ({
-                  key: String(d.orgId),
-                  label: d.name,
-                  cents: d.cents,
+                  key: String(d.orgId), label: d.name, cents: d.cents,
                   detail: `${d.invoices} invoice${d.invoices === 1 ? "" : "s"}`,
-                  href: `/settings/organizations/${d.orgId}`,
+                  href: `/money/clients?org=${d.orgId}`,
                 })),
-                // The tail is summed rather than dropped: a top-six that
-                // silently omits the rest answers "who owes us" wrongly.
                 ...(debtors.restCount > 0 ? [{
-                  key: "rest",
-                  label: `${debtors.restCount} other${debtors.restCount === 1 ? "" : "s"}`,
-                  cents: debtors.restCents,
-                  faint: true,
+                  key: "rest", label: `${debtors.restCount} other${debtors.restCount === 1 ? "" : "s"}`,
+                  cents: debtors.restCents, faint: true,
                 }] : []),
               ]}
             />
@@ -366,11 +257,7 @@ export default async function OperatorOwnerView({ user, periodParam }: {
       </div>
 
       <div className="chart-pair">
-        <Panel
-          title="The pipeline"
-          hint="Money that has not landed yet, by how far along it is."
-          empty="Nothing quoted, unbilled or outstanding."
-        >
+        <Panel title="The pipeline" hint="Money that has not landed yet, by how far along it is." empty="Nothing quoted, unbilled or outstanding.">
           {pipe.shown.length > 0 && (
             <SplitBar
               slices={pipe.shown.map((b, i) => ({ ...b, color: pipeRamp[["quoted", "unbilled", "open"].indexOf(b.key)] ?? pipeRamp[i] }))}
@@ -387,22 +274,11 @@ export default async function OperatorOwnerView({ user, periodParam }: {
           empty="No client is on a maintenance plan yet."
         >
           {pm.planned > 0 && (
-            <div style={{ display: "grid", gap: 14 }}>
-              <Meter
-                label="Systems behind"
-                done={pm.behind}
-                total={pm.planned}
-                invert
-                sub={pm.behind === 0
-                  ? "Every system on a plan is on pace for the year."
-                  : `${pm.behind} of ${pm.planned} have had fewer visits than the year has asked for.`}
-              />
-              <Meter
-                label="Visits delivered"
-                done={pm.delivered}
-                total={pm.delivered + pm.owed}
-                sub={`${pm.owed} still owed before the year is out.`}
-              />
+            <div style={{ display: "grid", gap: 16 }}>
+              <Meter label="Systems behind" done={pm.behind} total={pm.planned} invert
+                sub={pm.behind === 0 ? "Every system on a plan is on pace for the year." : `${pm.behind} of ${pm.planned} have had fewer visits than the year has asked for.`} />
+              <Meter label="Visits delivered" done={pm.delivered} total={pm.delivered + pm.owed}
+                sub={`${pm.owed} still owed before the year is out.`} />
             </div>
           )}
         </Panel>
@@ -410,23 +286,25 @@ export default async function OperatorOwnerView({ user, periodParam }: {
 
       <Panel
         title="Needs a decision"
-        count={fig.decisions.length}
-        hint="Gathered from every ledger. Each one is somebody waiting on you."
+        count={f.decisions.length}
+        hint="Gathered from every document. Each one is somebody waiting on you; the button that posts is on Financial."
         empty="Nothing is waiting on a decision."
         actions={<Link className="btn sm" href="/money">Financial</Link>}
       >
-        {fig.decisions.length > 0 && (
+        {f.decisions.length > 0 && (
           <DataTable
             cols={[
               { key: "what", label: "What", width: "minmax(240px, 2fr)" },
               { key: "detail", label: "Detail", width: "minmax(160px, 1.4fr)", hideMobile: true },
+              { key: "cents", label: "Amount", width: "110px", align: "right" },
             ]}
-            rows={fig.decisions.map((d) => ({
+            rows={f.decisions.map((d) => ({
               key: d.key,
               href: d.href,
               cells: {
-                what: <><Pill tone={d.tone}>{d.tone === "bad" ? "now" : "soon"}</Pill> <span>{d.title}</span></>,
+                what: <><Pill tone={d.tone === "bad" ? "bad" : d.tone === "warn" ? "warn" : "neutral"}>{d.tone === "bad" ? "now" : d.tone === "warn" ? "soon" : "when you can"}</Pill> <span>{d.title}</span></>,
                 detail: <span className="mut">{d.detail}</span>,
+                cents: formatCents(d.cents),
               },
             }))}
           />
@@ -435,43 +313,33 @@ export default async function OperatorOwnerView({ user, periodParam }: {
 
       <Panel
         title="Not yet invoiced"
-        count={mIn.unbilledJobs}
-        hint={`${formatCents(mIn.unbilledCents)} of closed work nobody has billed.`}
+        count={f.sources.unbilled.length}
+        hint={`${formatCents(f.sources.unbilled.reduce((n, j) => n + j.valueCents, 0))} of closed work nobody has billed.`}
         empty="Every closed job has been invoiced."
-        actions={<Link className="btn sm" href="/money/invoices">Invoices</Link>}
+        actions={<Link className="btn sm" href="/money/receivables?stage=unbilled">Receivables</Link>}
       >
-        {fig.unbilled.length > 0 && (
+        {f.sources.unbilled.length > 0 && (
           <DataTable
             cols={[
               { key: "job", label: "Job", width: "minmax(160px, 1.4fr)" },
               { key: "client", label: "Client", width: "minmax(120px, 1fr)", hideMobile: true },
               { key: "value", label: "Value", width: "110px", align: "right" },
             ]}
-            rows={fig.unbilled.map((j) => ({
+            rows={f.sources.unbilled.map((j) => ({
               key: j.woId,
               href: `/work/${j.woId}`,
-              cells: {
-                job: <Id>{j.number}</Id>,
-                client: <span className="mut">{j.orgName}</span>,
-                value: formatCents(j.valueCents),
-              },
+              cells: { job: <Id>{j.number}</Id>, client: <span className="mut">{j.orgName}</span>, value: formatCents(j.valueCents) },
             }))}
           />
         )}
       </Panel>
 
-      {/* The work half is not reproduced here. /work is where a job is
-          cleared and it is not gated on the books, so an owner following
-          this lands where their dispatchers already are. */}
-      <Panel
-        title="The floor"
-        hint="Work, stages and turnaround live where the people doing them work."
-      >
+      <Panel title="The floor" hint="Work, stages and turnaround live where the people doing them work.">
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Link className="btn sm" href="/work">Jobs</Link>
           <Link className="btn sm" href="/">The board</Link>
           <Link className="btn sm" href="/metrics">Metrics</Link>
-          <Link className="btn sm" href="/money/contracts">Contracts</Link>
+          <Link className="btn sm" href="/money/clients">Clients</Link>
           <Link className="btn sm" href="/maintenance">Maintenance</Link>
         </div>
       </Panel>
