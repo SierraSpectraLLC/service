@@ -98,6 +98,7 @@ import { btn, EMAIL, emailShell, esc } from "@/lib/emailTheme";
 import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
 import { appUrl } from "@/lib/appUrl";
 import { connectOrigin, payAmount, stripeConfigured, stripeMode } from "@/lib/stripe";
+import { quoteRecipients, reminderRecipients } from "@/lib/moneyRecipients";
 import { accountReady, checkoutSession, connectAuthorizeUrl, signConnectState, stripeClientId } from "@/lib/stripeApi";
 import { cleanBody, messageableFrom } from "@/lib/messages";
 import { QUALIFICATIONS, DOC_TYPES, SIG_ROLES, canApprove, canDelete, canExecute, canRevokeApproval, isProtocol } from "@/lib/gxp";
@@ -15909,10 +15910,9 @@ export async function setPoWorkOrder(poId: number, workOrderId: number | null): 
 // sent, void, referred - and never an arithmetic result.
 
 /**
- * Who at a client hears about their money. The digest recipient list is the
- * one place a client has already told us where their mail goes; the AP address
- * is added on top by the caller, because reminders belong at the desk that
- * pays rather than the lab that ordered.
+ * The client's digest list - the people who asked for the work. A quote may
+ * go here when no AP desk is set (lib/moneyRecipients); a reminder never
+ * does.
  */
 async function orgRecipients(orgId: number): Promise<string[]> {
   const [org] = await db.select({ list: orgs.digestRecipients }).from(orgs).where(eq(orgs.id, orgId));
@@ -16162,18 +16162,15 @@ export async function sendDunningRung(
   if (!step) return { error: "Nothing is due on this invoice today." };
 
   const [org] = await db.select().from(orgs).where(eq(orgs.id, full.row.orgId));
-  const to = [
-    step.contact?.email?.trim(),
-    // Past the first rung the AP desk is the destination; before it, whoever
-    // has been getting the mail.
-    step.rung.contactIndex >= 0 ? org?.apEmail?.trim() : "",
-    ...(await orgRecipients(full.row.orgId)),
-  ].filter(Boolean) as string[];
+  // The rung's contact, else the AP desk, else nobody - and never the digest
+  // list, whose readers watch instruments rather than pay bills. An empty
+  // answer is recorded below as exactly that, on the event and in the audit.
+  const to = reminderRecipients({ contactEmail: step.contact?.email, apEmail: org?.apEmail });
 
   const warning = to.length
-    ? await mailDunning({ full, org: org ?? null, step, view, policy })
+    ? await mailDunning({ full, org: org ?? null, step, view, policy, to })
         .then(() => "").catch(() => "sent, but the email did not go out")
-    : "nobody to send it to";
+    : "nobody to send it to - set the AP email on the organization";
 
   await db.insert(dunningEvents).values({
     tenantOrgId: full.row.tenantOrgId, invoiceId,
@@ -16202,8 +16199,10 @@ async function mailDunning(opts: {
   step: NonNullable<ReturnType<typeof nextAction>>;
   view: ReturnType<typeof invoiceView>;
   policy: BillingPolicy;
+  /** Decided by the caller (reminderRecipients), so the record and the mail agree. */
+  to: string[];
 }): Promise<void> {
-  const { full, org, step, view } = opts;
+  const { full, org, step, view, to } = opts;
   const base = appUrl();
   const brand = await brandForTenant(full.row.tenantOrgId);
   const [link] = await db.select().from(shareLinks)
@@ -16218,12 +16217,6 @@ async function mailDunning(opts: {
   const disputedNote = view.disputedCents > 0
     ? `<p style="margin:0 0 12px;">${esc(formatCents(view.disputedCents))} is paused while we sort out the line you asked about. The figure above is the rest.</p>`
     : "";
-  const to = [
-    step.contact?.email?.trim(),
-    step.rung.contactIndex >= 0 ? org?.apEmail?.trim() : "",
-    ...(await orgRecipients(full.row.orgId)),
-  ].filter(Boolean) as string[];
-
   const html = emailShell({
     brand: brand.operatorName || brand.name,
     logoUrl: brand.operatorLogoUrl || undefined,
@@ -16418,7 +16411,7 @@ async function mailQuote(opts: {
   token: string; total: number;
 }): Promise<void> {
   const { q, org } = opts;
-  const to = [org?.apEmail?.trim(), ...(await orgRecipients(q.orgId))].filter(Boolean) as string[];
+  const to = quoteRecipients({ apEmail: org?.apEmail, digestList: await orgRecipients(q.orgId) });
   if (!to.length) return;
   const base = appUrl();
   if (!base) return;
