@@ -19,7 +19,7 @@ import { formatCents } from "@/lib/money";
  * because the PO warning, if there is one, is the last chance anybody has to
  * read it.
  */
-export default function InvoiceActions({ id, number, status, balanceCents, today, poWarning, canDelete = false, absorbCardFee = false }: {
+export default function InvoiceActions({ id, number, status, balanceCents, today, poWarning, canDelete = false, absorbCardFee = false, clientFaceValue = false }: {
   id: number;
   number: string;
   status: string;
@@ -29,6 +29,8 @@ export default function InvoiceActions({ id, number, status, balanceCents, today
   canDelete?: boolean;
   /** A card taken at face value on this invoice - no surcharge. */
   absorbCardFee?: boolean;
+  /** The client's policy already takes every card at face value, so the per-invoice switch has nothing to add. */
+  clientFaceValue?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -107,7 +109,7 @@ export default function InvoiceActions({ id, number, status, balanceCents, today
             Record payment
           </button>
         )}
-        {status !== "void" && status !== "paid" && (
+        {status !== "void" && status !== "paid" && !clientFaceValue && (
           <button className="btn sm" disabled={pending} onClick={cardAtFaceValue}>
             {absorbCardFee ? "Charge card fee" : "Card at face value"}
           </button>

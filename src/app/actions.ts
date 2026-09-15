@@ -16936,9 +16936,10 @@ export async function startPayment(
   }
   const [settings] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
   const { policy } = await billingContext(full.row.orgId);
-  // A card at face value on this one invoice (setAbsorbCardFee): offered
-  // whatever the policy says, and asked for without the surcharge.
-  const absorb = full.row.absorbCardFee;
+  // A card at face value - on this one invoice (setAbsorbCardFee) or on every
+  // invoice for this client (their policy): offered whether or not cards are
+  // otherwise on, and asked for without the surcharge.
+  const absorb = full.row.absorbCardFee || policy.cardAtFaceValue;
   if (method === "card" && !policy.cardsEnabled && !absorb) return { error: "Card payments are not offered on this account." };
 
   const amount = payAmount({

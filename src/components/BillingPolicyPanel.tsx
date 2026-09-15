@@ -41,6 +41,7 @@ export default function BillingPolicyPanel({ orgId, orgName, policy, terms, apEm
     holdDays: String(policy.holdDays),
     holdAmount: centsToInput(policy.holdAmountCents),
     dunningAuto: policy.dunningAuto,
+    cardAtFaceValue: policy.cardAtFaceValue,
     partsMarkup: (policy.partsMarkupBps / 100).toFixed(1),
     escalation: policy.escalation.length
       ? policy.escalation
@@ -75,6 +76,7 @@ export default function BillingPolicyPanel({ orgId, orgName, policy, terms, apEm
         holdDays: parseInt(form.holdDays, 10) || 0,
         holdAmountCents: Math.round(num(form.holdAmount) * 100),
         dunningAuto: form.dunningAuto,
+        cardAtFaceValue: form.cardAtFaceValue,
         partsMarkupBps: Math.round(num(form.partsMarkup) * 100),
         escalation: form.escalation.filter((c) => c.name.trim()),
       },
@@ -143,6 +145,14 @@ export default function BillingPolicyPanel({ orgId, orgName, policy, terms, apEm
             <input id="oauto" type="checkbox" checked={form.dunningAuto}
               onChange={(e) => set("dunningAuto", e.target.checked)} />
             <span className="t-body">Run the ladder on its own for {orgName}</span>
+          </label>
+        </Field>
+        <Field label="Cards at face value" htmlFor="oface"
+          hint="For pre-loaded purchasing cards holding exactly the invoice amount">
+          <label className="row-2" style={{ alignItems: "center" }}>
+            <input id="oface" type="checkbox" checked={form.cardAtFaceValue}
+              onChange={(e) => set("cardAtFaceValue", e.target.checked)} />
+            <span className="t-body">Offer a card on every invoice for {orgName}, with no surcharge - the fee is absorbed</span>
           </label>
         </Field>
       </Panel>

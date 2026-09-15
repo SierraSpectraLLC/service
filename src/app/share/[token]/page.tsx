@@ -142,6 +142,8 @@ async function InvoiceShare({ link }: { link: typeof shareLinks.$inferSelect }) 
   ]);
   const mode = stripeMode();
   const canPay = mode !== "absent" && Boolean(operator?.stripeAccountId) && Boolean(operator?.stripeReady);
+  // This invoice, or every invoice for this client, takes a card at face value.
+  const faceValue = full.row.absorbCardFee || ctx.policy.cardAtFaceValue;
 
   return (
     <PublicShell brandName={name} tagline={brand.tagline} width={640}>
@@ -163,9 +165,9 @@ async function InvoiceShare({ link }: { link: typeof shareLinks.$inferSelect }) 
           enabled: canPay,
           // The same rule startPayment applies: a card at face value on this
           // one invoice is offered whatever the policy says, with no surcharge.
-          cardsEnabled: ctx.policy.cardsEnabled || full.row.absorbCardFee,
-          cardSurchargeBps: full.row.absorbCardFee ? 0 : ctx.policy.cardSurchargeBps,
-          cardSurchargeFlatCents: full.row.absorbCardFee ? 0 : ctx.policy.cardSurchargeFlatCents,
+          cardsEnabled: ctx.policy.cardsEnabled || faceValue,
+          cardSurchargeBps: faceValue ? 0 : ctx.policy.cardSurchargeBps,
+          cardSurchargeFlatCents: faceValue ? 0 : ctx.policy.cardSurchargeFlatCents,
           testMode: canPay && mode === "test",
           checkTo: name,
         }}

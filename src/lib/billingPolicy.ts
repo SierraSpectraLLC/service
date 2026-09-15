@@ -58,6 +58,15 @@ export type BillingPolicy = {
   cardSurchargeFlatCents: number;
   /** Offer a card at all. ACH is the default for labs and costs a tenth as much. */
   cardsEnabled: boolean;
+  /**
+   * Take every card from this client at face value: offered whether or not
+   * cards are otherwise on, and with no surcharge. For the client whose
+   * purchasing cards are pre-loaded with exactly the invoice amount - a
+   * university card for $24,000 cannot run $24,000 plus a fee. The operator
+   * absorbs the processing cost, which still posts as a cost row.
+   * invoices.absorb_card_fee is the same switch for one invoice.
+   */
+  cardAtFaceValue: boolean;
 };
 
 /**
@@ -83,6 +92,7 @@ export const DEFAULT_POLICY: BillingPolicy = {
   cardSurchargeBps: 290,
   cardSurchargeFlatCents: 30,
   cardsEnabled: true,
+  cardAtFaceValue: false,
 };
 
 const int = (v: unknown, fallback: number): number => {
@@ -129,6 +139,7 @@ function merge(base: BillingPolicy, raw: unknown): BillingPolicy {
     cardSurchargeBps: int(v.cardSurchargeBps, base.cardSurchargeBps),
     cardSurchargeFlatCents: int(v.cardSurchargeFlatCents, base.cardSurchargeFlatCents),
     cardsEnabled: typeof v.cardsEnabled === "boolean" ? v.cardsEnabled : base.cardsEnabled,
+    cardAtFaceValue: typeof v.cardAtFaceValue === "boolean" ? v.cardAtFaceValue : base.cardAtFaceValue,
   };
 }
 

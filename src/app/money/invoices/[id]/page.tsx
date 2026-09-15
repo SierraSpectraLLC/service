@@ -111,13 +111,16 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
             id={id} number={row.number} status={row.status}
             balanceCents={v.balanceCents} today={today} poWarning={warning}
             canDelete={user.role === "owner"} absorbCardFee={row.absorbCardFee}
+            clientFaceValue={policy.cardAtFaceValue}
           />
         }
       />
 
       <div className="row-2" style={{ marginBottom: 10 }}>
         <Pill tone={STANDING_TONE[v.standing]}>{STANDING_LABEL[v.standing]}</Pill>
-        {row.absorbCardFee && <Pill tone="warn">Card at face value - fee absorbed</Pill>}
+        {(row.absorbCardFee || policy.cardAtFaceValue) && (
+          <Pill tone="warn">Card at face value - fee absorbed{policy.cardAtFaceValue ? " (client policy)" : ""}</Pill>
+        )}
         <Link className="btn sm" href={`/money/invoices/${id}/print`} style={{ textDecoration: "none" }}>
           Preview PDF
         </Link>

@@ -88,6 +88,23 @@ describe("a card at face value", () => {
     expect(bodies[0].get("line_items[0][price_data][unit_amount]")).toBe("84000");
   });
 
+  it("is every invoice's, for a client whose policy says so", async () => {
+    // UCSF: every purchasing card is pre-loaded with the invoice amount.
+    await client.exec(`UPDATE orgs SET billing_policy = '{"cardAtFaceValue": true}' WHERE id = 2`);
+    const [{ id }] = (await client.query<{ id: number }>(
+      `INSERT INTO invoices (tenant_org_id, org_id, number, status, title, issued_on, due_on)
+       VALUES (${SIERRA}, 2, 'INV-5004', 'sent', 'Test', '2026-09-01', '2026-10-01') RETURNING id`)).rows;
+    await client.exec(`INSERT INTO invoice_lines (invoice_id, kind, description, qty, unit_cents, covered, position)
+      VALUES (${id}, 'labor', 'Work', 1000, 2400000, false, 0)`);
+    await client.exec(`INSERT INTO share_links (token, kind, org_id, invoice_id, label, expires_on, tenant_org_id, created_by)
+      VALUES ('tok_face_value_4', 'invoice', 2, ${id}, 'INV-5004', '2099-01-01', ${SIERRA}, 'joe@sierra.test')`);
+    expect((await rowOf(id)).absorbCardFee).toBe(false);   // nothing set on the invoice itself
+    const res = await actions.startPayment("tok_face_value_4", id, "card");
+    expect(res.url).toBeTruthy();
+    expect(bodies[0].get("line_items[0][price_data][unit_amount]")).toBe("2400000");
+    expect(bodies[0].get("payment_method_types[0]")).toBe("card");
+  });
+
   it("is undone the same way, and is another workspace's business to nobody else", async () => {
     const id = await sentInvoice("INV-5003", 10000, "tok_face_value_3");
     await money.setAbsorbCardFee(id, true);
