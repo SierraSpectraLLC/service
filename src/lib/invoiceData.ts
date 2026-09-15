@@ -11,11 +11,11 @@
 // proved they are entitled to - never through an id off a URL. See
 // invoiceForOrg, which is the only door the share viewer uses.
 
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import { db } from "@/db";
 import {
-  agreements, appSettings, creditOverrides, disputes, dunningEvents, expenses,
+  agreements, appSettings, creditOverrides, disputes, dunningEvents, expenseReports, expenses,
   instruments, invoiceFees, invoiceLines, invoices, orgs, orgSites, partPrices,
   parts, payments, promises, quoteLines, quotes, rateCards, shareLinks, tasks,
   timeEntries, workOrders,
@@ -35,6 +35,7 @@ import {
   clientMargin, inWindow, jobMargin, type ClientMargin, type JobMargin,
 } from "@/lib/costing";
 import { pmCosts, type PmCompletion, type PmCostBoard } from "@/lib/pmCosting";
+import { absorbedSpend, type AbsorbedBoard } from "@/lib/absorbedSpend";
 import { isoDay } from "@/lib/partGroups";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { daysToExpiry, netCents, stale } from "@/lib/quotes";
@@ -752,4 +753,49 @@ export async function pmCostingBoard(
     costCents: p.costCents ?? 0,
     onWorkOrder: p.workOrderId === null ? "" : woRows.find((w) => w.id === p.workOrderId)?.number ?? "",
   })), today, windowDays);
+}
+
+/**
+ * What the shop has absorbed for each client: claims filed against a client
+ * with no job, summed. See lib/absorbedSpend for the rule.
+ *
+ * Its own loader for the same reason pmCostingBoard is: /money and /metrics
+ * call costingBoard for figures this has nothing to do with. The claims are
+ * read under the tenant's stamp and their rows through the claim ids, the
+ * way costingBoard reaches expenses through its work order ids.
+ */
+export async function absorbedBoard(
+  today: string, windowDays: number, tenantOrgId: number | null,
+): Promise<AbsorbedBoard> {
+  const claims = await db.select({
+    id: expenseReports.id, orgId: expenseReports.orgId, title: expenseReports.title,
+    purpose: expenseReports.purpose, person: expenseReports.person,
+    status: expenseReports.status, submittedAt: expenseReports.submittedAt,
+  }).from(expenseReports).where(and(
+    forTenant(expenseReports.tenantOrgId, tenantOrgId),
+    isNotNull(expenseReports.orgId),
+    // Belt and braces: the action only sets org_id while there is no job, but
+    // a claim that somehow carries both is a job's, and a job counts its own.
+    isNull(expenseReports.workOrderId),
+  ));
+  if (!claims.length) return { rows: [], totalCents: 0 };
+
+  const ids = claims.map((c) => c.id);
+  const orgIds = [...new Set(claims.map((c) => c.orgId as number))];
+  const [rows, orgRows] = await Promise.all([
+    db.select({ reportId: expenses.reportId, amountCents: expenses.amountCents, incurredOn: expenses.incurredOn })
+      .from(expenses).where(inArray(expenses.reportId, ids)),
+    db.select({ id: orgs.id, name: orgs.name }).from(orgs).where(inArray(orgs.id, orgIds)),
+  ]);
+
+  return absorbedSpend(
+    claims.map((c) => ({
+      id: c.id, orgId: c.orgId as number,
+      orgName: orgRows.find((o) => o.id === c.orgId)?.name ?? "",
+      title: c.title || c.purpose, person: c.person, status: c.status,
+      submittedOn: c.submittedAt.toISOString().slice(0, 10),
+    })),
+    rows.map((e) => ({ reportId: e.reportId as number, amountCents: e.amountCents, incurredOn: e.incurredOn })),
+    today, windowDays,
+  );
 }

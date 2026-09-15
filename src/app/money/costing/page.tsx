@@ -5,7 +5,7 @@ import { readTenant } from "@/lib/tenancy";
 import { isStaffRole } from "@/lib/tenants";
 import { formatCents } from "@/lib/money";
 import { shopToday } from "@/lib/shopday";
-import { costingBoard, pmCostingBoard } from "@/lib/invoiceData";
+import { absorbedBoard, costingBoard, pmCostingBoard } from "@/lib/invoiceData";
 import { short, SLOW_PAY_DAYS } from "@/lib/costing";
 import { periodDays, periodSpan } from "@/lib/finance";
 import FinanceShell from "@/components/FinanceShell";
@@ -39,10 +39,13 @@ export default async function CostingPage({ searchParams }: {
     await booksContext(user, (await searchParams).period);
   const today = shopToday();
   const days = periodDays(today, period);
-  const [{ jobs, clients, loadedLaborCents }, pm] = await Promise.all([
+  const [{ jobs, clients, loadedLaborCents }, pm, absorbed] = await Promise.all([
     costingBoard(today, days, readTenant(user)),
     pmCostingBoard(today, days, readTenant(user)),
+    absorbedBoard(today, days, readTenant(user)),
   ]);
+  const absorbedFor = (orgId: number) =>
+    absorbed.rows.find((a) => a.orgId === orgId)?.totalCents ?? 0;
 
   const label = periodSpan(today, period);
 
@@ -153,6 +156,53 @@ export default async function CostingPage({ searchParams }: {
         })}
       </Panel>
 
+      {/*
+        What the shop has eaten for a client, with no job to charge it to.
+
+        A claim filed against a client rather than a job - a part bought for a
+        partner on a handshake - is spend nobody will invoice, and the two
+        panels above cannot see it: costing counts expenses under the job's
+        revenue, and these have no job. The claim itself is the record; this is
+        the running total per client, so "what has LabZen cost us this year" has
+        a page. See lib/absorbedSpend for what counts and when.
+      */}
+      <Panel
+        title="Absorbed for a client"
+        count={absorbed.rows.length}
+        hint={
+          <>
+            {`Spent in ${label} · claims filed against a client, no job`}
+            {absorbed.totalCents > 0 ? ` · ${formatCents(absorbed.totalCents)}` : ""}
+          </>
+        }
+        empty={`Nothing absorbed for a client in ${label}.`}
+      >
+        {absorbed.rows.length > 0 && absorbed.rows.map((c) => (
+          <div key={c.orgId} style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
+            <div className="row-2" style={{ alignItems: "baseline" }}>
+              <span style={{ flex: "1 1 200px", minWidth: 0 }}>
+                <span className="t-body" style={{ fontWeight: 600 }}>{c.orgName}</span>
+                <span className="mut t-meta" style={{ display: "block" }}>
+                  {`${c.claims.length} claim${c.claims.length === 1 ? "" : "s"}`}
+                </span>
+              </span>
+              <span className="t-body" style={{ width: 92, textAlign: "right", fontWeight: 600 }}>
+                {formatCents(c.totalCents)}
+              </span>
+            </div>
+            {c.claims.map((k) => (
+              <div key={k.id} className="row-2 t-meta" style={{ alignItems: "baseline", paddingLeft: 12 }}>
+                <Link href={`/money/reimbursements/${k.id}`} style={{ flex: "1 1 200px", minWidth: 0 }}>
+                  {k.title || "Untitled claim"}
+                </Link>
+                <span className="mut">{k.person}{k.on ? ` · ${k.on}` : ""}{k.status === "paid" ? "" : ` · ${k.status}`}</span>
+                <span className="mut" style={{ width: 92, textAlign: "right" }}>{formatCents(k.amountCents)}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </Panel>
+
       <Panel
         title="By client"
         count={clients.length}
@@ -167,6 +217,7 @@ export default async function CostingPage({ searchParams }: {
                 <span className="mut t-meta" style={{ display: "block" }}>
                   {`${c.terms} · ${c.jobs} job${c.jobs === 1 ? "" : "s"}`}
                   {c.openCents > 0 ? ` · ${formatCents(c.openCents)} still open` : ""}
+                  {absorbedFor(c.orgId) > 0 ? ` · ${formatCents(absorbedFor(c.orgId))} absorbed, no job` : ""}
                 </span>
               </span>
               <span className="t-body" style={{ width: 92, textAlign: "right", fontWeight: 600 }}>
@@ -190,7 +241,7 @@ export default async function CostingPage({ searchParams }: {
         ))}
       </Panel>
 
-      {jobs.length === 0 && clients.length === 0 && pm.rows.length === 0 && (
+      {jobs.length === 0 && clients.length === 0 && pm.rows.length === 0 && absorbed.rows.length === 0 && (
         <EmptyState title="Nothing closed in this window." />
       )}
     </FinanceShell>

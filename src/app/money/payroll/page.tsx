@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { asc, eq, inArray, isNull, and, gte, ne } from "drizzle-orm";
+import { asc, eq, inArray, and, gte, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { clientAllowlist, expenses, houseMembers, orgs, payroll, timeEntries, users } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import FinanceShell from "@/components/FinanceShell";
-import { railContext } from "@/lib/financeData";
+import { overheadExpense, railContext } from "@/lib/financeData";
 import { myTenantOrgId } from "@/lib/authz";
 import { forTenant } from "@/lib/tenancy";
 import { shopToday } from "@/lib/shopday";
@@ -120,7 +120,7 @@ export default async function PayrollPage({ searchParams }: {
     ? await Promise.all([
         db.select({ incurredOn: expenses.incurredOn, amountCents: expenses.amountCents })
           .from(expenses).where(and(
-            isNull(expenses.workOrderId), gte(expenses.incurredOn, since),
+            overheadExpense(), gte(expenses.incurredOn, since),
             forTenant(expenses.tenantOrgId, mine),
           )),
         db.select({ date: timeEntries.date, minutes: timeEntries.minutes, billable: timeEntries.billable })

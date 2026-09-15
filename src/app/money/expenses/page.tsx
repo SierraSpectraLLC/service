@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { asc, desc, eq, isNull, and } from "drizzle-orm";
+import { asc, desc, eq, and } from "drizzle-orm";
 import { db } from "@/db";
 import { expenseCategories, expenses, payroll } from "@/db/schema";
 import { myTenantOrgId, requireUser } from "@/lib/authz";
@@ -10,16 +10,17 @@ import { visibleDirectory } from "@/lib/directory";
 import { shopToday } from "@/lib/shopday";
 import { payrollForMonth, recentMonths, type PayRow } from "@/lib/payroll";
 import FinanceShell from "@/components/FinanceShell";
-import { booksContext } from "@/lib/financeData";
+import { booksContext, overheadExpense } from "@/lib/financeData";
 import OverheadPanel from "@/components/OverheadPanel";
 import { PageHead } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
 /**
- * The overhead ledger: expenses with no work order behind them. What it cost
- * to exist this month, as opposed to what any job cost - the job answer lives
- * in Costing, and the two deliberately never mix.
+ * The overhead ledger: expenses with no work order behind them and no client
+ * named on their claim - see overheadExpense. What it cost to exist this
+ * month, as opposed to what any job or any client cost - those answers live
+ * in Costing, and the three deliberately never mix.
  */
 export default async function OverheadExpensesPage({ searchParams }: {
   searchParams: Promise<{ period?: string }>;
@@ -32,7 +33,7 @@ export default async function OverheadExpensesPage({ searchParams }: {
 
   const [rows, people, categoryRows] = await Promise.all([
     db.select().from(expenses)
-      .where(and(isNull(expenses.workOrderId), forTenant(expenses.tenantOrgId, readTenant(user))))
+      .where(and(overheadExpense(), forTenant(expenses.tenantOrgId, readTenant(user))))
       .orderBy(desc(expenses.incurredOn), desc(expenses.id)),
     visibleDirectory(user),
     db.select().from(expenseCategories)
