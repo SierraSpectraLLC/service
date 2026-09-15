@@ -89,7 +89,7 @@ export default function BillingDefaultsForm({
   });
 
   const connect = () => startTransition(async () => {
-    const res = await connectStripe(`${window.location.origin}/settings/billing`);
+    const res = await connectStripe(window.location.origin);
     if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
     if (res.url) window.location.href = res.url;
   });
@@ -201,7 +201,7 @@ export default function BillingDefaultsForm({
                   : "none yet"}
               </span>
               <button className="btn sm" disabled={pending} onClick={connect}>
-                {stripe.accountId ? "Continue onboarding" : "Connect an account"}
+                {stripe.accountId ? "Reconnect with Stripe" : "Connect with Stripe"}
               </button>
               {stripe.accountId && (
                 <button className="btn sm" disabled={pending} onClick={refresh}>Re-check</button>

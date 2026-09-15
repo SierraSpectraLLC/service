@@ -3109,6 +3109,8 @@ END $$;
 -- not render at all.
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "stripe_account_id" text NOT NULL DEFAULT '';
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "stripe_ready" boolean NOT NULL DEFAULT false;
+-- "connected" once the operator authorized the platform through Connect OAuth.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "stripe_status" text NOT NULL DEFAULT '';
 
 -- Zero, and it stays zero until somebody decides otherwise: a platform that
 -- silently starts taking a percentage of an operator's revenue is a platform

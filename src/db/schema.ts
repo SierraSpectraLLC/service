@@ -354,6 +354,13 @@ export const orgs = pgTable("orgs", {
   /** Whether Stripe has finished its checks on that account. */
   stripeReady: boolean("stripe_ready").notNull().default(false),
   /**
+   * How the account got here. "connected" once the operator has authorized
+   * this platform through Stripe's Connect OAuth (api/stripe/oauth/callback);
+   * blank before that. Distinct from stripeReady, which is Stripe's own
+   * verdict on whether the account may be paid into yet.
+   */
+  stripeStatus: text("stripe_status").notNull().default(""),
+  /**
    * The hour (0-23, shop time) this organization's digest goes out. On the
    * operator's own row it is the internal edition's hour.
    *

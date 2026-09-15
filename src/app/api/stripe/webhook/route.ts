@@ -29,6 +29,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "bad signature" }, { status: 400 });
   }
 
+  // `account` is whose event this is: a direct charge lives on the operator's
+  // connected account, and every read back to Stripe about it has to say so.
   let event: { type?: string; account?: string; data?: { object?: Record<string, unknown> } };
   try {
     event = JSON.parse(raw);
@@ -93,7 +95,7 @@ export async function POST(req: Request) {
     // payment, so the gross in the Stripe balance and the net that will
     // reach the bank are both on the books. Best effort - a fee that has not
     // settled yet is zero here and a parity finding later, not a 500.
-    const feeCents = await paymentFee(String(session.payment_intent ?? "")).catch(() => 0);
+    const feeCents = await paymentFee(String(session.payment_intent ?? ""), String(event.account ?? "")).catch(() => 0);
     await recordStripePayment({
       invoiceId, amountCents: Math.round(amount), reference,
       method: method === "card" ? "card" : "ach", feeCents,
