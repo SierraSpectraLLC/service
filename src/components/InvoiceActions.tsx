@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
-import { deleteInvoice, markInvoiceSent, recordPayment, voidInvoice } from "@/app/actions";
+import { deleteInvoice, markInvoiceSent, recordPayment, voidInvoice } from "@/app/money/actions";
 import { PAYMENT_METHODS, METHOD_LABEL } from "@/lib/statement";
 import { formatCents } from "@/lib/money";
 

@@ -58,6 +58,15 @@ export type PostInput = {
 
 export type Posted = { id: number; created: boolean };
 
+/**
+ * A dry run. While a sink is set, post() does everything but write: it
+ * still checks the lines, still looks the key up, and hands what it WOULD
+ * have written to the sink instead. The backfill's --dry-run is this and
+ * nothing else, so what it prints is what the real run posts.
+ */
+let sink: ((input: PostInput, key: string) => void) | null = null;
+export function setPostSink(next: typeof sink): void { sink = next; }
+
 /** Why a posting was refused. `code` is what a screen switches on. */
 export class LedgerError extends Error {
   constructor(public readonly code: "unbalanced" | "closed" | "bad_line" | "bad_date" | "bank_confirmed" | "reversed", message: string) {
@@ -125,6 +134,8 @@ export async function post(input: PostInput): Promise<Posted> {
     throw new LedgerError("closed",
       `${input.on} is in a closed month. Post it today instead - the record keeps both.`);
   }
+
+  if (sink) { sink(input, key); return { id: -1, created: true }; }
 
   const [entry] = await tx.insert(ledgerEntries).values({
     tenantOrgId: input.tenantOrgId,

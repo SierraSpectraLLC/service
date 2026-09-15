@@ -4602,3 +4602,30 @@ END $$;
 
 -- The last closed month, "YYYY-MM". lib/ledger/post refuses entries inside it.
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "books_closed_through" text NOT NULL DEFAULT '';
+
+-- The day a late fee was waived, so the ledger's waiver entry has a date of
+-- its own rather than borrowing the fee's.
+ALTER TABLE "invoice_fees" ADD COLUMN IF NOT EXISTS "waived_on" text NOT NULL DEFAULT '';
+-- When a purchase order's vendor was paid. Blank = still a payable.
+ALTER TABLE "purchase_orders" ADD COLUMN IF NOT EXISTS "paid_on" text NOT NULL DEFAULT '';
+ALTER TABLE "purchase_orders" ADD COLUMN IF NOT EXISTS "paid_by" text NOT NULL DEFAULT '';
+ALTER TABLE "purchase_orders" ADD COLUMN IF NOT EXISTS "paid_ref" text NOT NULL DEFAULT '';
+
+-- One figure of one ledger parity run: legacy arithmetic beside the ledger's.
+CREATE TABLE IF NOT EXISTS "ledger_parity" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "run_at" timestamp NOT NULL DEFAULT now(),
+  "figure" text NOT NULL,
+  "label" text NOT NULL DEFAULT '',
+  "legacy_cents" integer NOT NULL DEFAULT 0,
+  "ledger_cents" integer NOT NULL DEFAULT 0,
+  "note" text NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS "ledger_parity_tenant_run_idx" ON "ledger_parity" ("tenant_org_id", "run_at");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ledger_parity_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "ledger_parity" ADD CONSTRAINT "ledger_parity_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;

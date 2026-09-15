@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { setCashOpening } from "@/app/actions";
+import { setCashOpening } from "@/app/money/actions";
 import { toast } from "@/components/ui/Toast";
 
 /**

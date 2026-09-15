@@ -3025,6 +3025,14 @@ export const purchaseOrders = pgTable("purchase_orders", {
   sentAt: timestamp("sent_at"),
   closedAt: timestamp("closed_at"),
   cancelReason: text("cancel_reason").notNull().default(""),
+  /**
+   * When the vendor was paid, and by whom. Blank until payPurchaseOrder: a
+   * received order is a payable until then, which is the figure the Payables
+   * queue exists to show. The ledger carries the money; this is the marker.
+   */
+  paidOn: text("paid_on").notNull().default(""),
+  paidBy: text("paid_by").notNull().default(""),
+  paidRef: text("paid_ref").notNull().default(""),
 }, (t) => [unique("po_number_unique").on(t.number), index("po_status_idx").on(t.status)]);
 
 export const poLines = pgTable("po_lines", {
@@ -3719,6 +3727,8 @@ export const invoiceFees = pgTable("invoice_fees", {
   postedBy: text("posted_by").notNull().default(""),
   waived: boolean("waived").notNull().default(false),
   waivedBy: text("waived_by").notNull().default(""),
+  /** The shop day it was waived - the day the ledger's waiver entry carries. */
+  waivedOn: text("waived_on").notNull().default(""),
   waivedReason: text("waived_reason").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("invoice_fees_invoice_idx").on(t.invoiceId)]);
@@ -4927,3 +4937,20 @@ export const payrollRuns = pgTable("payroll_runs", {
   postedBy: text("posted_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("payroll_runs_month_unique").on(t.tenantOrgId, t.ym)]);
+
+/**
+ * One figure of one parity run: the legacy arithmetic beside the ledger's,
+ * per workspace, per run. Written by the hourly cron and by "Run now" on the
+ * Ledger parity view; read by nothing else. The dual-write period's record,
+ * and the evidence gate 4 is decided on. See lib/ledger/parity.
+ */
+export const ledgerParity = pgTable("ledger_parity", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  runAt: timestamp("run_at").notNull().defaultNow(),
+  figure: text("figure").notNull(),
+  label: text("label").notNull().default(""),
+  legacyCents: integer("legacy_cents").notNull().default(0),
+  ledgerCents: integer("ledger_cents").notNull().default(0),
+  note: text("note").notNull().default(""),
+}, (t) => [index("ledger_parity_tenant_run_idx").on(t.tenantOrgId, t.runAt)]);

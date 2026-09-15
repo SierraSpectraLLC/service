@@ -57,6 +57,7 @@ beforeAll(async () => {
 beforeEach(() => { who = OWNER; });
 
 const actions = await import("@/app/actions");
+const money = await import("@/app/money/actions");
 
 /** A fresh draft order with one line on it. */
 async function anOrder(vendor = "Frit & Ferrule") {
@@ -145,7 +146,7 @@ describe("deleting a client's order from the store", () => {
 
   it("goes, and its lines go with it", async () => {
     const id = await anOrderFromAClient();
-    const res = await actions.deleteInvoice(id, "test order placed while trying the store");
+    const res = await money.deleteInvoice(id, "test order placed while trying the store");
     expect(res.error).toBeUndefined();
     expect((await testDb.select().from(schema.invoices)).some((i) => i.id === id)).toBe(false);
     expect((await testDb.select().from(schema.invoiceLines)).some((l) => l.invoiceId === id)).toBe(false);
@@ -156,7 +157,7 @@ describe("deleting a client's order from the store", () => {
     await testDb.insert(schema.payments).values({
       tenantOrgId: 3, invoiceId: id, amountCents: 42000, receivedOn: "2026-08-20", method: "card",
     });
-    await actions.deleteInvoice(id, "duplicate of INV-9002");
+    await money.deleteInvoice(id, "duplicate of INV-9002");
     const line = (await testDb.select().from(schema.auditLog))
       .map((a) => a.action).find((a) => a.includes("INV-9001") && a.includes("payments"));
     expect(line).toContain("$420");
@@ -165,6 +166,6 @@ describe("deleting a client's order from the store", () => {
   it("is an owner's move here too", async () => {
     const id = await anOrderFromAClient();
     who = STAFF;
-    await expect(actions.deleteInvoice(id, "tidying")).rejects.toThrow();
+    await expect(money.deleteInvoice(id, "tidying")).rejects.toThrow();
   });
 });

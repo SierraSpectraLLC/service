@@ -26,6 +26,7 @@ import { shopToday } from "@/lib/shopday";
 import { asStatementRow, creditFor, invoiceById } from "@/lib/invoiceData";
 import { invoiceView } from "@/lib/statement";
 import { accruedCents } from "@/lib/referral";
+import { postInvoicePayment, postProcessingFee, postReferralPaid } from "@/lib/ledger/postings";
 
 /** Both surfaces an invoice shows up on. Mirrors app/actions' revInvoice. */
 const revInvoice = (inv: { id: number; orgId: number }) => {
@@ -41,6 +42,8 @@ const revInvoice = (inv: { id: number; orgId: number }) => {
  */
 export async function recordStripePayment(input: {
   invoiceId: number; amountCents: number; reference: string; method: string;
+  /** Stripe's cut, when the event carried it. Its own cost row. */
+  feeCents?: number;
 }): Promise<void> {
   const [inv] = await db.select().from(invoices).where(eq(invoices.id, input.invoiceId));
   if (!inv) return;
@@ -48,12 +51,18 @@ export async function recordStripePayment(input: {
     .where(and(eq(payments.invoiceId, input.invoiceId), eq(payments.reference, input.reference)));
   if (already.length) return;   // Stripe retries; a payment is not recorded twice.
 
-  await db.insert(payments).values({
+  const [row] = await db.insert(payments).values({
     tenantOrgId: inv.tenantOrgId, invoiceId: input.invoiceId,
     method: input.method === "card" ? "card" : "ach",
     amountCents: input.amountCents, reference: input.reference,
     receivedOn: shopToday(), recordedBy: "stripe",
-  });
+  }).returning();
+  // The gross lands in the Stripe balance, not the bank - nothing reaches the
+  // bank until a payout - and the processing fee is its own cost row.
+  await postInvoicePayment({ inv, payment: row });
+  if (input.feeCents && input.feeCents > 0) {
+    await postProcessingFee({ inv, reference: input.reference, feeCents: input.feeCents, on: row.receivedOn });
+  }
 
   const full = await invoiceById(input.invoiceId);
   const view = full ? invoiceView(asStatementRow(full), shopToday()) : null;
@@ -104,6 +113,11 @@ export async function recordReferralPayment(input: {
       ? isNull(referralFees.tenantOrgId)
       : eq(referralFees.tenantOrgId, fee.tenantOrgId),
   ));
+  // The payer's books: a fee paid to another shop is a cost of the work.
+  await postReferralPaid({
+    tenantOrgId: fee.tenantOrgId, feeId: input.feeId, cents: Math.max(0, Math.round(input.amountCents)),
+    reference: input.reference, on: shopToday(),
+  });
   await audit({
     actor: "stripe", entityType: "referral_fee", entityId: input.feeId, tenantOrgId: fee.tenantOrgId,
     action: `referral fee payment of ${formatCents(input.amountCents)} received (${input.reference})`,

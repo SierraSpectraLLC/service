@@ -34,6 +34,7 @@ import { db } from "@/db";
 import { bills, expenses } from "@/db/schema";
 import { shopDay } from "@/lib/shopday";
 import { billDescription, billLive, dueBillCycles } from "@/lib/bills";
+import { postBillCycle } from "@/lib/ledger/postings";
 
 export type BillResult = {
   posted: { bill: number; name: string; on: string; amountCents: number }[];
@@ -69,6 +70,9 @@ export async function postBill(b: BillRow, today: string, out: BillResult): Prom
       });
       /* The cursor moves in the same breath as the row - see stipendRun. */
       await db.update(bills).set({ lastOn: on }).where(eq(bills.id, b.id));
+      /* Overhead up, bank down: a bill is paid when it posts. Keyed on the
+         cycle day, so the never-post-twice rule holds in the ledger too. */
+      await postBillCycle({ bill: b, on });
       out.posted.push({ bill: b.id, name: b.name, on, amountCents: b.amountCents });
     } catch (e) {
       out.failed.push({ bill: b.id, name: b.name, on, error: (e as Error).message });

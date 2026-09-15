@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
-import { keepPromise, logPromise, openDispute, postFee, resolveDispute, waiveFee } from "@/app/actions";
+import { keepPromise, logPromise, openDispute, postFee, resolveDispute, waiveFee } from "@/app/money/actions";
 import { formatCents } from "@/lib/money";
 import { Panel, Pill } from "@/components/ui";
 

@@ -250,7 +250,7 @@ describe("the gate on the money", () => {
     if (res.error) throw new Error(res.error);
   };
   const pay = async (id: number) => {
-    const { payExpenseReport } = await import("@/app/actions");
+    const { payExpenseReport } = await import("@/app/money/actions");
     return payExpenseReport(id, { paidOn: "2026-08-10", reference: "check 1044" });
   };
 

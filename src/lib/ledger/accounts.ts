@@ -68,6 +68,10 @@ export const CASH_ACCOUNTS: readonly AccountKey[] = ["bank", "stripe"] as const;
  */
 export const REF_TYPES = [
   "opening", "invoice", "job", "po", "bill", "report", "payroll", "bank", "payout", "tax", "referral",
+  // Not in the brief's vocabulary: a hand-logged, company-paid expense row
+  // (an overhead receipt, a crane rental on a job) is neither a bill cycle
+  // nor a claim, and the code has always had it. The code wins.
+  "expense",
 ] as const;
 export type RefType = (typeof REF_TYPES)[number];
 
@@ -77,7 +81,7 @@ export const isRefType = (v: unknown): v is RefType =>
 export const REF_LABEL: Record<RefType, string> = {
   opening: "Opening balance", invoice: "Invoice", job: "Job", po: "Purchase order", bill: "Bill",
   report: "Expense report", payroll: "Payroll", bank: "Bank line", payout: "Stripe payout",
-  tax: "Sales tax", referral: "Referral fee",
+  tax: "Sales tax", referral: "Referral fee", expense: "Expense",
 };
 
 /** The revenue account an invoice line kind posts to. */

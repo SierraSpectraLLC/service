@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
-  amendExpenseReport, approveExpenseAllowance, attachPoolExpenses, deleteExpenseReport, editReportExpense, logMyExpense, nameExpenseReport, payExpenseReport, removeReportExpense, returnExpenseReport, setReportTarget, submitDraftReport, withdrawExpenseReport,
+  amendExpenseReport, approveExpenseAllowance, attachPoolExpenses, deleteExpenseReport, editReportExpense, logMyExpense, nameExpenseReport, removeReportExpense, returnExpenseReport, setReportTarget, submitDraftReport, withdrawExpenseReport,
 } from "@/app/actions";
+import { payExpenseReport } from "@/app/money/actions";
 import {
   checkReportTitle, editableReport, NO_JOB, parseReportTarget, REPORT_LABEL, REPORT_TONE, reportSpan, reportTargetValue, reportTotalCents,
 } from "@/lib/expenseReports";

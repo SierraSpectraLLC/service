@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const editReportExpense = vi.fn(async () => ({}));
 const logMyExpense = vi.fn(async () => ({}));
 const removeReportExpense = vi.fn(async () => ({}));
+vi.mock("@/app/money/actions", () => ({ payExpenseReport: vi.fn(async () => ({})) }));
 vi.mock("@/app/actions", () => ({
   approveExpenseAllowance: vi.fn(async () => ({})),
   attachPoolExpenses: vi.fn(async () => ({})),
