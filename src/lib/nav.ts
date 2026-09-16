@@ -278,8 +278,21 @@ function staffSections(ctx: NavContext): NavSection[] {
   if (fin) {
     out.push({
       key: "money", label: LABEL.money, href: "/money", homeLabel: "Financial home",
-      items: financeNavItems({ seesBooks: ctx.seesBooks, seesPayroll: ctx.seesPayroll })
-        .filter((i) => i.href !== "/money"),
+      items: [
+        ...financeNavItems({ seesBooks: ctx.seesBooks, seesPayroll: ctx.seesPayroll })
+          .filter((i) => i.href !== "/money"),
+        /* Purchasing and Reimbursements are things an engineer DOES rather
+           than rooms over the journal, which is why they are not among the
+           section's rooms - but they are money, and the owner looked for
+           them here and found them under Operations instead. So: whoever has
+           this menu finds them in it, and only here; whoever has no
+           Financial menu finds them under Operations, and only there. One
+           door each, still. */
+        ...WORKING_ROOMS.map((r) => ({ href: r.href, label: r.label })),
+        /* The dual-write period's record, the money computed the old way
+           beside the ledger's: a books reader's page, about the books. */
+        ...(ctx.seesBooks ? [{ href: "/parity/ledger", label: "Ledger parity" }] : []),
+      ],
     });
   }
   out.push({
@@ -314,19 +327,12 @@ function staffSections(ctx: NavContext): NavSection[] {
          section below - the one place about the company itself, its sites and
          its people - and one destination goes by one word in one place. */
       /* Purchasing and Reimbursements, for the readers who have no Financial
-         menu to find them in.
-         They are things an engineer DOES rather than facts about how the
-         business is doing, and both were doors of their own before the
-         financial section existed - so an engineer must be able to raise a
-         purchase order and claim back a hotel without the books. That used to
-         mean listing them in BOTH menus, on the reasoning that the Financial
-         menu was owner-only and so the two readerships never overlapped. They
-         do now: HR gets that menu for the payroll register, and would have
-         seen the same two rooms twice.
-         So: one door each, and it is this one. The Financial menu is now the
-         seven rooms over the journal (lib/finance.FINANCE_KEYS), and neither
-         of these is one of them, so every staff reader finds them here. */
-      ...WORKING_ROOMS.map((r) => ({ href: r.href, label: r.label })),
+         menu to find them in - an engineer must be able to raise a purchase
+         order and claim back a hotel without the books. A reader WITH that
+         menu finds them there instead, never in both: HR has the Financial
+         menu for the register and would otherwise see the same two rooms
+         twice. */
+      ...(fin ? [] : WORKING_ROOMS.map((r) => ({ href: r.href, label: r.label }))),
       /* Payroll lives in the Financial menu. It is not something an engineer
          DOES - unlike the two rooms above it, which stay here precisely
          because they are - and its gate is the register gate, so anybody who
@@ -344,10 +350,9 @@ function staffSections(ctx: NavContext): NavSection[] {
       ...(ctx.modules.sheetSync
         ? [{ href: "/parity", label: "Sheet parity", badge: ctx.openDiffs, tone: "warn" as const }]
         : []),
-      /* The dual-write period's record: the money computed the old way beside
-         the ledger's. A books reader's page, next to Sheet parity because it
-         is the same kind of page - see lib/ledger/parity. */
-      ...(ctx.seesBooks ? [{ href: "/parity/ledger", label: "Ledger parity" }] : []),
+      /* Ledger parity is in the Financial menu now: it is about the books,
+         and its reader always has that menu. Sheet parity stays here - it is
+         about the sync, not the money. */
       { href: "/archive", label: "Archived" },
     ],
   });
