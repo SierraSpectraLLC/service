@@ -85,7 +85,7 @@ const monthLabel = (day: string): string =>
 
 export const FINANCE_KEYS = [
   "overview", "cash",
-  "receivables", "payables", "clients",
+  "receivables", "quotes", "payables", "clients",
   "ledger", "reports",
 ] as const;
 export type FinanceKey = (typeof FINANCE_KEYS)[number];
@@ -111,6 +111,10 @@ const ENTRIES: (FinanceEntry & { group: string })[] = [
   { group: "Position", key: "cash", label: "Cash", href: "/money/cash" },
 
   { group: "Money", key: "receivables", label: "Receivables", href: "/money/receivables" },
+  /* Quotes are the first stage of Receivables, and the one the shop reaches
+     for most: the old menu's "Quotes" was the door people missed when the
+     room was folded in. One entry, straight to that stage. */
+  { group: "Money", key: "quotes", label: "Quotes", href: "/money/quotes" },
   { group: "Money", key: "payables", label: "Payables", href: "/money/payables" },
   { group: "Money", key: "clients", label: "Clients", href: "/money/clients" },
 
@@ -155,7 +159,6 @@ export type Visibility = {
  * absorbed it, so a bookmark, a digest link or a muscle memory still lands.
  */
 export const RETIRED_ROUTES: Record<string, string> = {
-  "/money/quotes": "/money/receivables?stage=quoted",
   "/money/invoices": "/money/receivables",
   "/money/collections": "/money/receivables?stage=pastdue",
   "/money/expenses": "/money/payables",

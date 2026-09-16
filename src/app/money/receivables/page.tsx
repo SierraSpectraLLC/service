@@ -38,12 +38,24 @@ const PILL: Record<string, [Tone, string]> = {
 export default async function ReceivablesPage({ searchParams }: {
   searchParams: Promise<{ period?: string; stage?: string; org?: string }>;
 }) {
+  return ReceivablesRoom({ sp: await searchParams, room: "receivables" });
+}
+
+/**
+ * The room itself, fronted by two pages. /money/quotes is the same pipeline
+ * held at its first stage: the shop reaches for "Quotes" more than for any
+ * other stage, and the old menu's door was the one people missed when the
+ * room was folded into Receivables. One component, so the two cannot drift.
+ */
+export async function ReceivablesRoom({ sp, room }: {
+  sp: { period?: string; stage?: string; org?: string };
+  room: "receivables" | "quotes";
+}) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
-  const sp = await searchParams;
   const { period, today, mine, figures: f, rail } = await booksContext(user, sp.period);
-  const stage = STAGES.find((s) => s.k === sp.stage)?.k ?? null;
+  const stage = room === "quotes" ? "quoted" : STAGES.find((s) => s.k === sp.stage)?.k ?? null;
   const org = sp.org ? Number(sp.org) : null;
 
   const counts: Record<ReceivableRow["stage"], { cents: number; n: number; tone?: Tone }> = {
@@ -63,11 +75,13 @@ export default async function ReceivablesPage({ searchParams }: {
 
   return (
     <FinanceShell
-      rail={rail} active="receivables"
+      rail={rail} active={room}
       period={period}
-      path="/money/receivables"
-      title="Receivables"
-      sub={`Everything owed to the shop, from quote to paid · ${periodSpan(today, period)}`}
+      path={room === "quotes" ? "/money/quotes" : "/money/receivables"}
+      title={room === "quotes" ? "Quotes" : "Receivables"}
+      sub={room === "quotes"
+        ? `Priced and waiting on an answer · the first stage of what is owed · ${periodSpan(today, period)}`
+        : `Everything owed to the shop, from quote to paid · ${periodSpan(today, period)}`}
       actions={<><NewQuoteButton today={today} clients={payable} /><NewInvoiceButton clients={payable} /></>}
     >
       <div className="panel">

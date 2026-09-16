@@ -1,13 +1,15 @@
-import { redirect } from "next/navigation";
-import { RETIRED_ROUTES } from "@/lib/finance";
+import { ReceivablesRoom } from "@/app/money/receivables/page";
+
+export const dynamic = "force-dynamic";
 
 /**
- * A room that was folded into the seven. The old path keeps answering so a
- * bookmark, a digest link or a muscle memory still lands - see
- * RETIRED_ROUTES in lib/finance for where each one went.
+ * Quotes: the receivables pipeline, held at its first stage. The shop
+ * reaches for this more than for any other stage, so it has its own door in
+ * the menu and its own address - see ReceivablesRoom for the one component
+ * behind both.
  */
-export default async function RetiredRoom({ searchParams }: { searchParams: Promise<{ period?: string }> }) {
-  const { period } = await searchParams;
-  const to = RETIRED_ROUTES["/money/quotes"];
-  redirect(period && period !== "month" ? `${to}${to.includes("?") ? "&" : "?"}period=${period}` : to);
+export default async function QuotesPage({ searchParams }: {
+  searchParams: Promise<{ period?: string; org?: string }>;
+}) {
+  return ReceivablesRoom({ sp: await searchParams, room: "quotes" });
 }

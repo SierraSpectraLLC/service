@@ -405,7 +405,7 @@ export const moneyFigures = cache(async (
     holds: holds.length,
     decisions: decisionsFrom(sources),
     sources,
-    amounts: { receivables: receivableCents, payables: owedNow, cash: cashCents },
+    amounts: { receivables: receivableCents, quotes: quoted, payables: owedNow, cash: cashCents },
     labels: holds.length ? { clients: `${holds.length} on hold` } : {},
     tones: { ...(sumBal(late) > 0 ? { receivables: "bad" as const } : {}), ...(holds.length ? { clients: "bad" as const } : {}) },
     receivables: rows,
