@@ -14,10 +14,12 @@
 //
 // One cursor, top to bottom. Every block asks for the room it needs and
 // gets a new page when there is none; a heading keeps with what follows it,
-// and a table repeats its header row on the page it continues onto.
+// and a table repeats its header row on the page it continues onto. A
+// section - a heading and everything under it - is measured before it is
+// drawn and moved to the next page whole rather than torn across two.
 
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type RGB } from "pdf-lib";
-import { DOC_COLOR, PAGE, SIZE, SPECTRUM, cellIndent, columnShares, footerLine2, winAnsi, wordmark, type DocSpec } from "@/lib/docStyle";
+import { DOC_COLOR, PAGE, SIZE, SPECTRUM, cellIndent, columnShares, footerLine2, sectionsOf, winAnsi, wordmark, type DocSpec } from "@/lib/docStyle";
 import type { ProposalBlock } from "@/lib/proposal";
 
 const hex = (h: string): RGB => rgb(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255);
@@ -199,10 +201,6 @@ function drawBlock(s: Sheet, b: ProposalBlock) {
       return;
     }
     case "head":
-      /* A section of its own starts a page of its own. `y < TOP` is "this
-         page has something on it already", so a break never opens the
-         document with a blank sheet. */
-      if (s.spec.sectionBreaks && s.y < TOP) s.newPage();
       s.text(b.text, { font: s.f.bold, size: SIZE.h1, color: C.coral, before: 10, after: 5, keepNext: true });
       return;
     case "sub":
@@ -266,6 +264,30 @@ export async function renderPdf(spec: DocSpec): Promise<Uint8Array> {
     mono: await doc.embedFont(StandardFonts.Courier),
   };
   const s = new Sheet(doc, f, spec);
-  for (const b of spec.blocks) drawBlock(s, b);
+
+  // The measuring sheet: the same class, the same fonts, drawing the same
+  // blocks onto pages nobody ever sees. Measuring by drawing is the only way
+  // the number can be trusted - a second implementation of "how tall is a
+  // wrapped table" would drift from the first the first time either changed.
+  const pad = await PDFDocument.create();
+  const pf: Fonts = {
+    reg: await pad.embedFont(StandardFonts.Helvetica),
+    bold: await pad.embedFont(StandardFonts.HelveticaBold),
+    ital: await pad.embedFont(StandardFonts.HelveticaOblique),
+    mono: await pad.embedFont(StandardFonts.Courier),
+  };
+  const scratch = new Sheet(pad, pf, spec);
+
+  for (const section of sectionsOf(spec.blocks)) {
+    scratch.newPage();
+    const from = scratch.pageNo;
+    for (const b of section) drawBlock(scratch, b);
+    // A section that fills more than one page has to be broken somewhere, so
+    // it starts where it is; anything shorter than a page goes over whole.
+    const tall = scratch.pageNo > from;
+    const h = TOP - scratch.y;
+    if (!tall && h > s.y - BOTTOM) s.newPage();
+    for (const b of section) drawBlock(s, b);
+  }
   return doc.save();
 }
