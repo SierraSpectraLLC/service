@@ -14,7 +14,7 @@ import {
   Packer, PageNumber, Paragraph, ShadingType, Table, TableCell, TableRow, TabStopType, TextRun,
   VerticalAlign, WidthType,
 } from "docx";
-import { DOC_COLOR, PAGE, SIZE, SPECTRUM, cellIndent, columnShares, footerLine2, wordmark, type DocSpec } from "@/lib/docStyle";
+import { DOC_COLOR, PAGE, SIZE, SPECTRUM, cellIndent, columnShares, footerLine2, sectionsOf, wordmark, type DocSpec } from "@/lib/docStyle";
 import type { ProposalBlock } from "@/lib/proposal";
 
 /** Points to half-points, the unit a run's size is in. */
@@ -40,12 +40,16 @@ const run = (text: string, o: RunOpts = {}) => new TextRun({
   color: o.color ?? DOC_COLOR.ink, font: o.mono ? "Consolas" : "Arial", allCaps: o.caps,
 });
 
-type ParaOpts = { before?: number; after?: number; line?: number; keepNext?: boolean; align?: (typeof AlignmentType)[keyof typeof AlignmentType]; bullet?: boolean; indent?: number; pageBreakBefore?: boolean };
+type ParaOpts = { before?: number; after?: number; line?: number; keepNext?: boolean; align?: (typeof AlignmentType)[keyof typeof AlignmentType]; bullet?: boolean; indent?: number };
+/**
+ * Every paragraph keeps its own lines together; `keepNext` additionally keeps
+ * it with the paragraph after it, which is how a section is held on one page.
+ */
 const para = (children: TextRun[], o: ParaOpts = {}) => new Paragraph({
   children,
   spacing: { before: tw(o.before ?? 0), after: tw(o.after ?? 0), line: o.line ?? LINE, lineRule: LineRuleType.AUTO },
+  keepLines: true,
   keepNext: o.keepNext,
-  pageBreakBefore: o.pageBreakBefore,
   alignment: o.align,
   indent: o.indent ? { left: tw(o.indent) } : undefined,
   numbering: o.bullet ? { reference: "bullets", level: 0 } : undefined,
@@ -120,18 +124,21 @@ function footer(spec: DocSpec): Footer {
 }
 
 /** The summary block: label, value, twice across. Labels Sky on Paper. */
-function facts(rows: [string, string][]): Table {
+function facts(rows: [string, string][], keep: boolean): Table {
   const widths = [tw(72), tw(180), tw(72), tw(180)];
   const trs: TableRow[] = [];
-  for (let r = 0; r < Math.ceil(rows.length / 2); r++) {
+  const last = Math.ceil(rows.length / 2) - 1;
+  for (let r = 0; r <= last; r++) {
     const pair = [rows[r * 2], rows[r * 2 + 1]];
+    const keepNext = r < last || keep;
     trs.push(new TableRow({
+      cantSplit: true,
       children: pair.flatMap((kv, i) => {
         const [k, v] = kv ?? ["", ""];
         const mono = /#|number/i.test(k);
         return [
-          cell([para([run(k, { bold: true, size: SIZE.table, color: DOC_COLOR.sky })], { line: 240 })], widths[i * 2], { fill: DOC_COLOR.paper }),
-          cell([para([run(v, { size: SIZE.table, mono })], { line: 240 })], widths[i * 2 + 1]),
+          cell([para([run(k, { bold: true, size: SIZE.table, color: DOC_COLOR.sky })], { line: 240, keepNext })], widths[i * 2], { fill: DOC_COLOR.paper }),
+          cell([para([run(v, { size: SIZE.table, mono })], { line: 240, keepNext })], widths[i * 2 + 1]),
         ];
       }),
     }));
@@ -150,7 +157,7 @@ function facts(rows: [string, string][]): Table {
  * Consolas; a total row bold with no second fill; the recommended column
  * Blush. Full text width unless it has three or fewer columns.
  */
-function table(b: Extract<ProposalBlock, { kind: "table" }>): Table {
+function table(b: Extract<ProposalBlock, { kind: "table" }>, keep: boolean): Table {
   const n = b.head.length;
   const total = n <= 3 ? Math.round(TEXT_W * 0.66) : TEXT_W;
   const shares = b.shares ?? columnShares(b.head);
@@ -159,8 +166,11 @@ function table(b: Extract<ProposalBlock, { kind: "table" }>): Table {
   const align = (i: number) => (b.align?.[i] === "r" ? AlignmentType.RIGHT : AlignmentType.LEFT);
   const mono = (i: number) => (b.mono ?? []).includes(i);
 
-  const row = (cells: string[], o: { head?: boolean; bold?: boolean; lead?: boolean }) => new TableRow({
+  const row = (cells: string[], o: { head?: boolean; bold?: boolean; lead?: boolean; keepNext?: boolean }) => new TableRow({
     tableHeader: o.head,
+    // A row is a fact; half of it at the foot of one page and half at the
+    // head of the next is not one.
+    cantSplit: true,
     children: cells.map((raw, i) => {
       const { text, indent } = cellIndent(raw);
       return cell(
@@ -169,7 +179,7 @@ function table(b: Extract<ProposalBlock, { kind: "table" }>): Table {
           size: SIZE.table,
           color: o.head ? DOC_COLOR.sky : indent ? DOC_COLOR.slate : DOC_COLOR.ink,
           mono: !o.head && mono(i) && text.trim() !== "",
-        })], { line: 240, align: align(i), indent: indent ? 10 : 0 })],
+        })], { line: 240, align: align(i), indent: indent ? 10 : 0, keepNext: o.keepNext })],
         widths[i],
         { fill: o.head ? DOC_COLOR.paper : !o.head && b.highlightCol === i ? DOC_COLOR.blush : undefined },
       );
@@ -181,28 +191,35 @@ function table(b: Extract<ProposalBlock, { kind: "table" }>): Table {
     columnWidths: widths,
     borders: { ...box(HAIRLINE), insideHorizontal: HAIRLINE, insideVertical: HAIRLINE },
     rows: [
-      row(b.head, { head: true }),
-      ...b.rows.map((r, j) => row(r, { lead: b.lead && j === 0, bold: b.lead && j === 0 })),
-      ...(b.foot ?? []).map((r) => row(r, { bold: true })),
+      row(b.head, { head: true, keepNext: true }),
+      ...b.rows.map((r, j) => row(r, {
+        lead: b.lead && j === 0, bold: b.lead && j === 0,
+        keepNext: keep || j < b.rows.length - 1 || Boolean(b.foot?.length),
+      })),
+      ...(b.foot ?? []).map((r, j) => row(r, { bold: true, keepNext: keep || j < (b.foot?.length ?? 0) - 1 })),
     ],
   });
 }
 
 /** What we recommend: a Blush box, the heading in coral, the reasons under it. */
-function callout(b: Extract<ProposalBlock, { kind: "callout" }>): Table {
+function callout(b: Extract<ProposalBlock, { kind: "callout" }>, keep: boolean): Table {
   return new Table({
     width: { size: TEXT_W, type: WidthType.DXA },
     columnWidths: [TEXT_W],
     borders: { ...box(HAIRLINE), insideHorizontal: NONE, insideVertical: NONE },
     rows: [new TableRow({
+      cantSplit: true,
       children: [new TableCell({
         width: { size: TEXT_W, type: WidthType.DXA },
         shading: shade(DOC_COLOR.blush),
         margins: { top: tw(8), bottom: tw(8), left: tw(10), right: tw(10) },
         borders: box(HAIRLINE),
         children: [
-          para([run(b.text, { bold: true, color: DOC_COLOR.coral })], { after: 4 }),
-          ...b.body.map((t, i) => para([run(t)], { after: i === b.body.length - 1 ? 0 : 6 })),
+          para([run(b.text, { bold: true, color: DOC_COLOR.coral })], { after: 4, keepNext: true }),
+          ...b.body.map((t, i) => {
+            const last = i === b.body.length - 1;
+            return para([run(t)], { after: last ? 0 : 6, keepNext: keep || !last });
+          }),
         ],
       })],
     })],
@@ -210,35 +227,42 @@ function callout(b: Extract<ProposalBlock, { kind: "callout" }>): Table {
 }
 
 /**
- * `breakBefore` is set on a section heading when the document puts each
- * section on its own page - never on the first block, which would open the
- * file with a blank sheet.
+ * `keep` is set on every block of a section but its last, so Word holds the
+ * section on one page: each paragraph asks to stay with the one after it, and
+ * the chain ends where the section does. Word honours it where the section
+ * fits and gives up where it cannot, which is the behaviour wanted - the PDF
+ * is the copy a client is sent, and there the rule is exact.
  */
-function blockToDocx(b: ProposalBlock, breakBefore = false): (Paragraph | Table)[] {
+function blockToDocx(b: ProposalBlock, keep = false): (Paragraph | Table)[] {
   switch (b.kind) {
     case "title":
       return [
-        para([run(b.text, { bold: true, size: SIZE.title })], { after: 2, line: 240 }),
-        ...(b.sub ? [para([run(b.sub, { size: SIZE.subtitle, color: DOC_COLOR.slate })], { after: 14, line: 240 })] : [para([], { after: 14 })]),
+        para([run(b.text, { bold: true, size: SIZE.title })], { after: 2, line: 240, keepNext: true }),
+        ...(b.sub
+          ? [para([run(b.sub, { size: SIZE.subtitle, color: DOC_COLOR.slate })], { after: 14, line: 240, keepNext: keep })]
+          : [para([], { after: 14, keepNext: keep })]),
       ];
     case "facts":
-      return [facts(b.rows), para([], { after: 8, line: 240 })];
+      return [facts(b.rows, true), para([], { after: 8, line: 240, keepNext: keep })];
     case "head":
       return [para([run(b.text, { bold: true, size: SIZE.h1, color: DOC_COLOR.coral })],
-        { before: 10, after: 5, line: 240, keepNext: true, pageBreakBefore: breakBefore })];
+        { before: 10, after: 5, line: 240, keepNext: true })];
     case "sub":
       return [para([run(b.text, { bold: true, size: SIZE.h2 })], { before: 6, after: 4, line: 240, keepNext: true })];
     case "para":
       return [para(
         [run(b.text, b.lead ? { italic: true, size: SIZE.lead, color: DOC_COLOR.slate } : { bold: b.strong })],
-        { after: 7 },
+        { after: 7, keepNext: keep },
       )];
     case "list":
-      return b.items.map((it, i) => para([run(it)], { after: i === b.items.length - 1 ? 7 : 3, bullet: true }));
+      return b.items.map((it, i) => {
+        const last = i === b.items.length - 1;
+        return para([run(it)], { after: last ? 7 : 3, bullet: true, keepNext: keep || !last });
+      });
     case "table":
-      return [table(b), para([], { after: 6, line: 240 })];
+      return [table(b, true), para([], { after: 6, line: 240, keepNext: keep })];
     case "callout":
-      return [callout(b), para([], { after: 6, line: 240 })];
+      return [callout(b, true), para([], { after: 6, line: 240, keepNext: keep })];
   }
 }
 
@@ -276,7 +300,10 @@ export async function renderDocx(spec: DocSpec): Promise<Buffer> {
       },
       headers: { default: header(spec) },
       footers: { default: footer(spec) },
-      children: spec.blocks.flatMap((b, i) => blockToDocx(b, Boolean(spec.sectionBreaks) && i > 0)),
+      // Section by section, so the keep-with-next chain ends where a section
+      // does and Word is free to break there and nowhere else.
+      children: sectionsOf(spec.blocks).flatMap((section) =>
+        section.flatMap((b, i) => blockToDocx(b, i < section.length - 1))),
     }],
   });
   return Packer.toBuffer(doc);

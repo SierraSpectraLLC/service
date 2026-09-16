@@ -11,8 +11,8 @@ import { shopToday } from "@/lib/shopday";
 import { quoteById } from "@/lib/invoiceData";
 import { addressedTo } from "@/lib/quotes";
 import { longDate } from "@/lib/demandLetter";
-import { proposalBlocks } from "@/lib/proposal";
-import { cellIndent } from "@/lib/docStyle";
+import { proposalBlocks, type ProposalBlock } from "@/lib/proposal";
+import { cellIndent, sectionsOf } from "@/lib/docStyle";
 import { proposalForQuote, sectionRows, systemRows, tierRows } from "@/lib/proposalData";
 import { docContactLine } from "@/lib/xlsxDocData";
 import PrintButton from "@/components/PrintButton";
@@ -61,8 +61,84 @@ export default async function ProposalPrintPage({ params }: { params: Promise<{ 
     sections: sectionRows(p),
   });
 
+  /** One block, as the tag it prints as. The section wrapper is added below. */
+  const renderBlock = (b: ProposalBlock, i: number) => {
+    if (b.kind === "title") {
+      return (
+        <div key={i}>
+          <h1 className="doc-title">{b.text}</h1>
+          {b.sub && <div className="doc-subtitle">{b.sub}</div>}
+        </div>
+      );
+    }
+    if (b.kind === "facts") {
+      return (
+        <table key={i} className="doc-facts">
+          <tbody>
+            {/* Two pairs to a row, the way the shop's own header table reads. */}
+            {Array.from({ length: Math.ceil(b.rows.length / 2) }, (_, r) => (
+              <tr key={r}>
+                {[b.rows[r * 2], b.rows[r * 2 + 1]].map((cell, c) =>
+                  cell ? (
+                    <Fragment key={c}>
+                      <td className="k">{cell[0]}</td>
+                      <td>{cell[1]}</td>
+                    </Fragment>
+                  ) : <Fragment key={c}><td className="k" /><td /></Fragment>,
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      );
+    }
+    if (b.kind === "head") return <h2 key={i} className="doc-head">{b.text}</h2>;
+    if (b.kind === "sub") return <h3 key={i} className="doc-subhead">{b.text}</h3>;
+    // A caption for the table under it prints smaller and italic; the
+    // assembler decides which paragraphs those are, not this file.
+    if (b.kind === "para") {
+      return (
+        <p key={i} className={b.lead ? "doc-lead" : b.strong ? "strong" : undefined}>{b.text}</p>
+      );
+    }
+    if (b.kind === "list") {
+      return <ul key={i}>{b.items.map((it, j) => <li key={j}>{it}</li>)}</ul>;
+    }
+    if (b.kind === "callout") {
+      return (
+        <div key={i} className="doc-callout">
+          <div className="h">{b.text}</div>
+          {b.body.map((t, j) => <p key={j}>{t}</p>)}
+        </div>
+      );
+    }
+    return (
+      <table key={i} className="doc-table">
+        <thead>
+          <tr>{b.head.map((h, j) => <th key={j}>{h}</th>)}</tr>
+        </thead>
+        <tbody>
+          {b.rows.map((r, j) => (
+            <tr key={j} className={b.lead && j === 0 ? "lead" : undefined}>
+              {/* A cell that opens with spaces is a detail under the row
+                  above it - a system's module. The same mark the PDF and
+                  the Word file read; HTML collapses the spaces, so the
+                  indent is drawn rather than typed. */}
+              {r.map((c, k) => {
+                const { text, indent } = cellIndent(c);
+                return (
+                  <td key={k} className={indent ? "sub" : undefined}>{text}</td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  };
+
   return (
-    <div className="container doc sections-paged">
+    <div className="container doc">
       <div className="crumb no-print">
         <Link href="/money/quotes">Quotes</Link> ›{" "}
         <Link href={`/money/quotes/${id}`}>{full.row.number}</Link> ›{" "}
@@ -77,86 +153,22 @@ export default async function ProposalPrintPage({ params }: { params: Promise<{ 
         docId={p.row.number}
       />
 
-      {blocks.map((b, i) => {
-        if (b.kind === "title") {
-          return (
-            <div key={i}>
-              <h1 className="doc-title">{b.text}</h1>
-              {b.sub && <div className="doc-subtitle">{b.sub}</div>}
-            </div>
-          );
-        }
-        if (b.kind === "facts") {
-          return (
-            <table key={i} className="doc-facts">
-              <tbody>
-                {/* Two pairs to a row, the way the shop's own header table reads. */}
-                {Array.from({ length: Math.ceil(b.rows.length / 2) }, (_, r) => (
-                  <tr key={r}>
-                    {[b.rows[r * 2], b.rows[r * 2 + 1]].map((cell, c) =>
-                      cell ? (
-                        <Fragment key={c}>
-                          <td className="k">{cell[0]}</td>
-                          <td>{cell[1]}</td>
-                        </Fragment>
-                      ) : <Fragment key={c}><td className="k" /><td /></Fragment>,
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          );
-        }
-        if (b.kind === "head") return <h2 key={i} className="doc-head">{b.text}</h2>;
-        if (b.kind === "sub") return <h3 key={i} className="doc-subhead">{b.text}</h3>;
-        // A caption for the table under it prints smaller and italic; the
-        // assembler decides which paragraphs those are, not this file.
-        if (b.kind === "para") {
-          return (
-            <p key={i} className={b.lead ? "doc-lead" : b.strong ? "strong" : undefined}>{b.text}</p>
-          );
-        }
-        if (b.kind === "list") {
-          return <ul key={i}>{b.items.map((it, j) => <li key={j}>{it}</li>)}</ul>;
-        }
-        if (b.kind === "callout") {
-          return (
-            <div key={i} className="doc-callout">
-              <div className="h">{b.text}</div>
-              {b.body.map((t, j) => <p key={j}>{t}</p>)}
-            </div>
-          );
-        }
-        return (
-          <table key={i} className="doc-table">
-            <thead>
-              <tr>{b.head.map((h, j) => <th key={j}>{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {b.rows.map((r, j) => (
-                <tr key={j} className={b.lead && j === 0 ? "lead" : undefined}>
-                  {/* A cell that opens with spaces is a detail under the row
-                      above it - a system's module. The same mark the PDF and
-                      the Word file read; HTML collapses the spaces, so the
-                      indent is drawn rather than typed. */}
-                  {r.map((c, k) => {
-                    const { text, indent } = cellIndent(c);
-                    return (
-                      <td key={k} className={indent ? "sub" : undefined}>{text}</td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        );
-      })}
+      {sectionsOf(blocks).map((section, si) => (
+        /* A section prints whole or goes over to the next page - see
+           .doc-section. The PDF and the Word file group by the same
+           function, so all three break in the same places. */
+        <section key={si} className="doc-section">
+          {section.map((b, i) => renderBlock(b, i))}
+        </section>
+      ))}
 
-      <h2 className="doc-head">Contact</h2>
-      <p>
-        {brand.operatorName || brand.name}
-        {brand.contactEmail ? <><br />{brand.contactEmail}</> : null}
-      </p>
+      <section className="doc-section">
+        <h2 className="doc-head">Contact</h2>
+        <p>
+          {brand.operatorName || brand.name}
+          {brand.contactEmail ? <><br />{brand.contactEmail}</> : null}
+        </p>
+      </section>
 
       {/* Repeated on every printed page - see .doc-foot. A confidentiality
           line on page one and nowhere else is not a confidentiality line. */}

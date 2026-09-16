@@ -68,25 +68,34 @@ describe("renderDocx", () => {
     // US Letter with the guide's margins, in twips.
     expect(doc).toMatch(/w:pgSz w:w="12240" w:h="15840"/);
     expect(doc).toMatch(/w:pgMar[^>]*w:top="1440"[^>]*w:right="1080"[^>]*w:bottom="900"[^>]*w:left="1080"/);
-    // This sample is a proposal but sets no section breaks, so the Word file
-    // carries none either - the flag is the document's, not the renderer's.
+    // Nothing is forced onto a page of its own; a section is held together
+    // instead, and a table row is never split down the middle.
     expect(doc).not.toContain("w:pageBreakBefore");
+    expect(doc).toContain("w:cantSplit");
   }, SLOW);
 
-  it("breaks the page before each section when the document asks, and never before the first block", async () => {
+  it("holds a section together and lets go at the end of it", async () => {
     const zip = await JSZip.loadAsync(await renderDocx({
-      ...spec, sectionBreaks: true,
+      ...spec,
       blocks: [
-        { kind: "title", text: "Service Contract Proposal", sub: "" },
         { kind: "head", text: "One" },
-        { kind: "para", text: "A sentence." },
+        { kind: "para", text: "First sentence." },
+        { kind: "para", text: "Last sentence of the section." },
         { kind: "head", text: "Two" },
+        { kind: "para", text: "Alone under its heading." },
       ],
     }));
     const doc = await zip.file("word/document.xml")!.async("string");
-    expect([...doc.matchAll(/w:pageBreakBefore/g)]).toHaveLength(2);
-    // The title opens the file; a break there would be a blank first sheet.
-    expect(doc.indexOf("w:pageBreakBefore")).toBeGreaterThan(doc.indexOf("Service Contract Proposal"));
+    const paras = [...doc.matchAll(/<w:p>.*?<\/w:p>/gs)].map((m) => m[0]);
+    const keeps = (text: string) => paras.filter((x) => x.includes(text)).map((x) => x.includes("<w:keepNext/>"));
+    // A heading and the sentence under it keep with what follows them; the
+    // last paragraph of a section does not, which is where Word may break.
+    expect(keeps("One")).toEqual([true]);
+    expect(keeps("First sentence.")).toEqual([true]);
+    expect(keeps("Last sentence of the section.")).toEqual([false]);
+    expect(keeps("Alone under its heading.")).toEqual([false]);
+    // And no paragraph is torn in half across a page break.
+    expect(paras.every((x) => x.includes("<w:keepLines/>"))).toBe(true);
   }, SLOW);
 });
 
@@ -129,13 +138,12 @@ describe("renderPdf", () => {
     expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1);
   }, SLOW);
 
-  it("puts each section on a page of its own when the document asks for it", async () => {
-    // A proposal is read a section at a time, and its title and summary
-    // block are its cover. A quote sets none of this - the same rule there
-    // would turn one page of price into five.
+  it("keeps a section whole rather than filling the page it would not fit on", async () => {
+    // Short sections share a page - what is not wanted is the last two lines
+    // of one stranded at the foot of a page with its heading overleaf.
     const heads = ["One", "Two", "Three"];
-    const paged = await renderPdf({
-      ...spec, sectionBreaks: true,
+    const short = await renderPdf({
+      ...spec,
       blocks: [
         { kind: "title", text: "Service Contract Proposal", sub: "" },
         { kind: "facts", rows: [["Customer", "LabZen"]] },
@@ -145,20 +153,32 @@ describe("renderPdf", () => {
         ])),
       ],
     });
-    // The cover, then one page per section - not a blank sheet in front.
-    expect((await PDFDocument.load(paged)).getPageCount()).toBe(heads.length + 1);
+    expect((await PDFDocument.load(short)).getPageCount()).toBe(1);
 
-    const together = await renderPdf({
+    // A section that starts low on the page and runs past the bottom goes
+    // over to the next page whole, so it takes two pages, not three.
+    const half = Array.from({ length: 14 }, (_, i) => ({
+      kind: "para" as const,
+      text: `Paragraph ${i + 1}, long enough that fourteen of them fill better than half a page of a US Letter sheet at ten point on a one-and-a-bit line.`,
+    }));
+    const pushed = await renderPdf({
       ...spec,
       blocks: [
-        { kind: "title", text: "Service Quote", sub: "" },
-        ...heads.flatMap((text) => ([
-          { kind: "head" as const, text },
-          { kind: "para" as const, text: "A sentence under it." },
-        ])),
+        { kind: "head", text: "First" }, ...half,
+        { kind: "head", text: "Second" }, ...half,
       ],
     });
-    expect((await PDFDocument.load(together)).getPageCount()).toBe(1);
+    expect((await PDFDocument.load(pushed)).getPageCount()).toBe(2);
+
+    // A section taller than a page has to break somewhere, and does.
+    const tall = await renderPdf({
+      ...spec,
+      blocks: [
+        { kind: "head", text: "Long" },
+        ...Array.from({ length: 70 }, (_, i) => ({ kind: "para" as const, text: `Paragraph ${i + 1} of one very long section.` })),
+      ],
+    });
+    expect((await PDFDocument.load(tall)).getPageCount()).toBeGreaterThan(1);
   }, SLOW);
 
   it("does not throw on the characters the standard fonts lack", async () => {

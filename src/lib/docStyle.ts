@@ -68,16 +68,27 @@ export type DocSpec = {
   operatorName: string;
   /** Footer line 1: who we are and how to reach us. */
   contactLine: string;
-  /**
-   * Whether each section heading starts a fresh page.
-   *
-   * True for a proposal - a twelve-page argument whose sections are read one
-   * at a time, and whose title and summary block are its cover. False for a
-   * quote, where the same rule would turn one page of price into five.
-   */
-  sectionBreaks?: boolean;
   blocks: ProposalBlock[];
 };
+
+/**
+ * The document in sections: a heading and everything under it, up to the next
+ * heading. Whatever comes before the first heading - a title, the summary
+ * block - is the opening section.
+ *
+ * A section is the unit a reader takes in at once, so it is also the unit that
+ * should not be torn in half by a page break. All three renderers (PDF, Word,
+ * the print page) group by this one function, so what stays together in the
+ * PDF stays together in the others.
+ */
+export function sectionsOf(blocks: ProposalBlock[]): ProposalBlock[][] {
+  const out: ProposalBlock[][] = [];
+  for (const b of blocks) {
+    if (b.kind === "head" || !out.length) out.push([b]);
+    else out[out.length - 1].push(b);
+  }
+  return out;
+}
 
 /**
  * The wordmark, typed: S I E R R A  •  S P E C T R A. Capital letters, one
