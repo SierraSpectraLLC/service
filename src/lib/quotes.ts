@@ -15,25 +15,31 @@
 import { formatCents } from "@/lib/money";
 import type { Tone } from "@/lib/tones";
 
-export const QUOTE_STATUSES = ["draft", "sent", "approved", "declined", "expired"] as const;
+export const QUOTE_STATUSES = [
+  "draft", "sent", "approved", "declined", "unawarded", "expired",
+] as const;
 export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
 
 export const QUOTE_LABEL: Record<string, string> = {
   draft: "Draft", sent: "Awaiting client", approved: "Approved",
-  declined: "Declined", expired: "Expired",
+  declined: "Declined", unawarded: "Not awarded", expired: "Expired",
 };
 
 /** What a quote IS today, as opposed to what its column last said. */
-export type QuoteStanding = "draft" | "awaiting" | "approved" | "declined" | "expired";
+export type QuoteStanding =
+  | "draft" | "awaiting" | "approved" | "declined" | "unawarded" | "expired";
 
 export const STANDING_LABEL: Record<QuoteStanding, string> = {
   draft: "Draft", awaiting: "Awaiting client", approved: "Approved",
-  declined: "Declined", expired: "Expired",
+  declined: "Declined", unawarded: "Not awarded", expired: "Expired",
 };
 
 export const STANDING_TONE: Record<QuoteStanding, Tone> = {
   draft: "neutral", awaiting: "info", approved: "good",
-  declined: "bad", expired: "faint",
+  // Declined is bad because somebody read the price and said no to it. Not
+  // awarded is faint: the work went elsewhere, or nowhere, and that is a
+  // closed file rather than a rejection of anything we did.
+  declined: "bad", unawarded: "faint", expired: "faint",
 };
 
 /**
@@ -49,6 +55,7 @@ export function quoteStanding(
   if (q.status === "draft") return "draft";
   if (q.status === "approved") return "approved";
   if (q.status === "declined") return "declined";
+  if (q.status === "unawarded") return "unawarded";
   if (q.status === "expired") return "expired";
   return q.expiresOn && q.expiresOn < today ? "expired" : "awaiting";
 }
@@ -297,6 +304,117 @@ export function approvalConsequence(input: {
  */
 export const declineConsequence = (): string =>
   "Closes the quote. Your reason is passed to the engineer.";
+
+// ---------------------------------------------------------------------------
+// Closing a quote the shop lost.
+//
+// Until now the only door out of "awaiting" that was not a yes belonged to the
+// client: they pressed Decline on the share page, or they let it lapse. Both
+// of those are real, and neither is what usually happens. What usually happens
+// is a phone call - "we went with the OEM", "the capital request was pulled" -
+// and the quote then sat awaiting an answer it had already been given,
+// counting itself into the pipeline's promise and into the digest's chase list
+// every morning until the expiry date rescued it.
+//
+// So the shop gets its own door, and it records WHICH of the two things
+// happened, because they are different facts and a shop that cannot tell them
+// apart cannot learn anything from either. Declined is somebody reading the
+// price and saying no to it - that is feedback about us. Not awarded is the
+// work going elsewhere, or nowhere at all - that is the market, or a budget.
+// ---------------------------------------------------------------------------
+
+/** The two ways a quote is lost, as a status the row can hold. */
+export const LOST_OUTCOMES = ["declined", "unawarded"] as const;
+export type LostOutcome = (typeof LOST_OUTCOMES)[number];
+
+export const isLostOutcome = (s: string): s is LostOutcome =>
+  (LOST_OUTCOMES as readonly string[]).includes(s);
+
+/** What each outcome is called, and what it means, where somebody picks one. */
+export const LOST_CHOICES: { value: LostOutcome; label: string; note: string }[] = [
+  {
+    value: "declined",
+    label: "Rejected",
+    note: "They read the price and said no to it.",
+  },
+  {
+    value: "unawarded",
+    label: "Not awarded",
+    note: "The work went to somebody else, or nowhere - no decision was made about us.",
+  },
+];
+
+/**
+ * Can the shop close this one out as lost?
+ *
+ * Two standings, and they are the two a shop actually finds itself holding.
+ * AWAITING is the phone call: the client answered outside the app and the row
+ * has not caught up. EXPIRED is the tidy-up: it lapsed months ago, somebody
+ * has since learned where the job went, and "expired" alone will never say
+ * that - it records only that nobody answered in time.
+ *
+ * A DRAFT has not been offered to anybody, so there is nothing to lose;
+ * delete it instead. An APPROVED quote is not closed here either: a deposit
+ * may have been invoiced and a job put into work against it, and unwinding
+ * that is a reversal somebody does deliberately, not a status somebody picks
+ * off a menu. And a quote already closed stays closed - the day it was lost,
+ * and who was told, are the record.
+ */
+export const closeableAsLost = (
+  q: { status: string; expiresOn: string }, today: string,
+): boolean => {
+  const s = quoteStanding(q, today);
+  return s === "awaiting" || s === "expired";
+};
+
+/**
+ * Why this quote cannot be closed as lost, said to the person holding it.
+ *
+ * One sentence, and it names the way out where there is one, because "cannot"
+ * with nothing after it sends somebody to ask a colleague.
+ */
+export function lostRefusal(
+  q: { number: string; status: string; expiresOn: string }, today: string,
+): string | null {
+  if (closeableAsLost(q, today)) return null;
+  const s = quoteStanding(q, today);
+  if (s === "draft") return `${q.number} has not been sent, so there is nothing to lose - delete it instead.`;
+  if (s === "approved") return `${q.number} was approved. Reversing an approval is not this - it may have raised a deposit invoice and opened a job.`;
+  return `${q.number} is already closed as ${STANDING_LABEL[s].toLowerCase()}.`;
+}
+
+/**
+ * What closing it does, said before somebody does it.
+ *
+ * The same courtesy the client gets before approving: nothing here bills
+ * anybody, but it takes a live quote out of the pipeline and off the chase
+ * list, and somebody about to do that should read it first. Outcome-neutral,
+ * because this is read in the dialog that ASKS which outcome it was - what
+ * each outcome MEANS is the note on its own choice, which changes with it.
+ */
+export const LOST_PROMPT = "Closes the quote, takes it out of the pipeline and off "
+  + "the chase list, and passes your reason to the engineer on the job.";
+
+/**
+ * The line that goes in the audit trail and on the job's discussion.
+ *
+ * Composed here rather than at the call site so the two cannot drift, and so
+ * the thing a shop reads a year later - what was lost, to whom, and who at the
+ * client said so - is written down in one place. The staff member who recorded
+ * it is the audit row's actor and is not repeated in the sentence.
+ */
+export function lostLine(input: {
+  number: string;
+  outcome: LostOutcome;
+  /** Who at the client said so, where anybody knows. */
+  heardFrom?: string;
+  reason: string;
+}): string {
+  const verb = input.outcome === "declined" ? "declined" : "was not awarded";
+  const who = (input.heardFrom ?? "").trim();
+  const why = input.reason.trim();
+  return `${input.number} ${verb}${who ? ` - ${who} told us` : ""}${why ? `: ${why}` : ""}`;
+}
 
 /**
  * Renewal pricing, from what the last term actually cost to serve.

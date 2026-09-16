@@ -204,6 +204,10 @@ export default function ClientQuote({
         <div className="mut t-body" style={{ marginTop: 12 }}>
           {standing === "approved" && `Approved${answeredBy ? ` by ${answeredBy}` : ""}${answeredOn ? ` on ${answeredOn}` : ""}.`}
           {standing === "declined" && `Declined${answeredOn ? ` on ${answeredOn}` : ""}.`}
+          {/* Said as a closed file rather than as a refusal: the shop marked
+              this one not awarded, and the client may never have said no to
+              anything. See closeQuoteAsLost. */}
+          {standing === "unawarded" && `Closed${answeredOn ? ` on ${answeredOn}` : ""} - this work was not awarded to us.`}
           {standing === "expired" && "This quote has expired."}
           {standing === "draft" && "This quote has not been sent yet."}
         </div>

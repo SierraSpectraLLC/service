@@ -3840,7 +3840,7 @@ export const quotes = pgTable("quotes", {
   workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
   agreementId: integer("agreement_id").references((): AnyPgColumn => agreements.id, { onDelete: "set null" }),
   number: text("number").notNull(),
-  // draft | sent | approved | declined | expired
+  // draft | sent | approved | declined | unawarded | expired
   status: text("status").notNull().default("draft"),
   title: text("title").notNull().default(""),
   sentOn: text("sent_on").notNull().default(""),
@@ -3882,6 +3882,23 @@ export const quotes = pgTable("quotes", {
   answeredOn: text("answered_on"),
   answeredBy: text("answered_by").notNull().default(""),
   answerNote: text("answer_note").notNull().default(""),
+  /**
+   * The staff account that recorded an answer the client gave somewhere else.
+   *
+   * BLANK means the client answered through their own door - the share link or
+   * their login - and `answeredBy` is a signature they typed themselves. Set
+   * means somebody here closed the quote after a phone call, and `answeredBy`
+   * is who they say told them.
+   *
+   * Two facts that look like one on the page and are not. "Declined by Dr.
+   * Chen" is a thing the client did; "declined by Dr. Chen, recorded by
+   * maria@" is a thing we were told, and a year later, when somebody is
+   * arguing about whether that job was ever really lost, the difference is the
+   * whole question. It is a column rather than a prefix on the note because a
+   * note is prose somebody edits and this has to survive being read by code -
+   * see closeQuoteAsLost.
+   */
+  closedBy: text("closed_by").notNull().default(""),
   /** The deposit invoice approval generated, if it did. */
   depositInvoiceId: integer("deposit_invoice_id").references((): AnyPgColumn => invoices.id, { onDelete: "set null" }),
   note: text("note").notNull().default(""),
