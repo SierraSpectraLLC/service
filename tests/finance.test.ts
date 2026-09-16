@@ -83,7 +83,7 @@ describe("the rail", () => {
     const groups = financeRail({ seesBooks: true, seesPayroll: true });
     expect(groups.map((g) => g.label)).toEqual(["Position", "Money", "Record"]);
     expect(keysOf(groups)).toEqual([...FINANCE_KEYS]);
-    expect(keysOf(groups)).toEqual(["overview", "cash", "receivables", "payables", "clients", "ledger", "reports"]);
+    expect(keysOf(groups)).toEqual(["overview", "cash", "receivables", "quotes", "payables", "clients", "ledger", "reports"]);
   });
 
   it("payroll gates no room: the rail is the same with or without the register", () => {
@@ -130,7 +130,6 @@ describe("the rail", () => {
     expect(byKey.get("ledger")).toBe("/money/ledger");
     for (const href of byKey.values()) expect(href.startsWith("/money")).toBe(true);
     expect(RETIRED_ROUTES).toEqual({
-      "/money/quotes": "/money/receivables?stage=quoted",
       "/money/invoices": "/money/receivables",
       "/money/collections": "/money/receivables?stage=pastdue",
       "/money/expenses": "/money/payables",

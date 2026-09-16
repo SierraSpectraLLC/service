@@ -153,11 +153,11 @@ export default async function ClientsPage({ searchParams }: {
           <table className="list">
             <thead><tr><th>Client</th><th>Standing</th><th className="r">Owes</th><th>Terms</th><th>Agreement</th><th className="r">Quoted</th><th></th></tr></thead>
             <tbody>
-              {rows.length === 0 && <tr><td colSpan={7} className="empty">No clients yet.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={7} className="nothing">No clients yet.</td></tr>}
               {rows.map(({ c, s, policy, agr, tax, tone, label, open, quoted }) => {
                 const used = agr ? usage.get(agr.id)?.partsCents ?? 0 : 0;
                 return (
-                  <tr key={c.id} className="row">
+                  <tr key={c.id} className="hov">
                     <td><Link className="plain" href={`/money/clients?org=${c.id}`} style={{ fontWeight: 600 }}>{c.name}</Link></td>
                     <td>
                       <span className={`stand ${tone}`}><i />{label}</span>
@@ -222,7 +222,7 @@ export default async function ClientsPage({ searchParams }: {
                   {detailRows.length === 0 && <tr><td className="mut">Nothing open.</td></tr>}
                   {detailRows.map((r) => (
                     <tr key={r.doc}>
-                      <td><Link className="plain doc" href={r.href}><Id>{r.doc}</Id></Link><span className="meta">{r.title} · due {r.sort}</span></td>
+                      <td><Link className="plain docno" href={r.href}><Id>{r.doc}</Id></Link><span className="meta">{r.title} · due {r.sort}</span></td>
                       <td className={`num${r.pastDue ? " fig bad" : ""}`}>{formatCents(r.cents)}</td>
                     </tr>
                   ))}

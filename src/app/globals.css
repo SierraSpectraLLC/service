@@ -2625,13 +2625,17 @@ table.list { width: 100%; border-collapse: collapse; }
 table.list th { text-align: left; font-size: var(--fs-meta); color: var(--mut); font-weight: 600; padding: 8px 16px; border-bottom: 1px solid var(--line); }
 table.list td { padding: 10px 16px; border-bottom: 1px solid var(--line); vertical-align: middle; font-size: var(--fs-body); }
 table.list tr:last-child td { border-bottom: 0; }
-table.list tr.row:hover td { background: #F4F7FB; }
+/* Its own class names, because the money tables sit in a stylesheet that
+   already owns .row (a flex utility - which, on a <tr>, breaks the table into
+   wrapping blocks), .doc (a print document) and .empty (a dashed empty-state
+   box). A table row is a table row; these three are scoped to it. */
+table.list tr.hov:hover td { background: #F4F7FB; }
 table.list .r { text-align: right; }
 table.list .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-table.list .doc { font-family: var(--mono); font-size: var(--fs-small); font-weight: 600; }
+table.list .docno { font-family: var(--mono); font-size: var(--fs-small); font-weight: 600; }
 table.list .title { font-weight: 600; }
 table.list .title .meta, table.list .meta { font-weight: 400; display: block; font-size: var(--fs-meta); color: var(--mut); }
-table.list .empty { padding: 28px 16px; text-align: center; color: var(--mut); }
+table.list .nothing { padding: 28px 16px; text-align: center; color: var(--mut); }
 table.list .acts { text-align: right; white-space: nowrap; }
 table.list .acts .btn + .btn { margin-left: 6px; }
 

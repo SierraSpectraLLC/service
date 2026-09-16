@@ -1000,6 +1000,31 @@ export async function runLedgerParity(): Promise<{ error?: string; nonzero?: num
   return { nonzero: own?.figures.filter((f) => f.diffCents !== 0).length ?? 0 };
 }
 
+/**
+ * Post what the documents already say and the journal has not seen.
+ *
+ * Idempotent by construction - every posting carries a key and post()
+ * returns the entry that already has it - so pressing this twice writes
+ * nothing the second time. Owner only, on their own workspace: it writes
+ * entries. See lib/ledger/backfill for what it reads and in what order.
+ */
+export async function backfillJournal(): Promise<{ error?: string; created?: number; existing?: number; skipped?: number }> {
+  const u = await requireOwner();
+  const mine = myTenantOrgId(u);
+  if (mine === null) return { error: "Your company is not set up" };
+  const { backfillLedger } = await import("@/lib/ledger/backfill");
+  const result = await backfillLedger({ today: shopToday(), tenantOrgId: mine });
+  await audit({
+    actor: u.email, entityType: "ledger", entityId: mine, tenantOrgId: mine,
+    action: `backfilled the journal: ${result.created} entr${result.created === 1 ? "y" : "ies"} posted, ${result.existing} already there`
+      + (result.skipped.length ? `, ${result.skipped.length} skipped` : ""),
+  });
+  revalidatePath("/money");
+  revalidatePath("/money/ledger");
+  revalidatePath("/parity/ledger");
+  return { created: result.created, existing: result.existing, skipped: result.skipped.length };
+}
+
 // ---------------- The bank feed and reconciliation ----------------
 // The bank is somebody else's; the books are ours; reconciling is how the
 // two agree. A bank line gets a home one of three ways - matched to an entry

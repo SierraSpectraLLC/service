@@ -90,7 +90,7 @@ describe("the two rooms that are not the books", () => {
     // section has to be classified here on purpose. A new key that silently
     // lands on the open side of the wall is how this leaks back. Seven rooms
     // over one journal, and every one of them is the shop's position.
-    expect([...FINANCE_KEYS]).toEqual(["overview", "cash", "receivables", "payables", "clients", "ledger", "reports"]);
+    expect([...FINANCE_KEYS]).toEqual(["overview", "cash", "receivables", "quotes", "payables", "clients", "ledger", "reports"]);
     for (const k of FINANCE_KEYS) expect(WORKING_ROOMS.some((r) => r.href.endsWith(k))).toBe(false);
   });
 });

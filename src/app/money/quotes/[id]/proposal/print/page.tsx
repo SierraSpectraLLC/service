@@ -156,7 +156,9 @@ export default async function ProposalPrintPage({ params }: { params: Promise<{ 
       </div>
 
       <p className="mut t-meta no-print">
-        Print to PDF and send it, or <Link href={`/money/quotes/${id}/proposal`}>go back and edit it</Link>.
+        The <a href={`/api/doc/proposal/${id}?format=pdf`} download>PDF</a> and the{" "}
+        <a href={`/api/doc/proposal/${id}?format=docx`} download>Word file</a> are drawn in the house style from these same words;
+        this page is the on-screen read. Or <Link href={`/money/quotes/${id}/proposal`}>go back and edit it</Link>.
       </p>
     </div>
   );

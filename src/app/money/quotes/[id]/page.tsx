@@ -101,6 +101,15 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
       <div className="row-2" style={{ marginBottom: 10 }}>
         <Pill tone={STANDING_TONE[standing]}>{STANDING_LABEL[standing]}</Pill>
         {/* The shop's own Excel layout, filled - templates/QuoteTemplate.xlsx. */}
+        {/* The quote as paper, in the house style - lib/docStyle, from the
+            style guide. The PDF is the copy a client is sent; the Word file is
+            the copy the shop edits. See lib/quoteDoc for what is on it. */}
+        <a className="btn sm accent" href={`/api/doc/quote/${id}?format=pdf`} download>
+          PDF
+        </a>
+        <a className="btn sm" href={`/api/doc/quote/${id}?format=docx`} download>
+          Word
+        </a>
         <a className="btn sm" href={`/api/export/quote/${id}`} download>
           Excel
         </a>

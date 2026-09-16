@@ -278,6 +278,7 @@ exports[`buildNav, per persona > builds one tree for a staff owner 1`] = `
         "Financial home (home)",
         "Cash → /money/cash",
         "Receivables → /money/receivables",
+        "Quotes → /money/quotes",
         "Payables → /money/payables",
         "Clients → /money/clients",
         "Ledger → /money/ledger",

@@ -71,6 +71,14 @@ export default function BandLayout({ a, groups, pinned }: {
   const hasContent = (g: PanelGroup) => g.keys.some((k) => a.shown.includes(k));
 
   const slot = (k: string) => panelSlot(a, k);
+  /**
+   * The flow lays panels in two columns on a wide screen, which means a
+   * single panel renders half-width with nothing beside it - the job's own
+   * description crammed into the left half of the page, reading as a page
+   * that failed to finish loading. One card, one column. The rail layout
+   * has always made this call; the bands now make the same one.
+   */
+  const flowClass = (n: number) => (n > 1 ? "panel-flow" : "panel-flow one");
 
   return (
     <>
@@ -85,7 +93,7 @@ export default function BandLayout({ a, groups, pinned }: {
             <div>{a.rightCol.filter((k: string) => pinned.includes(k)).map(slot)}</div>
           </div>
         ) : (
-          <div className="panel-flow">
+          <div className={flowClass([...a.left, ...a.rightCol].filter((k: string) => pinned.includes(k)).length)}>
             {[...a.left, ...a.rightCol].filter((k: string) => pinned.includes(k)).map(slot)}
           </div>
         )
@@ -129,7 +137,7 @@ export default function BandLayout({ a, groups, pinned }: {
                 ) : (
                   /* Order is still the saved arrangement (left stack, then
                      right); only the geometry balances itself. */
-                  <div className="panel-flow">{[...l, ...r].map(slot)}</div>
+                  <div className={flowClass(l.length + r.length)}>{[...l, ...r].map(slot)}</div>
                 )}
               </section>
             );

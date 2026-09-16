@@ -9,6 +9,7 @@ import { periodSpan, periodWord } from "@/lib/finance";
 import FinanceShell from "@/components/FinanceShell";
 import CashOpeningForm from "@/components/CashOpeningForm";
 import DecisionButton from "@/components/money/DecisionButton";
+import BackfillJournalButton from "@/components/money/BackfillJournalButton";
 import { Figure } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +32,7 @@ export default async function MoneyPage({ searchParams }: {
   const { period, today, figures: f, rail } = await booksContext(user, (await searchParams).period);
   const brand = await brandForTenant(myTenantOrgId(user));
   const p = f.positions;
-  const net = p.receivable - f.owes.totalCents;
+  const net = f.receivableCents - f.owes.totalCents;
   const unrec = f.unreconciled.unmatched + f.unreconciled.inTransit;
   const hasOpening = f.sources.today !== "" && (p.bank !== 0 || p.stripe !== 0 || f.flow.cashInCents > 0);
 
@@ -75,7 +76,7 @@ export default async function MoneyPage({ searchParams }: {
         <div className="position">
           <div>
             <div className="k">Owed to you</div>
-            <div className="v"><Figure cents={p.receivable} filter={{ acct: "receivable" }} /></div>
+            <div className="v"><Figure cents={f.receivableCents} filter={{ acct: "receivable" }} /></div>
             <div className="d">
               <Figure cents={f.stages.pastDue.cents} filter={{ acct: "receivable", live: true }} tone={f.stages.pastDue.cents ? "bad" : undefined} />
               {" "}past due on {f.stages.pastDue.n} · {formatCents(f.stages.current.cents)} inside terms
@@ -97,6 +98,33 @@ export default async function MoneyPage({ searchParams }: {
           </div>
         </div>
       </div>
+
+      {/* The journal and the documents disagree about what is owed. The one
+          honest cause on a live shop is history: an invoice sent before the
+          ledger existed has no entry, so a payment against it leaves a credit
+          with no debit and the receivable account reads as if the client
+          were owed money. The backfill posts what the documents already say,
+          idempotently - see lib/ledger/backfill - and the figures above read
+          the documents in the meantime rather than the gap. */}
+      {f.journalGapCents !== 0 && (
+        <div className="panel">
+          <div className="ph">
+            <h2>The journal is behind the documents</h2>
+            <span className="t-meta mut">
+              the receivable account sums to {formatCents(p.receivable)}; the open invoices come to {formatCents(f.receivableCents)}
+            </span>
+          </div>
+          <div className="pb">
+            <p className="t-small" style={{ margin: "0 0 10px" }}>
+              Usually an invoice sent before the ledger existed: its payment posted, its sending never did. The figures on this page read the documents until the journal catches up.
+              {" "}<Link href="/parity/ledger">Ledger parity</Link> lists every figure the two disagree on.
+            </p>
+            {user.role === "owner"
+              ? <BackfillJournalButton />
+              : <span className="t-meta mut">The owner backfills the journal.</span>}
+          </div>
+        </div>
+      )}
 
       <div className="panel decide">
         <div className="ph">

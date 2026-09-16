@@ -98,7 +98,7 @@ export default async function ReportsPage({ searchParams }: {
         <div className="tblwrap"><table className="list">
           <thead><tr><th>Client</th><th>Revenue</th><th className="r">Direct cost</th><th className="r">Margin</th></tr></thead>
           <tbody>
-            {margins.length === 0 && <tr><td colSpan={4} className="empty">Nothing invoiced in this window.</td></tr>}
+            {margins.length === 0 && <tr><td colSpan={4} className="nothing">Nothing invoiced in this window.</td></tr>}
             {margins.map((m) => (
               <tr key={m.orgId}>
                 <td style={{ width: "30%" }}><Link className="plain" href={`/money/clients?org=${m.orgId}`}>{orgName.get(m.orgId) ?? `org ${m.orgId}`}</Link></td>
@@ -141,10 +141,10 @@ export default async function ReportsPage({ searchParams }: {
         <div className="tblwrap"><table className="list">
           <thead><tr><th>Job</th><th>Client</th><th className="r">Billed</th><th className="r">Cost</th><th className="r">Margin</th></tr></thead>
           <tbody>
-            {board.jobs.length === 0 && <tr><td colSpan={5} className="empty">Nothing closed in {label}.</td></tr>}
+            {board.jobs.length === 0 && <tr><td colSpan={5} className="nothing">Nothing closed in {label}.</td></tr>}
             {[...board.jobs].sort((a, b) => (a.marginPct ?? 999) - (b.marginPct ?? 999)).map((j) => (
-              <tr key={j.woId} className="row">
-                <td><Link className="plain doc" href={`/work/${j.woId}`}><Id>{j.number}</Id></Link><span className="meta">{j.title}</span></td>
+              <tr key={j.woId} className="hov">
+                <td><Link className="plain docno" href={`/work/${j.woId}`}><Id>{j.number}</Id></Link><span className="meta">{j.title}</span></td>
                 <td>{j.orgName}</td>
                 <td className="num">{formatCents(j.billedCents)}</td>
                 <td className="num">{formatCents(j.costCents)}</td>

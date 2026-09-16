@@ -104,14 +104,14 @@ export default async function CashPage({ searchParams }: {
           <table className="list">
             <thead><tr><th>Date</th><th>Bank description</th><th className="r">Amount</th><th>Books</th><th></th></tr></thead>
             <tbody>
-              {feed.length === 0 && <tr><td colSpan={5} className="empty">No bank lines yet.</td></tr>}
+              {feed.length === 0 && <tr><td colSpan={5} className="nothing">No bank lines yet.</td></tr>}
               {feed.map((t) => {
                 const e = t.matchedEntryId !== null ? entryById.get(t.matchedEntryId) : undefined;
                 if (t.matchedEntryId !== null) {
                   return (
                     <tr key={t.id}>
                       <td className="num" style={{ textAlign: "left" }}>{t.on}</td>
-                      <td className="doc">{t.description}</td>
+                      <td className="docno">{t.description}</td>
                       <td className={`num${t.amountCents > 0 ? " fig good" : ""}`}>{formatCents(t.amountCents)}</td>
                       <td colSpan={2}><Pill tone="good">matched</Pill> <span className="t-meta mut">#{t.matchedEntryId} · {e?.memo ?? ""}</span> {isOwner && <UnmatchButton txnId={t.id} />}</td>
                     </tr>
@@ -122,7 +122,7 @@ export default async function CashPage({ searchParams }: {
                 return (
                   <tr key={t.id}>
                     <td className="num" style={{ textAlign: "left" }}>{t.on}</td>
-                    <td className="doc">{t.description}</td>
+                    <td className="docno">{t.description}</td>
                     <td className={`num${t.amountCents > 0 ? " fig good" : ""}`}>{formatCents(t.amountCents)}</td>
                     <td><Pill tone="warn">no entry</Pill>{first?.kind === "invoice" ? <span className="t-meta mut"> equals the balance on {first.number}</span> : first?.kind === "entry" ? <span className="t-meta mut"> looks like #{first.entryId}</span> : null}</td>
                     <td className="acts"><BankLineActions txnId={t.id} suggestions={s} moneyIn={t.amountCents > 0} memo={memoFromDescription(t.description)} /></td>

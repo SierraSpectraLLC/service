@@ -38,12 +38,24 @@ const PILL: Record<string, [Tone, string]> = {
 export default async function ReceivablesPage({ searchParams }: {
   searchParams: Promise<{ period?: string; stage?: string; org?: string }>;
 }) {
+  return ReceivablesRoom({ sp: await searchParams, room: "receivables" });
+}
+
+/**
+ * The room itself, fronted by two pages. /money/quotes is the same pipeline
+ * held at its first stage: the shop reaches for "Quotes" more than for any
+ * other stage, and the old menu's door was the one people missed when the
+ * room was folded into Receivables. One component, so the two cannot drift.
+ */
+export async function ReceivablesRoom({ sp, room }: {
+  sp: { period?: string; stage?: string; org?: string };
+  room: "receivables" | "quotes";
+}) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
-  const sp = await searchParams;
   const { period, today, mine, figures: f, rail } = await booksContext(user, sp.period);
-  const stage = STAGES.find((s) => s.k === sp.stage)?.k ?? null;
+  const stage = room === "quotes" ? "quoted" : STAGES.find((s) => s.k === sp.stage)?.k ?? null;
   const org = sp.org ? Number(sp.org) : null;
 
   const counts: Record<ReceivableRow["stage"], { cents: number; n: number; tone?: Tone }> = {
@@ -63,11 +75,13 @@ export default async function ReceivablesPage({ searchParams }: {
 
   return (
     <FinanceShell
-      rail={rail} active="receivables"
+      rail={rail} active={room}
       period={period}
-      path="/money/receivables"
-      title="Receivables"
-      sub={`Everything owed to the shop, from quote to paid · ${periodSpan(today, period)}`}
+      path={room === "quotes" ? "/money/quotes" : "/money/receivables"}
+      title={room === "quotes" ? "Quotes" : "Receivables"}
+      sub={room === "quotes"
+        ? `Priced and waiting on an answer · the first stage of what is owed · ${periodSpan(today, period)}`
+        : `Everything owed to the shop, from quote to paid · ${periodSpan(today, period)}`}
       actions={<><NewQuoteButton today={today} clients={payable} /><NewInvoiceButton clients={payable} /></>}
     >
       <div className="panel">
@@ -102,13 +116,13 @@ export default async function ReceivablesPage({ searchParams }: {
           <table className="list">
             <thead><tr><th>Client</th><th>Document</th><th>What</th><th className="r">Amount</th><th></th></tr></thead>
             <tbody>
-              {shown.length === 0 && <tr><td colSpan={5} className="empty">Nothing at this stage.</td></tr>}
+              {shown.length === 0 && <tr><td colSpan={5} className="nothing">Nothing at this stage.</td></tr>}
               {shown.map((r) => {
                 const [tone, label] = PILL[r.status] ?? ["neutral", r.status];
                 return (
-                  <tr key={`${r.stage}-${r.doc}-${r.sort}`} className="row">
+                  <tr key={`${r.stage}-${r.doc}-${r.sort}`} className="hov">
                     <td><Link className="plain" href={`/money/receivables?org=${r.orgId}`}>{r.orgName}</Link></td>
-                    <td><Link className="plain doc" href={r.href}><Id>{r.doc}</Id></Link><br /><Pill tone={tone}>{label}</Pill></td>
+                    <td><Link className="plain docno" href={r.href}><Id>{r.doc}</Id></Link><br /><Pill tone={tone}>{label}</Pill></td>
                     <td className="title">{r.title}<span className="meta">{r.meta}</span></td>
                     <td className={`num${r.tone ? ` fig ${r.tone}` : ""}`}>{formatCents(r.cents)}</td>
                     <td className="acts">
@@ -137,7 +151,7 @@ export default async function ReceivablesPage({ searchParams }: {
         <div className="ph"><h2>Exposure by client</h2><span className="t-meta mut">awarded + unbilled + invoiced, excluding quotes and paid</span></div>
         <div className="tblwrap">
           <table className="list"><tbody>
-            {exposure.length === 0 && <tr><td className="empty">Nobody owes anything.</td></tr>}
+            {exposure.length === 0 && <tr><td className="nothing">Nobody owes anything.</td></tr>}
             {exposure.map((e) => (
               <tr key={e.orgId}>
                 <td style={{ width: "40%" }}><Link className="plain" href={`/money/clients?org=${e.orgId}`}>{e.orgName}</Link></td>
