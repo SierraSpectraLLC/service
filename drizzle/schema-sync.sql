@@ -4710,3 +4710,15 @@ DO $$ BEGIN
       FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- Who recorded an answer the client gave somewhere else.
+--
+-- The only door out of a quote that was not a yes belonged to the client: they
+-- pressed Decline on the share page, or they let it lapse. What usually happens
+-- is a phone call - "we went with the OEM", "the capital request was pulled" -
+-- and the quote then sat awaiting an answer it had already been given. The shop
+-- can now close it as declined or unawarded (see quotes.status and
+-- closeQuoteAsLost), and this column is what keeps that honest: blank means the
+-- client answered through their own door and answered_by is their signature;
+-- set means somebody here was told, and answered_by is who told them.
+ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "closed_by" text NOT NULL DEFAULT '';

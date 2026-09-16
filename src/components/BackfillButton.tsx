@@ -25,7 +25,8 @@ const INVOICE_OUTCOMES: [string, string][] = [
   ["paid", "Paid"], ["open", "Still open"], ["void", "Voided"],
 ];
 const QUOTE_OUTCOMES: [string, string][] = [
-  ["approved", "Approved"], ["declined", "Declined"], ["expired", "Expired unanswered"],
+  ["approved", "Approved"], ["declined", "Declined"],
+  ["unawarded", "Not awarded"], ["expired", "Expired unanswered"],
 ];
 const METHODS: [string, string][] = [
   ["check", "Check"], ["ach", "ACH"], ["card", "Card"], ["other", "Other"],

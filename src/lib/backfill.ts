@@ -21,7 +21,14 @@ export const isDay = (s: string): boolean => ISO.test(s.trim());
 export type BackfillLine = { kind: string; description: string; qty: number; unitCents: number };
 
 export const INVOICE_OUTCOMES = ["paid", "open", "void"] as const;
-export const QUOTE_OUTCOMES = ["approved", "declined", "expired"] as const;
+/**
+ * How a past quote ended. The two losses are kept apart here for the same
+ * reason they are kept apart on a live quote - see LOST_OUTCOMES in lib/quotes
+ * - because a shop typing in two years of old paper is exactly the shop that
+ * wants to know what it has been losing on, and "declined" over everything
+ * would answer that wrong from the first row.
+ */
+export const QUOTE_OUTCOMES = ["approved", "declined", "unawarded", "expired"] as const;
 /**
  * How a past purchase order ended.
  *

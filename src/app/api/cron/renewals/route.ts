@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cronAuthorized } from "@/lib/cronAuth";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { db } from "@/db";
 import { agreements, orgs, quoteLines, quotes, rateCards } from "@/db/schema";
 import { KIND_LABEL, allowance, needsAttention, renewalLine, standing } from "@/lib/agreements";
@@ -16,7 +16,7 @@ import { awardsFor } from "@/lib/awardData";
 import { decisionsDue, optionDeadline } from "@/lib/award";
 import { nextDocNumber } from "@/lib/docNumberData";
 import { resolveRate } from "@/lib/rates";
-import { renewalFromBurn } from "@/lib/quotes";
+import { LOST_OUTCOMES, renewalFromBurn } from "@/lib/quotes";
 
 /**
  * Tell the shop about contracts running out.
@@ -149,8 +149,12 @@ async function draftRenewalQuote(
   a: typeof agreements.$inferSelect,
   used: { partsCents: number; visits: number; laborMinutes: number },
 ): Promise<boolean> {
+  // A renewal the client turned down does not stop next year's being drafted -
+  // and neither does one the shop closed as lost, for the same reason: both are
+  // a finished conversation about the term that is ending, not a standing
+  // instruction never to ask again. See LOST_OUTCOMES.
   const existing = await db.select().from(quotes)
-    .where(and(eq(quotes.agreementId, a.id), ne(quotes.status, "declined")));
+    .where(and(eq(quotes.agreementId, a.id), notInArray(quotes.status, [...LOST_OUTCOMES])));
   if (existing.length) return false;
 
   // The agreement's own workspace prices its own renewal. Unscoped, resolveRate

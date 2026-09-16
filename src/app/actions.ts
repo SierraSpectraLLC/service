@@ -87,7 +87,8 @@ import { poProblem, usablePoLines } from "@/lib/backfill";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
 import {
-  addressBlock, answerable, depositCents, discountOf, netCents, quoteStanding, specRows,
+  addressBlock, answerable, depositCents, discountOf, isLostOutcome, lostLine, lostRefusal,
+  netCents, quoteStanding, specRows, type LostOutcome,
 } from "@/lib/quotes";
 import { feeClause, resolvePolicy } from "@/lib/billingPolicy";
 import { linkState } from "@/lib/dropShare";
@@ -16697,6 +16698,86 @@ export async function declineQuoteAsClient(
     reason.trim().slice(0, 2000),
     u.email,
   );
+}
+
+/**
+ * The shop closes out a quote it lost.
+ *
+ * The client's own doors - approveQuote, declineQuote and the two signed-in
+ * twins - cover the client answering IN THE APP. This is the other way a quote
+ * ends, which is the common way: somebody rings, or replies to the email, or
+ * mentions it on a visit, and says the work went to the OEM or the capital
+ * request was pulled. Before this, the row had nowhere to put that. It sat in
+ * "awaiting client" counting itself into the pipeline's quoted figure and into
+ * the morning digest's chase list until the expiry date quietly rescued it -
+ * and then read as "expired", which records that nobody answered rather than
+ * what actually happened.
+ *
+ * TWO OUTCOMES, because they are two facts. `declined` is somebody reading the
+ * price and saying no to it, which is feedback about us. `unawarded` is the
+ * work going elsewhere or nowhere, which is the market or a budget. A shop
+ * that files both under one word can never tell whether it is losing on price.
+ *
+ * This does NOT sign for the client. The signature fields say who at the
+ * client we were told by, and `closedBy` says which of us was told - see the
+ * column in schema.ts for why that separation matters. Staff only, scoped to
+ * the caller's own workspace, reason required, audited.
+ */
+export async function closeQuoteAsLost(
+  id: number,
+  data: { outcome: string; reason: string; heardFrom?: string },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(data.reason);
+  if (typeof why !== "string") return why;
+  if (!isLostOutcome(data.outcome)) return { error: "Say whether they rejected it or it went unawarded." };
+  const outcome: LostOutcome = data.outcome;
+
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
+  if (!q) return { error: "Not found" };
+  if (readTenant(u) !== null && q.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+
+  const today = shopToday();
+  // Which standings may be closed, and why the others may not, is lib/quotes'
+  // to answer - the button is drawn off the same function, so the page and the
+  // action cannot disagree about what is closeable.
+  const refusal = lostRefusal(q, today);
+  if (refusal) return { error: refusal };
+
+  const heardFrom = (data.heardFrom ?? "").trim().slice(0, 120);
+  const reason = why.slice(0, 2000);
+  await db.update(quotes).set({
+    status: outcome,
+    answeredOn: today,
+    // Their name where we have it, and the plain noun where we do not. Never
+    // the staff member's: this field is the client's side of the answer, and
+    // putting one of ours in it would read, forever, as the client saying it.
+    answeredBy: heardFrom || "the client",
+    answerNote: reason,
+    closedBy: u.email,
+    updatedAt: new Date(),
+  }).where(eq(quotes.id, id));
+
+  const line = lostLine({ number: q.number, outcome, heardFrom, reason });
+  // The engineer holding the job is the person who most needs to know the work
+  // is not coming - same destination as a client's own decline, for the same
+  // reason. The job's state is left alone: what happens to a job whose quote
+  // was lost is a decision, and it is made on the job.
+  if (q.workOrderId !== null) {
+    await db.insert(workOrderNotes).values({
+      workOrderId: q.workOrderId, author: u.name || u.email, authorEmail: u.email,
+      text: line,
+    });
+  }
+  await audit({
+    actor: u.email, entityType: "quote", entityId: q.id, tenantOrgId: q.tenantOrgId,
+    action: `recorded that ${line}`,
+    field: "status", oldValue: q.status, newValue: outcome,
+  });
+  // revQuote already reaches the quote, the pipeline, the job and the client's
+  // own copy - a lost quote has to leave the quoted figure on all four.
+  revQuote(q);
+  return {};
 }
 
 /**

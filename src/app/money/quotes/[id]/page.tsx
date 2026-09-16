@@ -14,13 +14,14 @@ import { billingContext, quoteById, quoteSubtotal, quoteTotal } from "@/lib/invo
 import { proposalForQuote } from "@/lib/proposalData";
 import { feeClause } from "@/lib/billingPolicy";
 import {
-  daysToExpiry, depositCents, discountLabel, discountOf, quoteStanding,
+  closeableAsLost, daysToExpiry, depositCents, discountLabel, discountOf, quoteStanding,
   STANDING_LABEL, STANDING_TONE,
 } from "@/lib/quotes";
 import QuoteActions from "@/components/QuoteActions";
 import QuoteLetterCard from "@/components/QuoteLetterCard";
 import CoverageEstimateBuilder from "@/components/CoverageEstimateBuilder";
 import AwardQuoteButton from "@/components/AwardQuoteButton";
+import CloseQuoteButton from "@/components/CloseQuoteButton";
 import InvoiceLineList from "@/components/InvoiceLineList";
 import { Id, Panel, Pill, RecordHero } from "@/components/ui";
 import type { HeroStat } from "@/components/ui";
@@ -91,7 +92,8 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
             {row.attn ? `attn ${row.attn} · ` : ""}
             {row.sentOn ? `sent ${row.sentOn}` : "not sent yet"}
             {row.expiresOn ? ` · expires ${row.expiresOn}` : ""}
-            {row.answeredOn ? ` · ${standing} ${row.answeredOn} by ${row.answeredBy}` : ""}
+            {row.answeredOn ? ` · ${STANDING_LABEL[standing].toLowerCase()} ${row.answeredOn} by ${row.answeredBy}` : ""}
+            {row.closedBy ? ` · recorded by ${row.closedBy}` : ""}
           </>
         }
         stats={stats}
@@ -134,6 +136,11 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
             Awarded{award.number ? ` as ${award.number}` : ""}
           </Link>
         )}
+        {/* The other half of the same afternoon: we won it, or we did not.
+            Drawn off the same function the action enforces with, so the button
+            is never offered for a quote that would refuse it - a draft, an
+            approval to unwind, or one already closed. See closeableAsLost. */}
+        {closeableAsLost(row, today) && <CloseQuoteButton quoteId={id} number={row.number} />}
         {row.depositInvoiceId && (
           <Link className="btn sm" href={`/money/invoices/${row.depositInvoiceId}`} style={{ textDecoration: "none" }}>
             The deposit invoice
@@ -183,10 +190,18 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
       )}
 
       {row.answerNote && (
-        <Panel title={standing === "declined" ? "Why they said no" : "What they said"}>
+        <Panel title={
+          standing === "declined" ? "Why they said no"
+            : standing === "unawarded" ? "Where it went"
+              : "What they said"
+        }>
           <div className="t-body">{row.answerNote}</div>
           <div className="mut t-meta" style={{ marginTop: 4 }}>
             {row.answeredBy}{row.answeredOn ? ` · ${row.answeredOn}` : ""}
+            {/* Said plainly rather than left to be inferred from a name: an
+                answer we were TOLD is not an answer the client typed, and a
+                year later that is the whole question. See quotes.closed_by. */}
+            {row.closedBy ? ` · told to ${row.closedBy}` : ""}
             {wo ? " · also posted to the job, where the engineer will read it" : ""}
           </div>
         </Panel>

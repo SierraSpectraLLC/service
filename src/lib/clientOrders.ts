@@ -33,6 +33,7 @@ export function quoteOrderStatus(row: { status: string }, standing: string): Ord
   if (standing === "awaiting") return { label: "Awaiting your approval", tone: "warn", needsYou: true };
   if (standing === "approved") return { label: "Approved", tone: "good", needsYou: false };
   if (standing === "declined") return { label: "Declined", tone: "faint", needsYou: false };
+  if (standing === "unawarded") return { label: "Not awarded", tone: "faint", needsYou: false };
   return { label: "Expired", tone: "faint", needsYou: false };
 }
 
@@ -78,6 +79,6 @@ export type OrderFacet = "open" | "needsyou" | "settled" | "all";
 export function facetMatches(f: OrderFacet, s: OrderStatus): boolean {
   if (f === "all") return true;
   if (f === "needsyou") return s.needsYou;
-  const settled = ["Paid", "Cancelled", "Declined", "Expired"].includes(s.label);
+  const settled = ["Paid", "Cancelled", "Declined", "Not awarded", "Expired"].includes(s.label);
   return f === "settled" ? settled : !settled;
 }

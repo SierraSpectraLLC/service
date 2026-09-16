@@ -2,9 +2,10 @@
 // and the two renewal figures. Pure, no DB.
 import { describe, expect, it } from "vitest";
 import {
-  answerable, approvalConsequence, contractProposal, daysToExpiry, declineConsequence,
-  depositCents, hasPace, paceShortfall, PACE_MIN_INVOICES, PACE_MIN_MONTHS,
-  quoteStanding, renewalFromBurn, stale, trailingUsage,
+  answerable, approvalConsequence, closeableAsLost, contractProposal, daysToExpiry,
+  declineConsequence, depositCents, hasPace, isLostOutcome, LOST_CHOICES, LOST_OUTCOMES,
+  lostLine, LOST_PROMPT, lostRefusal, paceShortfall, PACE_MIN_INVOICES, PACE_MIN_MONTHS,
+  quoteStanding, renewalFromBurn, stale, STANDING_LABEL, trailingUsage,
 } from "@/lib/quotes";
 
 const q = (over: Partial<{ status: string; expiresOn: string }> = {}) =>
@@ -21,6 +22,7 @@ describe("quoteStanding", () => {
   it("lets an answered quote keep its answer whatever the date", () => {
     expect(quoteStanding(q({ status: "approved" }), "2027-01-01")).toBe("approved");
     expect(quoteStanding(q({ status: "declined" }), "2027-01-01")).toBe("declined");
+    expect(quoteStanding(q({ status: "unawarded" }), "2027-01-01")).toBe("unawarded");
   });
 
   it("never expires one with no expiry set", () => {
@@ -32,12 +34,76 @@ describe("quoteStanding", () => {
     expect(answerable(q(), "2026-09-22")).toBe(false);
     expect(answerable(q({ status: "draft" }), "2026-08-22")).toBe(false);
     expect(answerable(q({ status: "approved" }), "2026-08-22")).toBe(false);
+    // A quote the shop closed as lost is answered, whoever answered it.
+    expect(answerable(q({ status: "unawarded" }), "2026-08-22")).toBe(false);
   });
 
   it("counts the days left, and past", () => {
     expect(daysToExpiry("2026-09-21", "2026-08-22")).toBe(30);
     expect(daysToExpiry("2026-08-20", "2026-08-22")).toBe(-2);
     expect(daysToExpiry("", "2026-08-22")).toBeNull();
+  });
+});
+
+describe("closing a quote the shop lost", () => {
+  it("is offered while it is live, and after it has lapsed", () => {
+    // The phone call: they answered outside the app and the row has not caught up.
+    expect(closeableAsLost(q(), "2026-08-22")).toBe(true);
+    // The tidy-up: it lapsed in September, and somebody has since learned where
+    // the job went. "Expired" alone will never say that.
+    expect(closeableAsLost(q(), "2026-09-22")).toBe(true);
+    expect(closeableAsLost(q({ status: "expired" }), "2026-08-22")).toBe(true);
+  });
+
+  it("is refused where there is nothing to lose, or something to unwind", () => {
+    expect(closeableAsLost(q({ status: "draft" }), "2026-08-22")).toBe(false);
+    expect(closeableAsLost(q({ status: "approved" }), "2026-08-22")).toBe(false);
+    // Already closed: the day it was lost, and who was told, are the record.
+    expect(closeableAsLost(q({ status: "declined" }), "2026-08-22")).toBe(false);
+    expect(closeableAsLost(q({ status: "unawarded" }), "2026-08-22")).toBe(false);
+  });
+
+  it("says why it is refused, and names the way out where there is one", () => {
+    const n = (over = {}) => ({ number: "Q-1001", ...q(over) });
+    expect(lostRefusal(n(), "2026-08-22")).toBeNull();
+    expect(lostRefusal(n({ status: "draft" }), "2026-08-22")).toContain("delete it instead");
+    expect(lostRefusal(n({ status: "approved" }), "2026-08-22")).toContain("deposit invoice");
+    expect(lostRefusal(n({ status: "unawarded" }), "2026-08-22")).toBe(
+      "Q-1001 is already closed as not awarded.",
+    );
+  });
+
+  it("keeps the two losses apart, because they are two facts", () => {
+    expect([...LOST_OUTCOMES]).toEqual(["declined", "unawarded"]);
+    expect(LOST_CHOICES.map((c) => c.label)).toEqual(["Rejected", "Not awarded"]);
+    expect(isLostOutcome("declined")).toBe(true);
+    expect(isLostOutcome("unawarded")).toBe(true);
+    // Not a door into any other status: this is what the action validates on.
+    expect(isLostOutcome("approved")).toBe(false);
+    expect(isLostOutcome("expired")).toBe(false);
+    expect(isLostOutcome("")).toBe(false);
+    // Declined is feedback about our price; not awarded is where the work went.
+    expect(STANDING_LABEL.declined).toBe("Declined");
+    expect(STANDING_LABEL.unawarded).toBe("Not awarded");
+  });
+
+  it("says what closing it does before somebody does it", () => {
+    // Nothing here bills anybody, but it takes a live quote out of the
+    // pipeline's quoted figure and off the morning chase list.
+    expect(LOST_PROMPT).toContain("off the chase list");
+    // What each outcome MEANS rides on the choice, so it changes with the picker.
+    expect(LOST_CHOICES.map((c) => c.note).join(" ")).toMatch(/said no to it.*went to somebody else/s);
+  });
+
+  it("writes one line for the trail and the job, naming who told us", () => {
+    expect(lostLine({
+      number: "Q-1001", outcome: "unawarded",
+      heardFrom: "Dr. Chen", reason: "Went to the OEM on lead time",
+    })).toBe("Q-1001 was not awarded - Dr. Chen told us: Went to the OEM on lead time");
+    // Nobody named is the ordinary case - an email forwarded by somebody who
+    // did not say who wrote it - and the sentence still has to read.
+    expect(lostLine({ number: "Q-1001", outcome: "declined", reason: "Too expensive" }))
+      .toBe("Q-1001 declined: Too expensive");
   });
 });
 
