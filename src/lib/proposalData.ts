@@ -42,7 +42,7 @@ export async function proposalById(id: number): Promise<FullProposal | null> {
 
 /** The rows as lib/proposal wants them - stored shape in, document shape out. */
 export const systemRows = (f: FullProposal): SystemRow[] =>
-  f.systems.map((s) => ({ name: s.name, model: s.model, note: s.note }));
+  f.systems.map((s) => ({ name: s.name, model: s.model, modules: s.modules, note: s.note }));
 
 export const tierRows = (f: FullProposal): Tier[] =>
   f.tiers.map((t) => ({

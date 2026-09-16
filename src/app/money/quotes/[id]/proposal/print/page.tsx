@@ -12,6 +12,7 @@ import { quoteById } from "@/lib/invoiceData";
 import { addressedTo } from "@/lib/quotes";
 import { longDate } from "@/lib/demandLetter";
 import { proposalBlocks } from "@/lib/proposal";
+import { cellIndent } from "@/lib/docStyle";
 import { proposalForQuote, sectionRows, systemRows, tierRows } from "@/lib/proposalData";
 import { docContactLine } from "@/lib/xlsxDocData";
 import PrintButton from "@/components/PrintButton";
@@ -134,7 +135,16 @@ export default async function ProposalPrintPage({ params }: { params: Promise<{ 
             <tbody>
               {b.rows.map((r, j) => (
                 <tr key={j} className={b.lead && j === 0 ? "lead" : undefined}>
-                  {r.map((c, k) => <td key={k}>{c}</td>)}
+                  {/* A cell that opens with spaces is a detail under the row
+                      above it - a system's module. The same mark the PDF and
+                      the Word file read; HTML collapses the spaces, so the
+                      indent is drawn rather than typed. */}
+                  {r.map((c, k) => {
+                    const { text, indent } = cellIndent(c);
+                    return (
+                      <td key={k} className={indent ? "sub" : undefined}>{text}</td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>

@@ -97,7 +97,7 @@ export default async function ProposalPage({ params }: { params: Promise<{ id: s
           pricingValid: p.row.pricingValid, recommendedTier: p.row.recommendedTier,
         }}
         systems={p.systems.map((s) => ({
-          instrumentId: s.instrumentId, name: s.name, model: s.model, note: s.note,
+          instrumentId: s.instrumentId, name: s.name, model: s.model, modules: s.modules, note: s.note,
         }))}
         tiers={p.tiers.map((t) => ({
           key: t.key, name: t.name, annualCents: t.annualCents, bestFor: t.bestFor,

@@ -3958,6 +3958,15 @@ export const proposalSystems = pgTable("proposal_systems", {
   instrumentId: integer("instrument_id").references((): AnyPgColumn => instruments.id, { onDelete: "set null" }),
   name: text("name").notNull().default(""),
   model: text("model").notNull().default(""),
+  /**
+   * What is IN it, one module per line as "Kind | Model" - the same
+   * Label | Value convention a tier's features use. A service contract on an
+   * LC-MS covers seven boxes; the covered-systems table listed one, and the
+   * first attempt at listing them put all seven in the note, which is a cell
+   * three lines deep that nobody reads. They are rows of their own now, so
+   * each module has its own line with its own model beside it.
+   */
+  modules: text("modules").notNull().default(""),
   note: text("note").notNull().default(""),
   position: integer("position").notNull().default(0),
 }, (t) => [index("proposal_systems_proposal_idx").on(t.proposalId)]);

@@ -31,28 +31,59 @@ import { formatCents } from "@/lib/money";
 export type FleetModule = { kind: string; model: string; sortOrder?: number };
 
 /**
- * The modules of a system, as one line: "Console LC-40; Autosampler SIL-40".
+ * The modules of a system, as stored: one per line, "Kind | Model".
  *
  * A service contract on an LC-MS covers seven boxes, and the covered-systems
  * table listed one - whatever somebody retyped into the Model column - so
- * the paper never said what was actually under the contract. Two identical
- * pumps read as "x2" rather than twice, which is composeSystemLabel's rule
- * and is right for the same reason: a reader counts, they do not re-read.
+ * the paper never said what was actually under the contract. The first fix
+ * put all seven in the notes, which is one cell three lines deep that a
+ * reader skips; they are rows of their own now, so the kind and the model
+ * have to stay apart. Same Label | Value convention a tier's features use.
  *
- * Kind AND model, unlike the system's own label, which is models alone: on
- * this table the reader is checking a list against the machine in their lab,
- * and "Roughing Pump E2M18" is findable where "E2M18" is not.
+ * Two identical pumps read as "x2" rather than appearing twice, which is
+ * composeSystemLabel's rule and is right for the same reason: a reader
+ * counts, they do not re-read.
  */
-export function moduleList(modules: FleetModule[]): string {
-  const counts: { name: string; n: number }[] = [];
+export function moduleLines(modules: FleetModule[]): string {
+  const counts: { kind: string; model: string; n: number }[] = [];
   for (const m of [...modules].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))) {
-    const name = [m.kind.trim(), m.model.trim()].filter(Boolean).join(" ");
-    if (!name) continue;
-    const seen = counts.find((c) => c.name.toLowerCase() === name.toLowerCase());
+    const kind = m.kind.trim(), model = m.model.trim();
+    if (!kind && !model) continue;
+    const seen = counts.find((c) =>
+      c.kind.toLowerCase() === kind.toLowerCase() && c.model.toLowerCase() === model.toLowerCase());
     if (seen) seen.n++;
-    else counts.push({ name, n: 1 });
+    else counts.push({ kind, model, n: 1 });
   }
-  return counts.map((c) => (c.n > 1 ? `${c.name} x${c.n}` : c.name)).join("; ");
+  return counts
+    .map((c) => {
+      // A module known only by its model is labelled by it: the alternative
+      // is a blank Instrument cell with a model stranded beside it.
+      const label = `${c.kind || c.model}${c.n > 1 ? ` x${c.n}` : ""}`;
+      const model = c.kind ? c.model : "";
+      return model ? `${label} | ${model}` : label;
+    })
+    .join("\n");
+}
+
+/** One module of a covered system, read back off the stored lines. */
+export type ModuleRow = { kind: string; model: string };
+
+/**
+ * The stored lines, as rows. A line with no "|" is all kind and no model -
+ * somebody typing a box they have no model number for, which is a real
+ * answer and not a reason to drop the line.
+ */
+export function parseModules(text: string): ModuleRow[] {
+  return (text ?? "").split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const i = l.indexOf("|");
+      return i < 0
+        ? { kind: l, model: "" }
+        : { kind: l.slice(0, i).trim(), model: l.slice(i + 1).trim() };
+    })
+    .filter((m) => m.kind || m.model);
 }
 
 /**
@@ -70,14 +101,17 @@ export function moduleList(modules: FleetModule[]): string {
 export function fleetSystemRow(
   system: { label: string; model: string },
   modules: FleetModule[],
-): { name: string; model: string; note: string } {
+): { name: string; model: string; modules: string; note: string } {
   const ordered = [...modules].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
   return {
     name: system.label,
     // The system's own model where it has one - an imported or older record.
     // Otherwise the first module's, which is the box the stack is named for.
     model: system.model.trim() || ordered.find((m) => m.model.trim())?.model.trim() || "",
-    note: moduleList(ordered),
+    modules: moduleLines(ordered),
+    // The note stays the shop's to write: the caveat that earns a row, not a
+    // list the table can draw for itself.
+    note: "",
   };
 }
 
@@ -86,6 +120,8 @@ export type SystemRow = {
   /** What it is: "Sciex TripleTOF Mass Spectrometer". */
   name: string;
   model: string;
+  /** What is in it, one per line as "Kind | Model". See moduleLines. */
+  modules: string;
   /** "ESI source; APCI familiarization included" - the caveat that earns a row. */
   note: string;
 };
@@ -291,10 +327,17 @@ export function proposalBlocks(p: ProposalInput): ProposalBlock[] {
          prose, which is why this is decided here and not by the renderer
          noticing what came before it. */
       out.push(...parseBody(s.body, true));
+      /* A system, then its modules under it - each with its own model beside
+         it, indented and quiet (see docStyle.cellIndent, which both renderers
+         and the print view read). One cell holding seven semicolons is a cell
+         a reader skips; seven rows is a list they check against their bench. */
       out.push({
         kind: "table",
         head: ["#", "Instrument", "Model", "Notes"],
-        rows: p.systems.map((r, i) => [String(i + 1), r.name, r.model || "(included)", r.note]),
+        rows: p.systems.flatMap((r, i) => [
+          [String(i + 1), r.name, r.model || "(included)", r.note],
+          ...parseModules(r.modules).map((m) => ["", `    ${m.kind}`, m.model, ""]),
+        ]),
         mono: [2],
       });
       continue;

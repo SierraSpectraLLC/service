@@ -18040,7 +18040,7 @@ export async function updateProposal(proposalId: number, data: {
 
 /** The covered systems, as one sheet. */
 export async function saveProposalSystems(proposalId: number, rows: {
-  instrumentId?: number | null; name: string; model: string; note: string;
+  instrumentId?: number | null; name: string; model: string; modules?: string; note: string;
 }[]): Promise<{ error?: string }> {
   const u = await requireStaff();
   const gate = await proposalGate(u, proposalId);
@@ -18051,6 +18051,8 @@ export async function saveProposalSystems(proposalId: number, rows: {
       instrumentId: r.instrumentId ?? null,
       name: r.name.trim().slice(0, 160),
       model: r.model.trim().slice(0, 120),
+      // One module per line; the cap is a long stack, not a paragraph.
+      modules: (r.modules ?? "").trim().slice(0, 1200),
       note: r.note.trim().slice(0, 300),
     }))
     .filter((r) => r.name || r.model)

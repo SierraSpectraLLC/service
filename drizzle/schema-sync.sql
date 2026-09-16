@@ -4722,3 +4722,7 @@ END $$;
 -- client answered through their own door and answered_by is their signature;
 -- set means somebody here was told, and answered_by is who told them.
 ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "closed_by" text NOT NULL DEFAULT '';
+
+-- What a covered system is made of, one module per line as "Kind | Model".
+-- The proposal's covered-systems table gives each its own row.
+ALTER TABLE "proposal_systems" ADD COLUMN IF NOT EXISTS "modules" text NOT NULL DEFAULT '';

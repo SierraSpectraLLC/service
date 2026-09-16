@@ -12,8 +12,9 @@
 // nothing printed over an empty section.
 import { describe, expect, it } from "vitest";
 import {
-  fleetSystemRow, HOUSE_SECTIONS, HOUSE_TIERS, houseTemplate, moduleList, parseBody, parseBullets,
-  parseFeatures, proposalBlocks, proposalValueCents, SECTION_KINDS, systemSummary, tierMatrix,
+  fleetSystemRow, HOUSE_SECTIONS, HOUSE_TIERS, houseTemplate, moduleLines, parseBody, parseBullets,
+  parseFeatures, parseModules, proposalBlocks, proposalValueCents, SECTION_KINDS, systemSummary,
+  tierMatrix,
   type ProposalInput, type Tier,
 } from "@/lib/proposal";
 
@@ -30,8 +31,8 @@ const input = (over: Partial<ProposalInput> = {}): ProposalInput => ({
   customer: "Avance Biosciences Inc.", contact: "James Otto Jr.",
   date: "May 10, 2026", quoteNumber: "030215_Ar1", pricingValid: "30 days from issue",
   systems: [
-    { name: "Sciex TripleTOF Mass Spectrometer", model: "TripleTOF 6600", note: "ESI source" },
-    { name: "Shimadzu UHPLC", model: "LC-30AD", note: "Coupled to the 6600" },
+    { name: "Sciex TripleTOF Mass Spectrometer", model: "TripleTOF 6600", modules: "", note: "ESI source" },
+    { name: "Shimadzu UHPLC", model: "LC-30AD", modules: "", note: "Coupled to the 6600" },
   ],
   tiers: [tier(), tier({ key: "premium", name: "Premium", annualCents: 4_600_000, features: "Preventive Maintenance | 2 / year\nOn-Site Escalation | Unlimited" })],
   recommendedTier: "essential",
@@ -288,18 +289,18 @@ describe("what the document is worth", () => {
 describe("the systems, as one line", () => {
   it("joins two with a plus, the way the shop writes it", () => {
     expect(systemSummary([
-      { name: "Sciex TripleTOF", model: "TripleTOF 6600", note: "" },
-      { name: "Shimadzu UHPLC", model: "LC-30AD", note: "" },
+      { name: "Sciex TripleTOF", model: "TripleTOF 6600", modules: "", note: "" },
+      { name: "Shimadzu UHPLC", model: "LC-30AD", modules: "", note: "" },
     ])).toBe("TripleTOF 6600 + LC-30AD");
   });
 
   it("counts the rest rather than running off the header table", () => {
-    expect(systemSummary(Array.from({ length: 5 }, (_, i) => ({ name: `S${i}`, model: `M${i}`, note: "" }))))
+    expect(systemSummary(Array.from({ length: 5 }, (_, i) => ({ name: `S${i}`, model: `M${i}`, modules: "", note: "" }))))
       .toBe("M0 + M1 +3 more");
   });
 
   it("falls back to the instrument's name where nobody typed a model", () => {
-    expect(systemSummary([{ name: "Nitrogen Gas Generator", model: "", note: "" }]))
+    expect(systemSummary([{ name: "Nitrogen Gas Generator", model: "", modules: "", note: "" }]))
       .toBe("Nitrogen Gas Generator");
   });
 });
@@ -318,16 +319,30 @@ describe("a system taken off the client's fleet", () => {
     { kind: "Roughing Pump", model: "E2M18", sortOrder: 3 },
     { kind: "Roughing Pump", model: "E2M18", sortOrder: 4 },
   ];
+  const LINES = "Console | LCMS-8060NX\nAutosampler | SIL-40\nRoughing Pump x2 | E2M18";
 
-  it("lists every module in the order they sit in, counting the repeats", () => {
-    expect(moduleList(stack)).toBe("Console LCMS-8060NX; Autosampler SIL-40; Roughing Pump E2M18 x2");
+  it("keeps every module on its own line, in the order they sit in, counting the repeats", () => {
+    expect(moduleLines(stack)).toBe(LINES);
   });
 
-  it("names a module by its kind and model, so a reader can find it in their lab", () => {
-    expect(moduleList([{ kind: "Degasser", model: "" }, { kind: "", model: "CTO-40" }]))
-      .toBe("Degasser; CTO-40");
-    expect(moduleList([{ kind: " ", model: " " }])).toBe("");
-    expect(moduleList([])).toBe("");
+  it("keeps the kind and the model apart, so each gets its own column on the page", () => {
+    expect(parseModules(LINES)).toEqual([
+      { kind: "Console", model: "LCMS-8060NX" },
+      { kind: "Autosampler", model: "SIL-40" },
+      { kind: "Roughing Pump x2", model: "E2M18" },
+    ]);
+  });
+
+  it("takes a module with no model, and a line somebody typed without the bar", () => {
+    expect(moduleLines([{ kind: "Degasser", model: "" }, { kind: "", model: "CTO-40" }]))
+      .toBe("Degasser\nCTO-40");
+    expect(parseModules("Nitrogen generator\n  \nDegasser | ")).toEqual([
+      { kind: "Nitrogen generator", model: "" },
+      { kind: "Degasser", model: "" },
+    ]);
+    expect(moduleLines([{ kind: " ", model: " " }])).toBe("");
+    expect(moduleLines([])).toBe("");
+    expect(parseModules("")).toEqual([]);
   });
 
   it("fills the row from the modules when the system has no model of its own", () => {
@@ -336,7 +351,9 @@ describe("a system taken off the client's fleet", () => {
     expect(fleetSystemRow({ label: "LC-MS 2 · AV-002", model: "" }, stack)).toEqual({
       name: "LC-MS 2 · AV-002",
       model: "LCMS-8060NX",
-      note: "Console LCMS-8060NX; Autosampler SIL-40; Roughing Pump E2M18 x2",
+      modules: LINES,
+      // The caveat that earns a row stays the shop's to write.
+      note: "",
     });
   });
 
@@ -344,9 +361,25 @@ describe("a system taken off the client's fleet", () => {
     expect(fleetSystemRow({ label: "GC-MS · T-001", model: "GCMS-QP2020" }, stack).model).toBe("GCMS-QP2020");
   });
 
-  it("leaves the notes empty for a system with nothing in it yet", () => {
+  it("leaves the modules empty for a system with nothing in it yet", () => {
     expect(fleetSystemRow({ label: "New bench · T-009", model: "" }, [])).toEqual({
-      name: "New bench · T-009", model: "", note: "",
+      name: "New bench · T-009", model: "", modules: "", note: "",
     });
+  });
+
+  it("gives every module its own row on page one, under the system it is in", () => {
+    const blocks = proposalBlocks(input({
+      systems: [{ name: "6500QTrap", model: "QTRAP 6500", modules: LINES, note: "ESI source" }],
+      sections: [{ kind: "systems", heading: "Covered Systems", body: "" }],
+    }));
+    const table = blocks.find((b) => b.kind === "table") as Extract<typeof blocks[number], { kind: "table" }>;
+    expect(table.rows).toEqual([
+      ["1", "6500QTrap", "QTRAP 6500", "ESI source"],
+      // Two leading spaces mark a detail under the row above - the one mark
+      // the PDF, the Word file and the print view all already read.
+      ["", "    Console", "LCMS-8060NX", ""],
+      ["", "    Autosampler", "SIL-40", ""],
+      ["", "    Roughing Pump x2", "E2M18", ""],
+    ]);
   });
 });
