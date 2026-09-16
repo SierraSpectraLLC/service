@@ -93,11 +93,11 @@ export default async function PayablesPage({ searchParams }: {
           <table className="list">
             <thead><tr><th>When</th><th>Payee</th><th>What</th><th className="r">Amount</th><th></th></tr></thead>
             <tbody>
-              {rows.length === 0 && <tr><td colSpan={5} className="empty">Nothing owed.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={5} className="nothing">Nothing owed.</td></tr>}
               {rows.map((r) => {
                 const d = r.when >= "9999" ? null : daysFrom(today, r.when);
                 return (
-                  <tr key={`${r.kind}-${r.doc}-${r.when}`} className="row">
+                  <tr key={`${r.kind}-${r.doc}-${r.when}`} className="hov">
                     <td className="num" style={{ textAlign: "left" }}>
                       {d === null ? "—" : r.when}
                       <span className="meta">{d === null ? "no date yet" : d < 0 ? `${-d}d late` : d === 0 ? "today" : `in ${d}d`}</span>

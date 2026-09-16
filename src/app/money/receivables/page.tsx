@@ -102,13 +102,13 @@ export default async function ReceivablesPage({ searchParams }: {
           <table className="list">
             <thead><tr><th>Client</th><th>Document</th><th>What</th><th className="r">Amount</th><th></th></tr></thead>
             <tbody>
-              {shown.length === 0 && <tr><td colSpan={5} className="empty">Nothing at this stage.</td></tr>}
+              {shown.length === 0 && <tr><td colSpan={5} className="nothing">Nothing at this stage.</td></tr>}
               {shown.map((r) => {
                 const [tone, label] = PILL[r.status] ?? ["neutral", r.status];
                 return (
-                  <tr key={`${r.stage}-${r.doc}-${r.sort}`} className="row">
+                  <tr key={`${r.stage}-${r.doc}-${r.sort}`} className="hov">
                     <td><Link className="plain" href={`/money/receivables?org=${r.orgId}`}>{r.orgName}</Link></td>
-                    <td><Link className="plain doc" href={r.href}><Id>{r.doc}</Id></Link><br /><Pill tone={tone}>{label}</Pill></td>
+                    <td><Link className="plain docno" href={r.href}><Id>{r.doc}</Id></Link><br /><Pill tone={tone}>{label}</Pill></td>
                     <td className="title">{r.title}<span className="meta">{r.meta}</span></td>
                     <td className={`num${r.tone ? ` fig ${r.tone}` : ""}`}>{formatCents(r.cents)}</td>
                     <td className="acts">
@@ -137,7 +137,7 @@ export default async function ReceivablesPage({ searchParams }: {
         <div className="ph"><h2>Exposure by client</h2><span className="t-meta mut">awarded + unbilled + invoiced, excluding quotes and paid</span></div>
         <div className="tblwrap">
           <table className="list"><tbody>
-            {exposure.length === 0 && <tr><td className="empty">Nobody owes anything.</td></tr>}
+            {exposure.length === 0 && <tr><td className="nothing">Nobody owes anything.</td></tr>}
             {exposure.map((e) => (
               <tr key={e.orgId}>
                 <td style={{ width: "40%" }}><Link className="plain" href={`/money/clients?org=${e.orgId}`}>{e.orgName}</Link></td>

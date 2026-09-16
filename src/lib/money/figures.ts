@@ -44,6 +44,16 @@ export type MoneyFigures = {
   from: string;
   to: string;
   positions: Positions;
+  /**
+   * What is owed, as the open invoices' balances - each from the journal
+   * where the journal has it, from the document where it does not. NOT the
+   * receivable account's raw sum: an invoice sent before the ledger existed
+   * and paid after it has a credit with no debit, and the raw sum reads that
+   * as money owed to the client. journalGapCents is the difference, and the
+   * Home page says what to do about it.
+   */
+  receivableCents: number;
+  journalGapCents: number;
   cashCents: number;
   runway: { burnCents: number; months: number | null };
   unreconciled: { unmatched: number; unmatchedCents: number; inTransit: number; hasFeed: boolean };
@@ -374,10 +384,11 @@ export const moneyFigures = cache(async (
 
   const owedNow = pos.payable + reimbDue + pos.salesTaxOwed;
   const committed = onOrderCents + (payrollDue?.grossCents ?? 0);
+  const receivableCents = sumBal(open);
 
   return {
     today, period, from, to,
-    positions: pos, cashCents,
+    positions: pos, receivableCents, journalGapCents: pos.receivable - receivableCents, cashCents,
     runway: { burnCents, months: burnCents > 0 ? Math.round((cashCents / burnCents) * 10) / 10 : null },
     unreconciled: { unmatched: unmatchedRows.length, unmatchedCents: sources.unmatchedBank.cents, inTransit, hasFeed },
     flow, collected: { cents: collected.cents, n: collected.n },
@@ -394,7 +405,7 @@ export const moneyFigures = cache(async (
     holds: holds.length,
     decisions: decisionsFrom(sources),
     sources,
-    amounts: { receivables: pos.receivable, payables: owedNow, cash: cashCents },
+    amounts: { receivables: receivableCents, payables: owedNow, cash: cashCents },
     labels: holds.length ? { clients: `${holds.length} on hold` } : {},
     tones: { ...(sumBal(late) > 0 ? { receivables: "bad" as const } : {}), ...(holds.length ? { clients: "bad" as const } : {}) },
     receivables: rows,
