@@ -35,6 +35,21 @@ const STAFF: Who = {
   email: "bill@sierra.test", name: "Bill Reyes", role: "staff",
   orgId: null, operatorOrgId: SIERRA, rootOperatorOrgId: SIERRA,
 };
+const LABZEN = 4, RIVAL = 5, CASCADE = 6;
+/** A client's own editor: may add their systems, may not say whose they are. */
+const THEIRS: Who = {
+  email: "ada@labzen.test", name: "Ada Park", role: "client_editor",
+  orgId: LABZEN, operatorOrgId: null, rootOperatorOrgId: SIERRA,
+};
+/**
+ * Another service company's staff. Sierra runs the instance, so ITS staff are
+ * platform staff and see every workspace by design - the cross-workspace
+ * boundary only exists to be crossed from somewhere else.
+ */
+const OTHER_SHOP: Who = {
+  email: "sam@cascade.test", name: "Sam Ortiz", role: "staff",
+  orgId: null, operatorOrgId: CASCADE, rootOperatorOrgId: SIERRA,
+};
 
 // app/actions is a large module and a create applies the catalog's procedures
 // and gases; PGlite is not quick about it.
@@ -43,7 +58,11 @@ const SLOW = 30_000;
 beforeAll(async () => {
   await client.exec(readFileSync("drizzle/schema-sync.sql", "utf8"));
   await client.exec(`
-    INSERT INTO orgs (id, name, kind, is_operator) VALUES (${SIERRA}, 'Sierra Spectra', 'provider', true);
+    INSERT INTO orgs (id, name, kind, is_operator, parent_org_id) VALUES
+      (${SIERRA},  'Sierra Spectra',     'provider', true,  NULL),
+      (${LABZEN},  'LabZen',             'client',   false, ${SIERRA}),
+      (${RIVAL},   'Rival Labs',         'client',   false, ${CASCADE}),
+      (${CASCADE}, 'Cascade Instrument', 'provider', true,  NULL);
     SELECT setval('orgs_id_seq', 100);
     INSERT INTO house_members (email, org_id, role, name) VALUES ('bill@sierra.test', ${SIERRA}, 'staff', 'Bill Reyes');
   `);
@@ -51,7 +70,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   who = STAFF;
-  await client.exec("DELETE FROM stage_events; DELETE FROM audit_log; DELETE FROM instruments;");
+  await client.exec("DELETE FROM stage_events; DELETE FROM audit_log; DELETE FROM system_shares; DELETE FROM instruments;");
 });
 
 const systems = async () => testDb.select().from(schema.instruments);
@@ -109,5 +128,75 @@ describe("adding a system", () => {
     expect((await systems())[0].lead).toBe("");
     await createInstrument({ externalId: "G-014", client: "", priority: 99, lead: "Bill Reyes" });
     expect((await systems()).find((s) => s.externalId === "G-014")?.lead).toBe("Bill Reyes");
+  }, SLOW);
+});
+
+/**
+ * A system added from a client's own Fleet tab belongs to that client.
+ *
+ * The tab lists a client's machines and had no way to put one on the list:
+ * adding meant the registry, and then coming back to say whose it was - the
+ * second step that gets skipped, which is how a fleet page ends up empty
+ * beside a client who has six instruments.
+ */
+describe("a system added for a client", () => {
+  it("lands owned by them, shared with them, and named for them", async () => {
+    const { createInstrument } = await import("@/app/actions");
+    const res = await createInstrument({
+      externalId: "T-003", client: "", category: "LC-MS", priority: 11, ownerOrgId: LABZEN,
+    });
+    expect(res.error).toBeUndefined();
+    const [made] = await systems();
+    expect(made.ownerOrgId).toBe(LABZEN);
+    // A blank label follows ownership, so the registry does not head their
+    // own machine "(no client)" - see lib/owner.clientAfterHandoff.
+    expect(made.client).toBe("LabZen");
+    // An owner who cannot see their own system helps nobody.
+    const shares = await testDb.select().from(schema.systemShares);
+    expect(shares.some((x) => x.orgId === LABZEN && x.instrumentId === made.id)).toBe(true);
+  }, SLOW);
+
+  it("keeps a label somebody typed themselves", async () => {
+    const { createInstrument } = await import("@/app/actions");
+    await createInstrument({
+      externalId: "T-004", client: "Berkeley loan", category: "", priority: 11, ownerOrgId: LABZEN,
+    });
+    const [made] = await systems();
+    expect(made.ownerOrgId).toBe(LABZEN);
+    expect(made.client).toBe("Berkeley loan");
+  }, SLOW);
+
+  it("refuses an owner outside this workspace, and writes nothing", async () => {
+    who = OTHER_SHOP;
+    const { createInstrument } = await import("@/app/actions");
+    // LabZen is Sierra's client, not Cascade's.
+    const res = await createInstrument({
+      externalId: "T-005", client: "", category: "", priority: 11, ownerOrgId: LABZEN,
+    });
+    expect(res.error).toBe("Not found");
+    expect(await systems()).toHaveLength(0);
+    // Their own client is theirs to name.
+    const ok = await createInstrument({
+      externalId: "T-005", client: "", category: "", priority: 11, ownerOrgId: RIVAL,
+    });
+    expect(ok.error).toBeUndefined();
+  }, SLOW);
+
+  it("refuses a client editor naming an owner - whose it is, is the shop's to say", async () => {
+    who = THEIRS;
+    const { createInstrument } = await import("@/app/actions");
+    const res = await createInstrument({
+      externalId: "T-006", client: "", category: "", priority: 11, ownerOrgId: LABZEN,
+    });
+    expect(res.error).toMatch(/shop/i);
+    expect(await systems()).toHaveLength(0);
+  }, SLOW);
+
+  it("is unchanged when no owner is named - the registry's own form", async () => {
+    const { createInstrument } = await import("@/app/actions");
+    await createInstrument({ externalId: "T-007", client: "GMI", category: "", priority: 11 });
+    const [made] = await systems();
+    expect(made.ownerOrgId).toBeNull();
+    expect(made.client).toBe("GMI");
   }, SLOW);
 });

@@ -21,6 +21,66 @@
 
 import { formatCents } from "@/lib/money";
 
+/**
+ * One module of a system, as the covered-systems table needs it.
+ *
+ * The same three facts lib/systemLabel composes a system's name from, which
+ * is deliberate: a proposal that names a stack one way and the record
+ * another is a proposal nobody can match to a machine afterwards.
+ */
+export type FleetModule = { kind: string; model: string; sortOrder?: number };
+
+/**
+ * The modules of a system, as one line: "Console LC-40; Autosampler SIL-40".
+ *
+ * A service contract on an LC-MS covers seven boxes, and the covered-systems
+ * table listed one - whatever somebody retyped into the Model column - so
+ * the paper never said what was actually under the contract. Two identical
+ * pumps read as "x2" rather than twice, which is composeSystemLabel's rule
+ * and is right for the same reason: a reader counts, they do not re-read.
+ *
+ * Kind AND model, unlike the system's own label, which is models alone: on
+ * this table the reader is checking a list against the machine in their lab,
+ * and "Roughing Pump E2M18" is findable where "E2M18" is not.
+ */
+export function moduleList(modules: FleetModule[]): string {
+  const counts: { name: string; n: number }[] = [];
+  for (const m of [...modules].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))) {
+    const name = [m.kind.trim(), m.model.trim()].filter(Boolean).join(" ");
+    if (!name) continue;
+    const seen = counts.find((c) => c.name.toLowerCase() === name.toLowerCase());
+    if (seen) seen.n++;
+    else counts.push({ name, n: 1 });
+  }
+  return counts.map((c) => (c.n > 1 ? `${c.name} x${c.n}` : c.name)).join("; ");
+}
+
+/**
+ * What picking one of the client's systems fills in.
+ *
+ * The picker used to fill the name and the model and leave the notes empty,
+ * and on a system entered since assets became how a system is described the
+ * model is blank too - so a pick landed a row with a name and two empty
+ * cells. Its modules are on file; the row says what they are.
+ *
+ * `note` is offered, never imposed: this builds a NEW row, so nothing
+ * somebody typed is overwritten, and the field stays editable for the
+ * caveat that earns it ("ESI source; APCI familiarization included").
+ */
+export function fleetSystemRow(
+  system: { label: string; model: string },
+  modules: FleetModule[],
+): { name: string; model: string; note: string } {
+  const ordered = [...modules].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  return {
+    name: system.label,
+    // The system's own model where it has one - an imported or older record.
+    // Otherwise the first module's, which is the box the stack is named for.
+    model: system.model.trim() || ordered.find((m) => m.model.trim())?.model.trim() || "",
+    note: moduleList(ordered),
+  };
+}
+
 /** One machine the contract covers. */
 export type SystemRow = {
   /** What it is: "Sciex TripleTOF Mass Spectrometer". */

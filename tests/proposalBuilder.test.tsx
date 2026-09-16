@@ -55,22 +55,40 @@ const build = async (over: Record<string, unknown> = {}) => {
         { kind: "systems", heading: "Scope of Coverage", body: "" },
         { kind: "tiers", heading: "Coverage Tier Comparison", body: "" },
       ]}
-      fleet={[{ id: 41, label: "LC-MS 2 · AV-002", model: "LCMS-8060NX" }]}
+      fleet={[{
+        id: 41, label: "LC-MS 2 · AV-002", model: "LCMS-8060NX",
+        // What its modules make of it - see lib/proposal.fleetSystemRow.
+        note: "Console LCMS-8060NX; Autosampler SIL-40; Roughing Pump E2M18 x2",
+      }]}
       {...over} />,
   );
 };
 
 describe("adding a system", () => {
-  it("takes one off the client's own fleet, named and modelled already", async () => {
+  it("takes one off the client's own fleet, named and modelled and with its modules listed", async () => {
     // The point of picking rather than retyping: a retyped model number is how
-    // a proposal covers a machine nobody can find in the record afterwards.
+    // a proposal covers a machine nobody can find in the record afterwards -
+    // and a contract on a seven-box LC-MS that names one box is the same
+    // failure one column over.
     await build();
     fireEvent.change(screen.getByLabelText("Add one of their systems"), { target: { value: "41" } });
     fireEvent.click(screen.getByRole("button", { name: "Save systems" }));
     await waitFor(() => expect(saveProposalSystems).toHaveBeenCalled());
     const rows = saveProposalSystems.mock.calls[0][1]!;
     expect(rows).toHaveLength(2);
-    expect(rows[1]).toEqual({ instrumentId: 41, name: "LC-MS 2 · AV-002", model: "LCMS-8060NX", note: "" });
+    expect(rows[1]).toEqual({
+      instrumentId: 41, name: "LC-MS 2 · AV-002", model: "LCMS-8060NX",
+      note: "Console LCMS-8060NX; Autosampler SIL-40; Roughing Pump E2M18 x2",
+    });
+  });
+
+  it("leaves the filled-in modules editable - they are offered, not imposed", async () => {
+    await build();
+    fireEvent.change(screen.getByLabelText("Add one of their systems"), { target: { value: "41" } });
+    fireEvent.change(screen.getByLabelText("System 2 notes"), { target: { value: "ESI source only" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save systems" }));
+    await waitFor(() => expect(saveProposalSystems).toHaveBeenCalled());
+    expect(saveProposalSystems.mock.calls[0][1]![1].note).toBe("ESI source only");
   });
 
   it("takes a blank row for a machine the shop has never touched", async () => {

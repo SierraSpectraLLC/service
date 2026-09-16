@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, orgs } from "@/db/schema";
+import { assets, instruments, orgs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { quoteById } from "@/lib/invoiceData";
 import { proposalForQuote } from "@/lib/proposalData";
+import { fleetSystemRow } from "@/lib/proposal";
 import ProposalBuilder from "@/components/ProposalBuilder";
 import StartProposalButton from "@/components/StartProposalButton";
 import { EmptyState, Id, PageHead } from "@/components/ui";
@@ -60,6 +61,16 @@ export default async function ProposalPage({ params }: { params: Promise<{ id: s
   const fleet = await db.select().from(instruments)
     .where(and(eq(instruments.ownerOrgId, full.row.orgId), eq(instruments.archived, false)))
     .catch(() => []);
+  /* And what is IN each of them. A service contract on an LC-MS covers seven
+     boxes; the table listed one, because the picker had nothing else to
+     offer. See lib/proposal.fleetSystemRow for what a pick fills in. */
+  const modules = fleet.length
+    ? await db.select({
+      instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, sortOrder: assets.sortOrder,
+    }).from(assets).where(inArray(assets.instrumentId, fleet.map((i) => i.id)))
+      .orderBy(asc(assets.sortOrder), asc(assets.id))
+      .catch(() => [])
+    : [];
 
   return (
     <div className="container">
@@ -98,8 +109,11 @@ export default async function ProposalPage({ params }: { params: Promise<{ id: s
            and the tag either way so two LC-MS systems are tellable apart. */
         fleet={fleet.map((i) => ({
           id: i.id,
+          ...fleetSystemRow(
+            { label: [i.name.trim() || i.model.trim(), i.externalId].filter(Boolean).join(" · "), model: i.model },
+            modules.filter((m) => m.instrumentId === i.id),
+          ),
           label: [i.name.trim() || i.model.trim(), i.externalId].filter(Boolean).join(" · "),
-          model: i.model,
         }))}
       />
     </div>

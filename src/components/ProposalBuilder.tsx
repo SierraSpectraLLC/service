@@ -16,7 +16,12 @@ export type SystemDraft = {
   instrumentId: number | null; name: string; model: string; note: string;
 };
 /** A system the client already has on file, offered rather than retyped. */
-export type FleetOption = { id: number; label: string; model: string };
+/**
+ * One of the client's systems, ready to drop into the table: the page has
+ * already asked lib/proposal.fleetSystemRow what its modules make of it, so
+ * the picker is a pick and not a second opinion.
+ */
+export type FleetOption = { id: number; label: string; model: string; note: string };
 
 /**
  * The proposal, edited.
@@ -119,15 +124,15 @@ export default function ProposalBuilder({
             ＋ System
           </button>
           {/* The client's own fleet. Adding a system they already have on file
-              should be a pick: the name and model are already right, and a
-              retyped model number is how a proposal covers a machine nobody
-              can find in the record afterwards. */}
+              should be a pick: the name, the model and the modules under it
+              are already right, and a retyped model number is how a proposal
+              covers a machine nobody can find in the record afterwards. */}
           {fleet.length > 0 && (
             <select aria-label="Add one of their systems" value=""
               onChange={(e) => {
                 const hit = fleet.find((f) => String(f.id) === e.target.value);
                 if (!hit) return;
-                setSys([...sys, { instrumentId: hit.id, name: hit.label, model: hit.model, note: "" }]);
+                setSys([...sys, { instrumentId: hit.id, name: hit.label, model: hit.model, note: hit.note }]);
               }} style={{ width: "auto" }}>
               <option value="">Add one of theirs...</option>
               {fleet.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}

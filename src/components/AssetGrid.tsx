@@ -71,6 +71,13 @@ export default function AssetGrid({ instrumentId, kinds, models, owners, existin
   existing?: ServeTarget[];
   onDone?: () => void;
 }) {
+  /* The catalog hands its terms back in the order somebody entered them,
+     which is the one order nobody scans a list in. Every other picker over
+     the catalog sorts its own options (CatalogSelect, PickOrAdd); the two
+     raw selects in this file and the filter next door now do the same. */
+  const typeList = [...new Set(kinds.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const modelList = (kind: string) =>
+    [...(models[kind] ?? [])].sort((a, b) => a.name.localeCompare(b.name));
   const [rows, setRows] = useState<Row[]>([blank(kinds[0] ?? ""), blank(kinds[0] ?? ""), blank(kinds[0] ?? "")]);
   const [error, setError] = useState("");
   const [failures, setFailures] = useState<{ row: number; error: string }[]>([]);
@@ -212,7 +219,7 @@ export default function AssetGrid({ instrumentId, kinds, models, owners, existin
                         onChange={(e) => setCell(i, "kind", e.target.value)}
                         className="t-small" style={{ width: "100%", padding: "3px 4px" }}>
                         <option value="">-</option>
-                        {kinds.map((k) => <option key={k}>{k}</option>)}
+                        {typeList.map((k) => <option key={k}>{k}</option>)}
                       </select>
                     ) : c.key === "model" ? (
                       <>
@@ -224,7 +231,7 @@ export default function AssetGrid({ instrumentId, kinds, models, owners, existin
                           onPaste={(e) => onPaste(e, i, ci)}
                           className="t-small" style={{ width: "100%", padding: "3px 4px" }} />
                         <datalist id={`grid-models-${r.kind}`}>
-                          {(models[r.kind] ?? []).map((m) => (
+                          {modelList(r.kind).map((m) => (
                             <option key={m.name} value={m.name}>{m.manufacturer}</option>
                           ))}
                         </datalist>

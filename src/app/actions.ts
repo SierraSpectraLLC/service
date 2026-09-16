@@ -859,7 +859,18 @@ export async function setInstrumentLead(instrumentId: number, lead: string) {
  * to be found the hard way.
  */
 export async function createInstrument(
-  data: { externalId: string; client: string; category?: string; priority: number; lead?: string },
+  data: {
+    externalId: string; client: string; category?: string; priority: number; lead?: string;
+    /**
+     * Whose system it is, when the page knows. The client's own Fleet tab
+     * does: "add a system" there means "add one of THEIRS", and leaving the
+     * owner to be set afterwards is the step that got skipped, which is how
+     * a fleet page ends up listing none of a client's machines. Staff only,
+     * and checked against what this reader can see - the same rule
+     * createAsset applies to a unit's owner.
+     */
+    ownerOrgId?: number | null;
+  },
 ): Promise<{ id?: number; error?: string }> {
   // Editors, not just staff: LabZen adds their internal systems themselves.
   const u = await requireEditor();
@@ -871,6 +882,14 @@ export async function createInstrument(
   if (clash) return { error: `${clash.externalId} is already used by another system` };
   let lead = (data.lead ?? "").trim();
   if (lead && !(await assignableNames(u)).has(lead)) lead = "";
+  /* Checked BEFORE the insert, so an owner this reader may not name refuses
+     the whole add rather than leaving a system on the books with nobody's
+     name on it. */
+  const wantsOwner = data.ownerOrgId ?? null;
+  if (wantsOwner !== null) {
+    if (!isHouse(u.role)) return { error: "Only the shop can say whose system it is" };
+    if (!(await visibleOrgs(u)).some((o) => o.id === wantsOwner)) return { error: "Not found" };
+  }
   const [row] = await db.insert(instruments).values({
     tenantOrgId: myTenantOrgId(u),
     // model stays blank: the system is named by the assets added to it
@@ -924,6 +943,13 @@ export async function createInstrument(
       actorEmail: u.email, actorName: u.name, lead,
       instrumentId: row.id, externalId: row.externalId, label: "",
     });
+  }
+  /* The owner the page named, through the one function that knows what
+     ownership entails: the share that keeps them able to see their own
+     machine, the client label rule, and its own audit line. */
+  if (wantsOwner !== null) {
+    const owned = await setSystemOwner(row.id, wantsOwner);
+    if (owned.error) return { error: owned.error };
   }
   await generateCheckout(row.id, { id: null, kind: "system", model: "", serial: "" }, u.email, row.tenantOrgId);
   // Whatever this kind of system needs on the bench, per the catalog.
