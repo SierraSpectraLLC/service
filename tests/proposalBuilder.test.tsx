@@ -8,7 +8,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-type SystemArg = { instrumentId: number | null; name: string; model: string; note: string };
+type SystemArg = { instrumentId: number | null; name: string; model: string; modules: string; note: string };
 type TierArg = { key: string; name: string; annualCents: number };
 type SectionArg = { kind: string; heading: string; body: string };
 
@@ -48,7 +48,7 @@ const build = async (over: Record<string, unknown> = {}) => {
     <ProposalBuilder
       proposalId={7} quoteId={5}
       header={{ title: "Service Contract Proposal", subtitle: "", pricingValid: "30 days from issue", recommendedTier: "essential" }}
-      systems={[{ instrumentId: null, name: "Sciex TripleTOF", model: "6600", note: "ESI source" }]}
+      systems={[{ instrumentId: null, name: "Sciex TripleTOF", model: "6600", modules: "", note: "ESI source" }]}
       tiers={TIERS}
       sections={[
         { kind: "prose", heading: "Executive Summary", body: "" },
@@ -58,7 +58,8 @@ const build = async (over: Record<string, unknown> = {}) => {
       fleet={[{
         id: 41, label: "LC-MS 2 · AV-002", model: "LCMS-8060NX",
         // What its modules make of it - see lib/proposal.fleetSystemRow.
-        note: "Console LCMS-8060NX; Autosampler SIL-40; Roughing Pump E2M18 x2",
+        modules: "Console | LCMS-8060NX\nAutosampler | SIL-40\nRoughing Pump x2 | E2M18",
+        note: "",
       }]}
       {...over} />,
   );
@@ -78,17 +79,21 @@ describe("adding a system", () => {
     expect(rows).toHaveLength(2);
     expect(rows[1]).toEqual({
       instrumentId: 41, name: "LC-MS 2 · AV-002", model: "LCMS-8060NX",
-      note: "Console LCMS-8060NX; Autosampler SIL-40; Roughing Pump E2M18 x2",
+      modules: "Console | LCMS-8060NX\nAutosampler | SIL-40\nRoughing Pump x2 | E2M18",
+      note: "",
     });
   });
 
   it("leaves the filled-in modules editable - they are offered, not imposed", async () => {
     await build();
     fireEvent.change(screen.getByLabelText("Add one of their systems"), { target: { value: "41" } });
+    fireEvent.change(screen.getByLabelText("System 2 modules"), { target: { value: "Mass Spec | QTRAP 6500" } });
     fireEvent.change(screen.getByLabelText("System 2 notes"), { target: { value: "ESI source only" } });
     fireEvent.click(screen.getByRole("button", { name: "Save systems" }));
     await waitFor(() => expect(saveProposalSystems).toHaveBeenCalled());
-    expect(saveProposalSystems.mock.calls[0][1]![1].note).toBe("ESI source only");
+    const row = saveProposalSystems.mock.calls[0][1]![1];
+    expect(row.modules).toBe("Mass Spec | QTRAP 6500");
+    expect(row.note).toBe("ESI source only");
   });
 
   it("takes a blank row for a machine the shop has never touched", async () => {

@@ -68,6 +68,25 @@ describe("renderDocx", () => {
     // US Letter with the guide's margins, in twips.
     expect(doc).toMatch(/w:pgSz w:w="12240" w:h="15840"/);
     expect(doc).toMatch(/w:pgMar[^>]*w:top="1440"[^>]*w:right="1080"[^>]*w:bottom="900"[^>]*w:left="1080"/);
+    // This sample is a proposal but sets no section breaks, so the Word file
+    // carries none either - the flag is the document's, not the renderer's.
+    expect(doc).not.toContain("w:pageBreakBefore");
+  }, SLOW);
+
+  it("breaks the page before each section when the document asks, and never before the first block", async () => {
+    const zip = await JSZip.loadAsync(await renderDocx({
+      ...spec, sectionBreaks: true,
+      blocks: [
+        { kind: "title", text: "Service Contract Proposal", sub: "" },
+        { kind: "head", text: "One" },
+        { kind: "para", text: "A sentence." },
+        { kind: "head", text: "Two" },
+      ],
+    }));
+    const doc = await zip.file("word/document.xml")!.async("string");
+    expect([...doc.matchAll(/w:pageBreakBefore/g)]).toHaveLength(2);
+    // The title opens the file; a break there would be a blank first sheet.
+    expect(doc.indexOf("w:pageBreakBefore")).toBeGreaterThan(doc.indexOf("Service Contract Proposal"));
   }, SLOW);
 });
 
@@ -108,6 +127,38 @@ describe("renderPdf", () => {
     const docx = await renderDocx(q);
     if (out) writeFileSync(join(out, "quote.docx"), docx);
     expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1);
+  }, SLOW);
+
+  it("puts each section on a page of its own when the document asks for it", async () => {
+    // A proposal is read a section at a time, and its title and summary
+    // block are its cover. A quote sets none of this - the same rule there
+    // would turn one page of price into five.
+    const heads = ["One", "Two", "Three"];
+    const paged = await renderPdf({
+      ...spec, sectionBreaks: true,
+      blocks: [
+        { kind: "title", text: "Service Contract Proposal", sub: "" },
+        { kind: "facts", rows: [["Customer", "LabZen"]] },
+        ...heads.flatMap((text) => ([
+          { kind: "head" as const, text },
+          { kind: "para" as const, text: "A sentence under it." },
+        ])),
+      ],
+    });
+    // The cover, then one page per section - not a blank sheet in front.
+    expect((await PDFDocument.load(paged)).getPageCount()).toBe(heads.length + 1);
+
+    const together = await renderPdf({
+      ...spec,
+      blocks: [
+        { kind: "title", text: "Service Quote", sub: "" },
+        ...heads.flatMap((text) => ([
+          { kind: "head" as const, text },
+          { kind: "para" as const, text: "A sentence under it." },
+        ])),
+      ],
+    });
+    expect((await PDFDocument.load(together)).getPageCount()).toBe(1);
   }, SLOW);
 
   it("does not throw on the characters the standard fonts lack", async () => {

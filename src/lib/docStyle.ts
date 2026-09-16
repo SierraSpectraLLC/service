@@ -68,6 +68,14 @@ export type DocSpec = {
   operatorName: string;
   /** Footer line 1: who we are and how to reach us. */
   contactLine: string;
+  /**
+   * Whether each section heading starts a fresh page.
+   *
+   * True for a proposal - a twelve-page argument whose sections are read one
+   * at a time, and whose title and summary block are its cover. False for a
+   * quote, where the same rule would turn one page of price into five.
+   */
+  sectionBreaks?: boolean;
   blocks: ProposalBlock[];
 };
 

@@ -13,7 +13,10 @@ import { Panel } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 
 export type SystemDraft = {
-  instrumentId: number | null; name: string; model: string; note: string;
+  instrumentId: number | null; name: string; model: string;
+  /** What is in it, one per line as "Kind | Model" - see lib/proposal. */
+  modules: string;
+  note: string;
 };
 /** A system the client already has on file, offered rather than retyped. */
 /**
@@ -21,7 +24,7 @@ export type SystemDraft = {
  * already asked lib/proposal.fleetSystemRow what its modules make of it, so
  * the picker is a pick and not a second opinion.
  */
-export type FleetOption = { id: number; label: string; model: string; note: string };
+export type FleetOption = { id: number; label: string; model: string; modules: string; note: string };
 
 /**
  * The proposal, edited.
@@ -116,11 +119,21 @@ export default function ProposalBuilder({
             <button className="btn link t-meta" style={{ color: "var(--t-bad-fg)" }}
               aria-label={`Remove system ${i + 1}`}
               onClick={() => setSys(sys.filter((_, j) => j !== i))}>remove</button>
+            {/* What is in it. Each line becomes its own row under the system
+                on page one, with its model beside it - see lib/proposal. */}
+            <div style={{ flexBasis: "100%", paddingLeft: 16 }}>
+              <textarea value={r.modules} rows={Math.min(8, Math.max(2, r.modules.split("\n").length))}
+                aria-label={`System ${i + 1} modules`} placeholder={"Mass Spec | QTRAP 6500\nPump | G1312B Binary Pump"}
+                onChange={(e) => setSys(sys.map((x, j) => (j === i ? { ...x, modules: e.target.value } : x)))} />
+              <div className="field-hint">
+                One module per line, <b>Kind | Model</b>. Each gets its own row under the system.
+              </div>
+            </div>
           </div>
         ))}
         <div className="row-2" style={{ marginTop: 8, flexWrap: "wrap" }}>
           <button className="btn sm"
-            onClick={() => setSys([...sys, { instrumentId: null, name: "", model: "", note: "" }])}>
+            onClick={() => setSys([...sys, { instrumentId: null, name: "", model: "", modules: "", note: "" }])}>
             ＋ System
           </button>
           {/* The client's own fleet. Adding a system they already have on file
@@ -132,7 +145,7 @@ export default function ProposalBuilder({
               onChange={(e) => {
                 const hit = fleet.find((f) => String(f.id) === e.target.value);
                 if (!hit) return;
-                setSys([...sys, { instrumentId: hit.id, name: hit.label, model: hit.model, note: hit.note }]);
+                setSys([...sys, { instrumentId: hit.id, name: hit.label, model: hit.model, modules: hit.modules, note: hit.note }]);
               }} style={{ width: "auto" }}>
               <option value="">Add one of theirs...</option>
               {fleet.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}

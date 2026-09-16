@@ -990,6 +990,14 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
   font-size: var(--fs-body); font-weight: 700; color: var(--ink);
   margin: 12px 0 4px; break-after: avoid;
 }
+/* A proposal's sections are read one at a time, so each starts a page - the
+   title and the summary block above the first are its cover. The generated
+   PDF and Word file do the same, from the one flag on the document (see
+   lib/docStyle.DocSpec.sectionBreaks); a quote sets none of this, because
+   there the rule would turn one page of price into five. */
+@media print {
+  .doc.sections-paged .doc-head { break-before: page; }
+}
 .doc p { margin: 0 0 8px; }
 /* The figure a reader skips to - a tier's price, among its sentences. */
 .doc p.strong { font-weight: 700; }
@@ -1019,6 +1027,9 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 .doc-table th:first-child, .doc-table td:first-child { text-align: left; }
 .doc-table td { padding: 4px 8px; border: 1px solid var(--line); text-align: center; }
 .doc-table td:first-child { font-weight: 600; }
+/* A module under its system: indented, quieter, and never bolded by the
+   first-column rule above - the row above it is the thing being covered. */
+.doc-table td.sub { padding-left: 20px; color: var(--slate); font-weight: 400; }
 .doc-table tr { break-inside: avoid; }
 /* The price row of a comparison: the figure every other row is read against. */
 .doc-table tr.lead td { background: var(--coral-wash); font-weight: 700; }

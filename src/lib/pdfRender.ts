@@ -199,6 +199,10 @@ function drawBlock(s: Sheet, b: ProposalBlock) {
       return;
     }
     case "head":
+      /* A section of its own starts a page of its own. `y < TOP` is "this
+         page has something on it already", so a break never opens the
+         document with a blank sheet. */
+      if (s.spec.sectionBreaks && s.y < TOP) s.newPage();
       s.text(b.text, { font: s.f.bold, size: SIZE.h1, color: C.coral, before: 10, after: 5, keepNext: true });
       return;
     case "sub":
@@ -215,7 +219,7 @@ function drawBlock(s: Sheet, b: ProposalBlock) {
     case "table": {
       const n = b.head.length;
       const total = n <= 3 ? Math.round(TEXT_W * 0.66) : TEXT_W;
-      const shares = columnShares(b.head);
+      const shares = b.shares ?? columnShares(b.head);
       const unit = total / shares.reduce((a, x) => a + x, 0);
       const widths = shares.map((x) => Math.floor(x * unit));
       const aligns = b.head.map((_, i) => b.align?.[i] ?? "l");
