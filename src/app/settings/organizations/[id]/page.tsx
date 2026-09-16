@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/db";
 import { providerNameOf, providerNames } from "@/lib/providers";
-import { agreements, appSettings, assets, attachments, clientAllowlist, instruments, orgs, orgSites, remoteDevices, systemShares, users } from "@/db/schema";
+import { agreements, appSettings, assets, attachments, clientAllowlist, instruments, orgs, orgSites, remoteDevices, systemShares, users, vocabTerms } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { brandForTenant } from "@/lib/brand";
 import { shopDay } from "@/lib/shopday";
@@ -15,6 +15,9 @@ import AgreementsPanel from "@/components/AgreementsPanel";
 import BillingPolicyPanel from "@/components/BillingPolicyPanel";
 import PmPlanPanel from "@/components/PmPlanPanel";
 import FleetBriefCard from "@/components/FleetBriefCard";
+import { NewSystemButton } from "@/components/NewSystemDialog";
+import NewAssetForm from "@/components/NewAssetForm";
+import { directoryNames, visibleDirectory } from "@/lib/directory";
 import ShareClientButton from "@/components/ShareClientButton";
 import { providerLinks } from "@/db/schema";
 import { coverageForOrg, fleetCategories } from "@/lib/pmPlanData";
@@ -22,7 +25,7 @@ import { resolvePolicy } from "@/lib/billingPolicy";
 import { usageForAll } from "@/lib/agreementUsage";
 import { shopToday } from "@/lib/shopday";
 import { getAppearance } from "@/lib/appearanceData";
-import { isHouse, maySeeAgreements, readTenant, tenantOfOrg } from "@/lib/tenancy";
+import { forTenant, isHouse, maySeeAgreements, readTenant, tenantOfOrg } from "@/lib/tenancy";
 import { stageOf } from "@/lib/orgStage";
 import { siteLabel } from "@/lib/sites";
 import { tempState } from "@/lib/tempPassword";
@@ -167,6 +170,27 @@ export default async function OrgSettingsPage({ params, searchParams }: {
     ? { plans: [], rows: [] }
     : await coverageForOrg({ orgId: org.id, tenantOrgId: tenant, today });
   const pmCategories = org.isOperator ? [] : await fleetCategories(org.id, tenant);
+
+  /* What the Fleet tab needs to PUT equipment on the record, not just list
+     it: the catalog's system types and unit models, and who a system can be
+     led by. Their fleet page is where somebody sits with a client's asset
+     list; sending them to the registry to add a machine and then back here
+     to say whose it is, is the round trip that left fleets empty. */
+  const canAddFleet = isHouse(user.role) && !org.isOperator;
+  const [fleetVocab, fleetPeople] = canAddFleet
+    ? await Promise.all([
+      db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, tenant)),
+      visibleDirectory(user),
+    ])
+    : [[], []];
+  const systemTypes = [...new Set(fleetVocab.filter((v) => v.kind === "category").map((v) => v.name))]
+    .filter(Boolean).sort((a, b) => a.localeCompare(b));
+  const unitKinds = fleetVocab.filter((v) => v.kind === "asset_type").map((v) => v.name);
+  const unitModels: Record<string, string[]> = {};
+  for (const v of fleetVocab) {
+    if (v.kind !== "model" || !v.assetType) continue;
+    (unitModels[v.assetType] ??= []).push(v.name);
+  }
   // How many machines this organization has enrolled - the number the remote
   // tier is sold against, and what billing would eventually read.
   const deviceCount = (await db.select({ id: remoteDevices.id }).from(remoteDevices)
@@ -341,7 +365,13 @@ export default async function OrgSettingsPage({ params, searchParams }: {
               the hand-off below are things to DO with the fleet, and they read
               better under the list of what would be sent. */}
           <div className="card" style={{ marginBottom: 12 }}>
-            <div className="card-title" style={{ marginBottom: 8 }}>Systems</div>
+            <div className="row-2 al-center" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+              <div className="card-title" style={{ margin: 0 }}>Systems</div>
+              {canAddFleet && (
+                <NewSystemButton clients={[org.name]} categories={systemTypes}
+                  people={directoryNames(fleetPeople)} owner={{ id: org.id, name: org.name }} />
+              )}
+            </div>
             <DataTable
               cols={[
                 { key: "id", label: "ID", width: "90px" },
@@ -376,7 +406,13 @@ export default async function OrgSettingsPage({ params, searchParams }: {
             />
           </div>
           <div className="card" style={{ marginBottom: 12 }}>
-            <div className="card-title" style={{ marginBottom: 8 }}>Units</div>
+            <div className="row-2 al-center" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+              <div className="card-title" style={{ margin: 0 }}>Units</div>
+              {canAddFleet && (
+                <NewAssetForm owners={[]} kinds={unitKinds} models={unitModels}
+                  owner={{ id: org.id, name: org.name }} label="+ Unit" />
+              )}
+            </div>
             <DataTable
               cols={[
                 { key: "unit", label: "Unit", width: "minmax(180px, 2fr)" },

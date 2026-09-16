@@ -4,9 +4,84 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
-import { createBlankInvoice, createBlankQuote } from "@/app/actions";
+import { addOrg, createBlankInvoice, createBlankQuote } from "@/app/actions";
 
 export type ClientOption = { id: number; name: string };
+
+const NEW = "new";
+
+/**
+ * Who the paper is for - picked from the roster, or added right here.
+ *
+ * The roster is the only place a client could be created, so pricing work
+ * for somebody new meant leaving a half-typed quote, going to Clients,
+ * adding them, and coming back to start again. A new client is one field -
+ * a name - and nothing else about them is needed to put a price in front of
+ * them, so the picker takes it: the company is created (the same staff-only
+ * addOrg the roster runs, with its own plan check and audit) and selected,
+ * and the draft carries on.
+ */
+function ClientPicker({ clients, value, onPick, onAdded, disabled }: {
+  clients: ClientOption[];
+  value: number;
+  onPick: (id: number) => void;
+  onAdded: (c: ClientOption) => void;
+  disabled?: boolean;
+}) {
+  const [typing, setTyping] = useState(false);
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  const [pending, startTransition] = useTransition();
+
+  const add = () => {
+    const n = name.trim();
+    if (!n) return;
+    setError("");
+    startTransition(async () => {
+      const res = await addOrg(n, "client");
+      if (res?.error || !res?.id) { setError(res?.error ?? "That didn't save"); return; }
+      onAdded({ id: res.id, name: n });
+      toast({ message: `Added ${n}` });
+      setTyping(false);
+      setName("");
+    });
+  };
+
+  if (typing) {
+    return (
+      <div style={{ marginBottom: 8 }}>
+        <div className="row-2" style={{ flexWrap: "nowrap" }}>
+          <input autoFocus value={name} placeholder="Company name" aria-label="New client name"
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
+          <button type="button" className="btn sm accent" style={{ flexShrink: 0 }}
+            disabled={pending || !name.trim()} onClick={add}>
+            {pending ? "Adding..." : "Add"}
+          </button>
+          <button type="button" className="btn sm" style={{ flexShrink: 0 }} disabled={pending}
+            onClick={() => { setTyping(false); setName(""); setError(""); }}>
+            List
+          </button>
+        </div>
+        <div className="field-hint">
+          Added to the client roster, and everything else about them - terms, sites, people - is set there later.
+        </div>
+        {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 4 }}>{error}</div>}
+      </div>
+    );
+  }
+  return (
+    <select value={value || ""} disabled={disabled} autoFocus style={{ marginBottom: 8 }}
+      onChange={(e) => {
+        if (e.target.value === NEW) { setTyping(true); onPick(0); return; }
+        onPick(parseInt(e.target.value) || 0);
+      }}>
+      <option value="">Pick the client</option>
+      {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      <option value={NEW}>+ New client...</option>
+    </select>
+  );
+}
 
 /**
  * Invoices and quotes with no job behind them: a deposit, a shipment, a
@@ -16,6 +91,8 @@ export type ClientOption = { id: number; name: string };
 export function NewInvoiceButton({ clients }: { clients: ClientOption[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  // A client added from inside the dialog joins the list for the rest of it.
+  const [roster, setRoster] = useState(clients);
   const [orgId, setOrgId] = useState(0);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
@@ -48,10 +125,8 @@ export function NewInvoiceButton({ clients }: { clients: ClientOption[] }) {
           </>
         }>
         <label>Who gets the bill</label>
-        <select value={orgId || ""} onChange={(e) => setOrgId(parseInt(e.target.value) || 0)} autoFocus>
-          <option value="">Pick the client</option>
-          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <ClientPicker clients={roster} value={orgId} onPick={setOrgId} disabled={pending}
+          onAdded={(c) => { setRoster((r) => [...r, c]); setOrgId(c.id); }} />
       </Dialog>
     </>
   );
@@ -67,6 +142,8 @@ const daysOut = (today: string, days: number) => {
 export function NewQuoteButton({ clients, today }: { clients: ClientOption[]; today: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  // A client added from inside the dialog joins the list for the rest of it.
+  const [roster, setRoster] = useState(clients);
   const [orgId, setOrgId] = useState(0);
   const [title, setTitle] = useState("");
   const [expiresOn, setExpiresOn] = useState("");
@@ -88,7 +165,7 @@ export function NewQuoteButton({ clients, today }: { clients: ClientOption[]; to
         title, expiresOn, depositPct: Number(depositPct) || 0,
       });
       if (res.error || !res.id) { setError(res.error ?? "That didn't save"); return; }
-      toast({ message: `Drafted a quote for ${clients.find((c) => c.id === orgId)?.name ?? "the client"}` });
+      toast({ message: `Drafted a quote for ${roster.find((c) => c.id === orgId)?.name ?? "the client"}` });
       router.push(`/money/quotes/${res.id}`);
     });
   };
@@ -112,11 +189,8 @@ export function NewQuoteButton({ clients, today }: { clients: ClientOption[]; to
           </>
         }>
         <label>Who it is for</label>
-        <select value={orgId || ""} onChange={(e) => setOrgId(parseInt(e.target.value) || 0)} autoFocus
-          style={{ marginBottom: 8 }}>
-          <option value="">Pick the client</option>
-          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <ClientPicker clients={roster} value={orgId} onPick={setOrgId} disabled={pending}
+          onAdded={(c) => { setRoster((r) => [...r, c]); setOrgId(c.id); }} />
         <label>What it is for</label>
         <input value={title} placeholder="Relocate the GC-2010 to lab 4"
           onChange={(e) => setTitle(e.target.value)} style={{ marginBottom: 8 }} />

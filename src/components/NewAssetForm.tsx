@@ -15,15 +15,25 @@ const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: ""
  * the shelf, with no system to attach it to yet. It lands as a Spare and can be
  * installed into a system later (from here or from the system's Assets section).
  */
-export default function NewAssetForm({ owners, kinds, models }: {
+export default function NewAssetForm({ owners, kinds, models, owner, label }: {
   /** The organizations a unit may belong to - see lib/owner.ownerChoices. */
   owners: OrgLite[]; kinds: string[];
   // Catalog models per type - the only source; no free text (see CatalogSelect).
   models: Record<string, string[]>;
+  /**
+   * Whose unit it is, when the page already knows - a client's own Fleet tab
+   * does. The owner picker goes away and every unit added here lands as
+   * theirs, which is the step that got forgotten when the only door was the
+   * registry's own form.
+   */
+  owner?: OrgLite;
+  /** What the button says. "+ New asset" on the registry; "+ Unit" on a fleet. */
+  label?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<typeof empty>(empty);
+  const blank = owner ? { ...empty, owner: owner.name } : empty;
+  const [draft, setDraft] = useState<typeof empty>(blank);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [pending, startTransition] = useTransition();
@@ -36,10 +46,13 @@ export default function NewAssetForm({ owners, kinds, models }: {
     startTransition(async () => {
       // Picked off the organization list, the owner is linked as well as
       // named; typed freehand it is a name only (a company not on the platform).
-      const res = await createAsset(null, { ...draft, ownerOrgId: orgNamed(draft.owner, owners)?.id ?? null });
+      const res = await createAsset(null, {
+        ...draft,
+        ownerOrgId: owner ? owner.id : orgNamed(draft.owner, owners)?.id ?? null,
+      });
       if (res?.error) { setError(res.error); return; }
       setSaved(`Added ${draft.kind} ${draft.model || draft.serial} to stock`);
-      setDraft({ ...empty, kind: draft.kind, owner: draft.owner, location: draft.location });
+      setDraft({ ...blank, kind: draft.kind, owner: draft.owner, location: draft.location });
       setTimeout(() => setSaved(""), 4000);
       router.refresh();
     });
@@ -49,19 +62,21 @@ export default function NewAssetForm({ owners, kinds, models }: {
     <>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <button className="btn sm primary" onClick={() => { setOpen((v) => !v); setError(""); }}>
-          {open ? "Cancel" : "+ New asset"}
+          {open ? "Cancel" : label ?? "+ New asset"}
         </button>
         {saved && <span className="t-small" style={{ color: "var(--t-good-fg)", fontWeight: 700 }}>{saved} ✓</span>}
       </div>
 
       {open && (
-        <Dialog open onClose={() => { setOpen(false); setDraft(empty); }} title="New asset"
-          context="Goes onto the shelf as a spare - no system needed. Attach it to one whenever it's used."
+        <Dialog open onClose={() => { setOpen(false); setDraft(blank); }} title={owner ? `New unit for ${owner.name}` : "New asset"}
+          context={owner
+            ? `Lands as ${owner.name}'s, on the shelf as a spare. Install it into one of their systems whenever it is used.`
+            : "Goes onto the shelf as a spare - no system needed. Attach it to one whenever it's used."}
           footer={
             <>
               <DialogStatus error={error} problem={problem}
                 ok={saved ? `${saved} ✓` : "Type, owner and location stay put so a shipment goes in fast."} />
-              <button className="btn" onClick={() => { setOpen(false); setDraft(empty); }} disabled={pending}>Done</button>
+              <button className="btn" onClick={() => { setOpen(false); setDraft(blank); }} disabled={pending}>Done</button>
               <button className="btn accent" onClick={submit} disabled={pending || !!problem}>
                 {pending ? "Saving..." : "Add to stock"}
               </button>
@@ -88,8 +103,12 @@ export default function NewAssetForm({ owners, kinds, models }: {
             <div><label>Manufacturer</label><input value={draft.manufacturer} onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })} placeholder="Shimadzu" /></div>
             <div>
               <label>Owner</label>
-              <PickOrAdd value={draft.owner} options={owners.map((o) => o.name)} newLabel="+ New owner..." placeholder="Client name"
-                onChange={(owner) => setDraft({ ...draft, owner })} />
+              {owner
+                ? <div className="t-body" style={{ paddingTop: 6, fontWeight: 600 }}>{owner.name}</div>
+                : (
+                  <PickOrAdd value={draft.owner} options={owners.map((o) => o.name)} newLabel="+ New owner..." placeholder="Client name"
+                    onChange={(who) => setDraft({ ...draft, owner: who })} />
+                )}
             </div>
             <div><label>Where it is</label><input value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="Warehouse, shelf B" /></div>
           </div>

@@ -31,7 +31,8 @@ export default function AssetRegistryFilter({ q, kind, status, owner, group = ""
     <>
       <select value={kind} aria-label="Filter by kind" onChange={(e) => go({ kind: e.target.value })} className="t-small" style={{ width: "auto" }}>
         <option value="">All kinds</option>
-        {kinds.map((k) => <option key={k}>{k}</option>)}
+        {[...new Set(kinds.filter(Boolean))].sort((a, b) => a.localeCompare(b))
+          .map((k) => <option key={k}>{k}</option>)}
       </select>
       {owners.length > 0 && (
         <select value={owner} aria-label="Filter by owner" onChange={(e) => go({ owner: e.target.value })} className="t-small" style={{ width: "auto" }}>

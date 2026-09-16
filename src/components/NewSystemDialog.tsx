@@ -16,6 +16,13 @@ export type NewSystemOptions = {
   categories: string[];
   /** People this reader may hand a system to. Empty hides the picker. */
   people: string[];
+  /**
+   * Whose system it is, when the page opening the form already knows - a
+   * client's own Fleet tab does. The client picker goes away and the system
+   * is created owned by them, which is what "add a system" means on a page
+   * that is about one company's equipment.
+   */
+  owner?: { id: number; name: string };
 };
 
 const BLANK = { externalId: "", client: "", category: "", priority: "", lead: "" };
@@ -33,11 +40,11 @@ const BLANK = { externalId: "", client: "", category: "", priority: "", lead: ""
  * on its page (lib/systemLabel), so asking for a name here invites a second
  * spelling of a thing the record can already say for itself.
  */
-export default function NewSystemDialog({ clients, categories, people, onClose }: NewSystemOptions & {
+export default function NewSystemDialog({ clients, categories, people, owner, onClose }: NewSystemOptions & {
   onClose: () => void;
 }) {
   const router = useRouter();
-  const [draft, setDraft] = useState(BLANK);
+  const [draft, setDraft] = useState(owner ? { ...BLANK, client: owner.name } : BLANK);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -50,6 +57,7 @@ export default function NewSystemDialog({ clients, categories, people, onClose }
       const res = await createInstrument({
         externalId: draft.externalId, client: draft.client, category: draft.category,
         priority: parseInt(draft.priority) || 99, lead: draft.lead,
+        ...(owner ? { ownerOrgId: owner.id } : {}),
       });
       // A tag already on the books is the one thing somebody typing this in
       // gets wrong, and it arrives as a sentence rather than as a crash.
@@ -80,8 +88,14 @@ export default function NewSystemDialog({ clients, categories, people, onClose }
         </div>
         <div>
           <label>Client</label>
-          <PickOrAdd value={draft.client} options={clients} newLabel="+ New client..." placeholder="New client name"
-            onChange={(client) => setDraft({ ...draft, client })} />
+          {owner
+            /* Named, not picked: on their own page the answer is settled, and
+               a picker offering every other client is a way to get it wrong. */
+            ? <div className="t-body" style={{ paddingTop: 6, fontWeight: 600 }}>{owner.name}</div>
+            : (
+              <PickOrAdd value={draft.client} options={clients} newLabel="+ New client..." placeholder="New client name"
+                onChange={(client) => setDraft({ ...draft, client })} />
+            )}
         </div>
         <div>
           <label>Priority</label>
@@ -119,13 +133,16 @@ export default function NewSystemDialog({ clients, categories, people, onClose }
  * The board holds the trigger itself, because it sits in a row with that
  * page's other actions; the registry only needs "a button that opens this".
  */
-export function NewSystemButton({ clients, categories, people }: NewSystemOptions) {
+export function NewSystemButton({ clients, categories, people, owner, label }: NewSystemOptions & {
+  /** What the button says. "+ New system" on the registry; "+ System" on a fleet. */
+  label?: string;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button className="btn sm primary" onClick={() => setOpen(true)}>+ New system</button>
+      <button className="btn sm primary" onClick={() => setOpen(true)}>{label ?? "+ New system"}</button>
       {open && (
-        <NewSystemDialog clients={clients} categories={categories} people={people}
+        <NewSystemDialog clients={clients} categories={categories} people={people} owner={owner}
           onClose={() => setOpen(false)} />
       )}
     </>
