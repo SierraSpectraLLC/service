@@ -40,11 +40,12 @@ const run = (text: string, o: RunOpts = {}) => new TextRun({
   color: o.color ?? DOC_COLOR.ink, font: o.mono ? "Consolas" : "Arial", allCaps: o.caps,
 });
 
-type ParaOpts = { before?: number; after?: number; line?: number; keepNext?: boolean; align?: (typeof AlignmentType)[keyof typeof AlignmentType]; bullet?: boolean; indent?: number };
+type ParaOpts = { before?: number; after?: number; line?: number; keepNext?: boolean; align?: (typeof AlignmentType)[keyof typeof AlignmentType]; bullet?: boolean; indent?: number; pageBreakBefore?: boolean };
 const para = (children: TextRun[], o: ParaOpts = {}) => new Paragraph({
   children,
   spacing: { before: tw(o.before ?? 0), after: tw(o.after ?? 0), line: o.line ?? LINE, lineRule: LineRuleType.AUTO },
   keepNext: o.keepNext,
+  pageBreakBefore: o.pageBreakBefore,
   alignment: o.align,
   indent: o.indent ? { left: tw(o.indent) } : undefined,
   numbering: o.bullet ? { reference: "bullets", level: 0 } : undefined,
@@ -152,7 +153,7 @@ function facts(rows: [string, string][]): Table {
 function table(b: Extract<ProposalBlock, { kind: "table" }>): Table {
   const n = b.head.length;
   const total = n <= 3 ? Math.round(TEXT_W * 0.66) : TEXT_W;
-  const shares = columnShares(b.head);
+  const shares = b.shares ?? columnShares(b.head);
   const unit = total / shares.reduce((a, s) => a + s, 0);
   const widths = shares.map((s) => Math.floor(s * unit));
   const align = (i: number) => (b.align?.[i] === "r" ? AlignmentType.RIGHT : AlignmentType.LEFT);
@@ -208,7 +209,12 @@ function callout(b: Extract<ProposalBlock, { kind: "callout" }>): Table {
   });
 }
 
-function blockToDocx(b: ProposalBlock): (Paragraph | Table)[] {
+/**
+ * `breakBefore` is set on a section heading when the document puts each
+ * section on its own page - never on the first block, which would open the
+ * file with a blank sheet.
+ */
+function blockToDocx(b: ProposalBlock, breakBefore = false): (Paragraph | Table)[] {
   switch (b.kind) {
     case "title":
       return [
@@ -218,7 +224,8 @@ function blockToDocx(b: ProposalBlock): (Paragraph | Table)[] {
     case "facts":
       return [facts(b.rows), para([], { after: 8, line: 240 })];
     case "head":
-      return [para([run(b.text, { bold: true, size: SIZE.h1, color: DOC_COLOR.coral })], { before: 10, after: 5, line: 240, keepNext: true })];
+      return [para([run(b.text, { bold: true, size: SIZE.h1, color: DOC_COLOR.coral })],
+        { before: 10, after: 5, line: 240, keepNext: true, pageBreakBefore: breakBefore })];
     case "sub":
       return [para([run(b.text, { bold: true, size: SIZE.h2 })], { before: 6, after: 4, line: 240, keepNext: true })];
     case "para":
@@ -269,7 +276,7 @@ export async function renderDocx(spec: DocSpec): Promise<Buffer> {
       },
       headers: { default: header(spec) },
       footers: { default: footer(spec) },
-      children: spec.blocks.flatMap(blockToDocx),
+      children: spec.blocks.flatMap((b, i) => blockToDocx(b, Boolean(spec.sectionBreaks) && i > 0)),
     }],
   });
   return Packer.toBuffer(doc);

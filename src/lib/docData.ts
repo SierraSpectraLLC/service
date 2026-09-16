@@ -114,6 +114,9 @@ export async function proposalDocSpec(quoteId: number): Promise<DocOf | null> {
       number: p.row.number || full.row.number,
       operatorName: operator,
       contactLine: docContactLine(brand),
+      // The long document: title and summary block are its cover, and each
+      // section is read on a page of its own. See docStyle.DocSpec.
+      sectionBreaks: true,
       blocks,
     },
   };

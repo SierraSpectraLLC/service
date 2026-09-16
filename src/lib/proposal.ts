@@ -194,6 +194,12 @@ export type ProposalBlock =
   | {
       kind: "table"; head: string[]; rows: string[][]; lead?: boolean;
       foot?: string[][]; align?: ("l" | "r")[]; mono?: number[]; highlightCol?: number;
+      /**
+       * How the width is shared between the columns, when the generic rule
+       * (docStyle.columnShares, which reads the headings) gets it wrong for
+       * a particular table. Same length as `head`.
+       */
+      shares?: number[];
     }
   | { kind: "callout"; text: string; body: string[] };
 
@@ -339,6 +345,11 @@ export function proposalBlocks(p: ProposalInput): ProposalBlock[] {
           ...parseModules(r.modules).map((m) => ["", `    ${m.kind}`, m.model, ""]),
         ]),
         mono: [2],
+        /* Model carries the most: it is set in Consolas, which is wide, and a
+           module list is mostly model numbers - "G4225A HiP Degasser" wrapped
+           to two lines while the Instrument column sat half empty. The number
+           column takes the least a column can. */
+        shares: [0.35, 1.3, 1.5, 1.3],
       });
       continue;
     }

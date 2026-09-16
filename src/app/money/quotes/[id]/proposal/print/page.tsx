@@ -62,7 +62,7 @@ export default async function ProposalPrintPage({ params }: { params: Promise<{ 
   });
 
   return (
-    <div className="container doc">
+    <div className="container doc sections-paged">
       <div className="crumb no-print">
         <Link href="/money/quotes">Quotes</Link> ›{" "}
         <Link href={`/money/quotes/${id}`}>{full.row.number}</Link> ›{" "}

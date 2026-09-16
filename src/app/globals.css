@@ -990,6 +990,14 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
   font-size: var(--fs-body); font-weight: 700; color: var(--ink);
   margin: 12px 0 4px; break-after: avoid;
 }
+/* A proposal's sections are read one at a time, so each starts a page - the
+   title and the summary block above the first are its cover. The generated
+   PDF and Word file do the same, from the one flag on the document (see
+   lib/docStyle.DocSpec.sectionBreaks); a quote sets none of this, because
+   there the rule would turn one page of price into five. */
+@media print {
+  .doc.sections-paged .doc-head { break-before: page; }
+}
 .doc p { margin: 0 0 8px; }
 /* The figure a reader skips to - a tier's price, among its sentences. */
 .doc p.strong { font-weight: 700; }

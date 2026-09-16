@@ -381,5 +381,8 @@ describe("a system taken off the client's fleet", () => {
       ["", "    Autosampler", "SIL-40", ""],
       ["", "    Roughing Pump x2", "E2M18", ""],
     ]);
+    // Model carries the most: it is mono, and a module list is model numbers.
+    expect(table.shares).toEqual([0.35, 1.3, 1.5, 1.3]);
+    expect(table.shares!).toHaveLength(table.head.length);
   });
 });
