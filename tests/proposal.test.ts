@@ -12,8 +12,8 @@
 // nothing printed over an empty section.
 import { describe, expect, it } from "vitest";
 import {
-  HOUSE_SECTIONS, HOUSE_TIERS, houseTemplate, parseBody, parseBullets, parseFeatures,
-  proposalBlocks, proposalValueCents, SECTION_KINDS, systemSummary, tierMatrix,
+  fleetSystemRow, HOUSE_SECTIONS, HOUSE_TIERS, houseTemplate, moduleList, parseBody, parseBullets,
+  parseFeatures, proposalBlocks, proposalValueCents, SECTION_KINDS, systemSummary, tierMatrix,
   type ProposalInput, type Tier,
 } from "@/lib/proposal";
 
@@ -301,5 +301,52 @@ describe("the systems, as one line", () => {
   it("falls back to the instrument's name where nobody typed a model", () => {
     expect(systemSummary([{ name: "Nitrogen Gas Generator", model: "", note: "" }]))
       .toBe("Nitrogen Gas Generator");
+  });
+});
+
+/**
+ * What picking one of the client's own systems fills in.
+ *
+ * A service contract on an LC-MS covers seven boxes, and the covered-systems
+ * table listed one - whatever somebody retyped into the Model column. The
+ * modules are on file; the row says what they are.
+ */
+describe("a system taken off the client's fleet", () => {
+  const stack = [
+    { kind: "Console", model: "LCMS-8060NX", sortOrder: 1 },
+    { kind: "Autosampler", model: "SIL-40", sortOrder: 2 },
+    { kind: "Roughing Pump", model: "E2M18", sortOrder: 3 },
+    { kind: "Roughing Pump", model: "E2M18", sortOrder: 4 },
+  ];
+
+  it("lists every module in the order they sit in, counting the repeats", () => {
+    expect(moduleList(stack)).toBe("Console LCMS-8060NX; Autosampler SIL-40; Roughing Pump E2M18 x2");
+  });
+
+  it("names a module by its kind and model, so a reader can find it in their lab", () => {
+    expect(moduleList([{ kind: "Degasser", model: "" }, { kind: "", model: "CTO-40" }]))
+      .toBe("Degasser; CTO-40");
+    expect(moduleList([{ kind: " ", model: " " }])).toBe("");
+    expect(moduleList([])).toBe("");
+  });
+
+  it("fills the row from the modules when the system has no model of its own", () => {
+    // A system entered since assets became how a system is described has a
+    // blank model, which is what left a pick landing two empty cells.
+    expect(fleetSystemRow({ label: "LC-MS 2 · AV-002", model: "" }, stack)).toEqual({
+      name: "LC-MS 2 · AV-002",
+      model: "LCMS-8060NX",
+      note: "Console LCMS-8060NX; Autosampler SIL-40; Roughing Pump E2M18 x2",
+    });
+  });
+
+  it("keeps the system's own model where it has one - an imported or older record", () => {
+    expect(fleetSystemRow({ label: "GC-MS · T-001", model: "GCMS-QP2020" }, stack).model).toBe("GCMS-QP2020");
+  });
+
+  it("leaves the notes empty for a system with nothing in it yet", () => {
+    expect(fleetSystemRow({ label: "New bench · T-009", model: "" }, [])).toEqual({
+      name: "New bench · T-009", model: "", note: "",
+    });
   });
 });
