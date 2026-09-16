@@ -68,7 +68,14 @@ export default async function ProposalPage({ params }: { params: Promise<{ id: s
         title={<>Service proposal <Id>{p.row.number}</Id></>}
         sub={`${org?.name ?? "The client"} · behind quote ${full.row.number}`}
         actions={
-          <a className="btn sm primary" href={`/money/quotes/${id}/proposal/print`}>Read it as paper</a>
+          <>
+            {/* The document itself, drawn in the house style from the same
+                blocks the print view shows - lib/docxRender and lib/pdfRender.
+                Send the PDF; keep the Word file. */}
+            <a className="btn sm accent" href={`/api/doc/proposal/${id}?format=pdf`} download>PDF</a>
+            <a className="btn sm" href={`/api/doc/proposal/${id}?format=docx`} download>Word</a>
+            <a className="btn sm primary" href={`/money/quotes/${id}/proposal/print`}>Read it as paper</a>
+          </>
         }
       />
       <ProposalBuilder

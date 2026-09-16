@@ -87,8 +87,18 @@ export type ProposalBlock =
    */
   | { kind: "para"; text: string; lead?: boolean; strong?: boolean }
   | { kind: "list"; items: string[] }
-  /** `lead` tints the first row: the price every other row is read against. */
-  | { kind: "table"; head: string[]; rows: string[][]; lead?: boolean }
+  /**
+   * `lead` tints the first row: the price every other row is read against.
+   * `foot` rows print bold under the body (a total). `align` is per column,
+   * "r" for numbers, dates and money - the guide right-aligns those and
+   * nothing else. `mono` names the columns set in Consolas: model, part and
+   * document numbers, so they can be read back over the phone. `highlightCol`
+   * shades one column Blush: the recommended tier in a comparison.
+   */
+  | {
+      kind: "table"; head: string[]; rows: string[][]; lead?: boolean;
+      foot?: string[][]; align?: ("l" | "r")[]; mono?: number[]; highlightCol?: number;
+    }
   | { kind: "callout"; text: string; body: string[] };
 
 /**
@@ -225,6 +235,7 @@ export function proposalBlocks(p: ProposalInput): ProposalBlock[] {
         kind: "table",
         head: ["#", "Instrument", "Model", "Notes"],
         rows: p.systems.map((r, i) => [String(i + 1), r.name, r.model || "(included)", r.note]),
+        mono: [2],
       });
       continue;
     }
@@ -236,7 +247,10 @@ export function proposalBlocks(p: ProposalInput): ProposalBlock[] {
       out.push(...parseBody(s.body, true));
       // The comparison's first row is the annual investment, and the document
       // has always tinted it: it is the figure every other row is read against.
-      out.push({ kind: "table", ...tierMatrix(p.tiers), lead: true });
+      // The recommended tier's column is shaded Blush, per the style guide;
+      // column 0 is the feature labels, so the first tier is column 1.
+      const rec = p.tiers.findIndex((t) => t.key === p.recommendedTier);
+      out.push({ kind: "table", ...tierMatrix(p.tiers), lead: true, ...(rec >= 0 ? { highlightCol: rec + 1 } : {}) });
       continue;
     }
     if (s.kind === "tier_detail") {
