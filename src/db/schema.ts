@@ -2386,6 +2386,41 @@ export const workOrders = pgTable("work_orders", {
   index("work_orders_state_idx").on(t.state),
 ]);
 
+/**
+ * A service report, as issued.
+ *
+ * The document a client is handed when a visit is finished: what was asked,
+ * what was found, what was fitted, what the contract absorbed. It is not an
+ * invoice and says so on its face - the money on it is there to show what the
+ * agreement just paid for.
+ *
+ * The report is FROZEN at issue, in `data`. A visit's report is countersigned
+ * and filed on the client's side, so re-rendering it from today's rows a year
+ * later - a rate card since changed, a part since repriced - would produce a
+ * different document under the same number. The rows stay the record of the
+ * work; this is the record of the paper.
+ *
+ * Several per job is ordinary: a job that takes three visits issues three
+ * reports, numbered _SR1 to _SR3 off the job's own number (lib/docNumber).
+ */
+export const serviceReports = pgTable("service_reports", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  workOrderId: integer("work_order_id").notNull().references(() => workOrders.id, { onDelete: "cascade" }),
+  // Who it was written for. Kept beside the job so a report survives a job
+  // losing its client the way an invoice does.
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "set null" }),
+  number: text("number").notNull(),
+  issuedOn: text("issued_on").notNull().default(""),   // YYYY-MM-DD in shop time
+  issuedBy: text("issued_by").notNull().default(""),
+  /** The whole document as issued - see lib/serviceReport.ServiceReport. */
+  data: jsonb("data").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("service_reports_wo_idx").on(t.workOrderId),
+  unique("service_report_number_unique").on(t.tenantOrgId, t.number),
+]);
+
 // ── The part catalog ────────────────────────────────────────────────────────
 // What a part number IS.
 //

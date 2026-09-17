@@ -4726,3 +4726,35 @@ ALTER TABLE "quotes" ADD COLUMN IF NOT EXISTS "closed_by" text NOT NULL DEFAULT 
 -- What a covered system is made of, one module per line as "Kind | Model".
 -- The proposal's covered-systems table gives each its own row.
 ALTER TABLE "proposal_systems" ADD COLUMN IF NOT EXISTS "modules" text NOT NULL DEFAULT '';
+
+-- The service report a client is handed when a visit is finished, frozen as
+-- issued. Several per job is ordinary - three visits, _SR1 to _SR3 - and the
+-- number is unique within the workspace, which is what makes two people
+-- pressing the button at once a failed insert rather than two SR4s.
+CREATE TABLE IF NOT EXISTS "service_reports" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "work_order_id" integer NOT NULL,
+  "org_id" integer,
+  "number" text NOT NULL,
+  "issued_on" text NOT NULL DEFAULT '',
+  "issued_by" text NOT NULL DEFAULT '',
+  "data" jsonb NOT NULL,
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "service_report_number_unique" UNIQUE ("tenant_org_id", "number")
+);
+CREATE INDEX IF NOT EXISTS "service_reports_wo_idx" ON "service_reports" ("work_order_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'service_reports_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "service_reports" ADD CONSTRAINT "service_reports_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'service_reports_work_order_id_work_orders_id_fk') THEN
+    ALTER TABLE "service_reports" ADD CONSTRAINT "service_reports_work_order_id_work_orders_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'service_reports_org_id_orgs_id_fk') THEN
+    ALTER TABLE "service_reports" ADD CONSTRAINT "service_reports_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

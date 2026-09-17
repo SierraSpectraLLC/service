@@ -10,7 +10,7 @@
 import { cache } from "react";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { invoices, orgs, purchaseOrders, quotes, workOrders } from "@/db/schema";
+import { invoices, orgs, purchaseOrders, quotes, serviceReports, workOrders } from "@/db/schema";
 import { forTenant } from "@/lib/tenancy";
 import {
   DEFAULT_SCHEME, DOC_KINDS, jobScoped, nextJob, nextNumber, parse, parseScheme,
@@ -63,8 +63,11 @@ async function used(kind: DocKind, tenantOrgId: number | null): Promise<string[]
     : kind === "quote"
       ? await db.select({ number: quotes.number }).from(quotes)
           .where(forTenant(quotes.tenantOrgId, scope))
-      : await db.select({ number: workOrders.number }).from(workOrders)
-          .where(forTenant(workOrders.tenantOrgId, scope));
+      : kind === "service_report"
+        ? await db.select({ number: serviceReports.number }).from(serviceReports)
+            .where(forTenant(serviceReports.tenantOrgId, scope))
+        : await db.select({ number: workOrders.number }).from(workOrders)
+            .where(forTenant(workOrders.tenantOrgId, scope));
   return rows.map((r) => r.number);
 }
 

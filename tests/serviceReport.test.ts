@@ -37,7 +37,7 @@ function drawnYs(doc: PDFDocument, ix: number): number[] {
 function visit(over: Partial<ServiceReport> = {}): ServiceReport {
   return {
     reportNumber: "030181_SR2", date: "2025-08-25", visitDate: "Monday, August 25, 2025",
-    serviceType: "PM", engineer: "Joe Harris",
+    serviceType: "PM", visitNumber: "02", engineer: "Joe Harris",
     provider: { name: "Sierra Spectra, LLC.", lines: ["2393 Anglers Ct.,", "Mariposa, CA 95338"] },
     customer: { name: "Modesto Irrigation District", lines: ["1008 Reservoir Rd.,", "Waterford, CA 95386"] },
     instrument: { type: "Shimadzu UV-1900 UV-Vis", model: "UV-1900", serial: "A12425650267" },
@@ -104,6 +104,27 @@ describe("the report keeps its shape", () => {
     const one = pageText(await load(visit()), 0);
     expect(one).toContain("Shimadzu UV-1900 UV-Vis");
     expect(one).toContain("A12425650267");
+  });
+
+  it("names the module instead of the model when the work was on one", async () => {
+    // The original's own rule: the row says which thing this is about, so a
+    // job on a pump names the pump and a job on the stack names its model.
+    const one = pageText(await load(visit({
+      instrument: { type: "Thermo UPLC", model: "Vanquish Flex", serial: "8339399", module: "Pump VF-P10" },
+    })), 0);
+    expect(one).toContain("Module:");
+    expect(one).toContain("Pump VF-P10");
+    expect(one).not.toContain("Model Number:");
+  });
+
+  it("counts the visit off the contract, not the kind of visit it was", async () => {
+    // "Service Visit: 02" is which visit of the term this was. It printed the
+    // service type for a while, which told a client counting down nothing.
+    const one = pageText(await load(visit()), 0);
+    expect(one).toContain("Service Visit:");
+    expect(one).toContain("02");
+    const none = pageText(await load(visit({ visitNumber: "" })), 0);
+    expect(none).toContain("Service Visit:");
   });
 
   it("keeps the closing lines a client looks for", async () => {

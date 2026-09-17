@@ -19,6 +19,7 @@ const SIERRA: Scheme = {
     quote: "Q{job:6}_{alpha}",
     invoice: "{job:6}_INV{seq}",
     purchase_order: "{job:6}_PO{seq}",
+    service_report: "{job:6}_SR{seq}",
   },
   jobStart: 30120,
 };

@@ -23,6 +23,9 @@ const STAMPED = [
   "purchaseOrders", "partPrices", "eodUpdates", "remoteDevices", "auditLog",
   "cloudConnections", "serviceVisits", "workOrders", "orgSites", "partCatalog", "agreements",
   "catalogRefs", "validationDocs", "messageThreads", "folders", "dropLinks", "shareLinks",
+  // The service report a client signs, frozen as issued - one workspace's
+  // paper, numbered in that workspace's own series.
+  "serviceReports",
   "rateCards", "expenses", "invoices", "payments", "invoiceFees", "promises",
   "disputes", "dunningEvents", "creditOverrides", "quotes", "expenseCategories", "expenseReports",
   "awards",

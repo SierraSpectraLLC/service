@@ -39,6 +39,8 @@ import { coverageFor } from "@/lib/billing";
 import { asStatementRow, billingContext, creditFor, invoicesForOrg } from "@/lib/invoiceData";
 import { invoiceView, isOpen } from "@/lib/statement";
 import { resolveRate } from "@/lib/rates";
+import { reportsForJob } from "@/lib/serviceReportData";
+import ServiceReportPanel from "@/components/ServiceReportPanel";
 import { quoteStanding, STANDING_LABEL as QUOTE_STANDING, STANDING_TONE as QUOTE_TONE } from "@/lib/quotes";
 import QuoteJobButton from "@/components/QuoteJobButton";
 import PhotosPanel from "@/components/PhotosPanel";
@@ -267,6 +269,17 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     ? await db.select().from(quotes).where(eq(quotes.workOrderId, woId)).orderBy(desc(quotes.id))
     : [];
 
+  // The paper the client signs. Offered once the work is done - resolving is
+  // the engineer saying so, closing is the client agreeing, and the report is
+  // most of what they agree to.
+  const reportRows = staff ? await reportsForJob(woId) : [];
+  const reportReady = wo.state === "resolved" || wo.state === "closed";
+  const reportReason = !reportReady
+    ? "Resolve the job with a close-out first - the report says what was done."
+    : !wo.closeSummary.trim()
+      ? "Nothing is written about what was done yet."
+      : "";
+
   // A job with no record could turn out to be about one - offered only while
   // it is still taking work, and only the systems that could honestly take it:
   // this client's own, plus the shop's own bench.
@@ -436,7 +449,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           { key: "work", label: "Work", keys: [...(modules.discussions ? ["notes"] : []), "tasks", "parts", "hours"],
             badge: openTasksH || undefined,
             badgeTone: taskRows.some((t) => t.state !== "Done" && t.dueDate && t.dueDate < today) ? "bad" : "info" },
-          { key: "files", label: "Files", keys: ["files", "photos"] },
+          { key: "files", label: "Files", keys: [...(staff ? ["report"] : []), "files", "photos"] },
           { key: "purchasing", label: "Purchasing", keys: ["po"] },
           { key: "history", label: "History", keys: ["activity"] },
         ]}
@@ -472,6 +485,15 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         />
       </div>
           ) },
+          ...(staff ? [{ key: "report", label: "Service report", node: (
+      <ServiceReportPanel
+        workOrderId={wo.id}
+        number={wo.number}
+        reports={reportRows.map((r) => ({ id: r.id, number: r.number, issuedOn: r.issuedOn, issuedBy: r.issuedBy }))}
+        ready={reportReady && Boolean(wo.closeSummary.trim())}
+        reason={reportReason}
+      />
+          ) }] : []),
           // The Comments card goes with the talk module (lib/flags). What was
           // posted stays on file and comes back with the switch.
           ...(modules.discussions ? [{ key: "notes", label: "Notes", node: (

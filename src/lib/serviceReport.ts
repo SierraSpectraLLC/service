@@ -64,10 +64,21 @@ export type ServiceReport = {
   date: string;                 // header date, as printed
   visitDate: string;            // "Monday, August 25, 2025"
   serviceType: string;          // PM | Repair | Install
+  /**
+   * Which visit of the contract this was - "05". The master sheet carries it
+   * beside the PO number and a client counts down by it. Blank prints a dash,
+   * which is what a visit under no contract is.
+   */
+  visitNumber: string;
   engineer: string;
   provider: { name: string; lines: string[] };
   customer: { name: string; lines: string[] };
-  instrument: { type: string; model: string; serial: string };
+  /**
+   * `module` is the unit the work was on, when it was on one: "Pump VF-P10
+   * (Asset ID# EQ-227)". The original's own rule - a report names the module
+   * OR the model, never both, because the row is "which thing is this about".
+   */
+  instrument: { type: string; model: string; serial: string; module?: string };
   workCompleted: string;
   poNumber: string;
   request: { date: string; from: string; text: string };
@@ -253,7 +264,10 @@ function overview(page: PDFPage, F: Fonts, r: ServiceReport, yIn: number): numbe
     ["Service Type:", r.serviceType],
     ["Service Engineer:", r.engineer],
     ["Instrument Type:", r.instrument.type],
-    ["Model Number:", r.instrument.model],
+    // The module, where the work was on one; otherwise the model.
+    r.instrument.module?.trim()
+      ? ["Module:", r.instrument.module.trim()]
+      : ["Model Number:", r.instrument.model],
     ["Serial Number:", r.instrument.serial],
     ["Work Completed:", r.workCompleted],
   ], 236, 244, cursor - 14);
@@ -261,8 +275,8 @@ function overview(page: PDFPage, F: Fonts, r: ServiceReport, yIn: number): numbe
   // These two are the contract's figures, not this visit's: the original prints
   // a dash here while page two totals three thousand dollars of parts.
   pairs(page, F, [
-    ["PO Number:", r.poNumber],
-    ["Service Visit:", r.serviceType],
+    ["PO Number:", r.poNumber || DASH],
+    ["Service Visit:", r.visitNumber || DASH],
     ["Total Parts:", r.balances.partsTotal || DASH],
     ["Parts Balance:", r.balances.partsRemaining || DASH],
   ], 486, 494, cursor - 14);
