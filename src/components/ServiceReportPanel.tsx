@@ -44,7 +44,7 @@ export default function ServiceReportPanel({ workOrderId, number, reports, ready
       </div>
 
       {reports.length > 0 && (
-        <div style={{ marginTop: 10 }}>
+        <div style={{ marginTop: 12 }}>
           {reports.map((r) => (
             <div
               key={r.id}
@@ -68,7 +68,7 @@ export default function ServiceReportPanel({ workOrderId, number, reports, ready
         </div>
       )}
 
-      <div className="row-2" style={{ alignItems: "center", marginTop: 10 }}>
+      <div className="row-2" style={{ alignItems: "center", marginTop: 12 }}>
         <button
           className="btn sm accent"
           disabled={pending || !ready}
