@@ -17,19 +17,33 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 
 // ── the page's own measurements ──────────────────────────────────────────────
+// Read off the original with a ruler: the sheet prints with a 20pt margin,
+// bands 13.5pt tall, rows 13pt apart, the label column of the overview
+// ending at 124pt and its values starting at 127. Every number below is one
+// of those, not a design decision made here.
 const PAGE = { w: 612, h: 792 };
-const M = 36;                       // outer margin
+const M = 20;                        // outer margin
+const RIGHT = PAGE.w - M;            // the right edge of everything
+const ROW = 13;                      // the pitch of every row of text
 const INK = rgb(0.05, 0.05, 0.05);
 const MUT = rgb(0.35, 0.35, 0.35);
 const RULE = rgb(0.72, 0.72, 0.72);
 const BAND = rgb(0.898, 0.898, 0.898);   // section header bands
 const HEAD = rgb(0.937, 0.937, 0.937);   // table column headings
-const BOX = rgb(0.98, 0.98, 0.98);
-const MONEY_GREEN = rgb(0.1, 0.5, 0.2);
+const LABEL = rgb(0.94, 0.94, 0.94);     // the grey behind a label column
+const BOX = rgb(0.98, 0.98, 0.98);       // a value cell
 
 /**
- * The spectrum mark, drawn rather than embedded so no image has to travel with
- * the code.
+ * The sizes, in points. The sheet sets its body in a narrow face at 9.3; the
+ * standard Helvetica is wider, so each is a half-point under the original to
+ * land the same words in the same columns.
+ */
+const S = { title: 13.5, band: 9.5, body: 8.5, cell: 8, foot: 8.5 };
+
+/**
+ * The spectrum mark: five segments through six points, a dot at every
+ * vertex, drawn rather than embedded so no image has to travel with the code.
+ * The points are the original's, in points from the mark's own origin.
  *
  * NOTE: this is ONE service company's logo. Everything else on this page is
  * data, so a report can be issued by whichever operator did the work; this is
@@ -38,13 +52,9 @@ const MONEY_GREEN = rgb(0.1, 0.5, 0.2);
  * brandForTenant) - printing one company's mark on another's service report is
  * a false statement about who did the work.
  */
-const MARK = [
-  { from: [0, 6], to: [14, 30], color: rgb(0.91, 0.30, 0.24) },
-  { from: [14, 30], to: [28, 16], color: rgb(0.95, 0.61, 0.24) },
-  { from: [28, 16], to: [42, 44], color: rgb(0.65, 0.78, 0.25) },
-  { from: [42, 44], to: [56, 26], color: rgb(0.40, 0.72, 0.85) },
-  { from: [56, 26], to: [78, 0], color: rgb(0.45, 0.66, 0.88) },
-];
+const MARK_POINTS: [number, number][] = [[0, 2], [27, 33], [44, 20], [75, 60], [102, 20], [127, 0]];
+const MARK_COLORS = ["E8756A", "E8A370", "C5D44A", "7BAFD4", "9B8EB8"];
+const hex = (h: string) => rgb(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255);
 
 export type ReportLine = {
   description: string;
@@ -143,13 +153,14 @@ export async function buildServiceReport(r: ServiceReport): Promise<Uint8Array> 
   }
 
   const page2 = doc.addPage([PAGE.w, PAGE.h]);
-  let y2 = header(page2, F, r);
+  // The first table sits a row and a half under the header, as on the sheet.
+  let y2 = header(page2, F, r) - 23;
   y2 = lineTable(page2, F, "Calibration & Equpment",
     ["Description", "Part Num.", "Quantity", "Lot #", "Cal #", "Exp. Date"], r.calibration, y2, "calibration", 6);
   y2 = lineTable(page2, F, "Parts Summary",
-    ["Description", "Part Num.", "Quantity", "Unit Price", "Tax Exempt", "Total"], r.parts, y2, "billed", 10);
+    ["Description", "Part Num.", "Quantity", "Unit Price", "Tax Exempt", "Total"], r.parts, y2, "billed", 11);
   y2 = lineTable(page2, F, "Labor & Travel Summary",
-    ["Description", "Part Num.", "Quantity", "Unit Price", "Tax Exempt", "Total"], r.labor, y2, "billed", 6);
+    ["Description", "Part Num.", "Quantity", "Unit Price", "Tax Exempt", "Total"], r.labor, y2, "billed", 4);
   y2 = balancesAndTotals(page2, F, r, y2);
   await signatures(doc, page2, F, r, y2);
 
@@ -164,102 +175,112 @@ function right(page: PDFPage, s: string, xRight: number, y: number, f: PDFFont, 
   page.drawText(s, { x: xRight - f.widthOfTextAtSize(s, size), y, size, font: f, color });
 }
 
+/** Centered between two x's. Shrinks a line that would not fit rather than spilling it. */
+function centered(page: PDFPage, s: string, x0: number, x1: number, y: number, f: PDFFont, size: number, color = INK) {
+  let sz = size;
+  while (sz > 5 && f.widthOfTextAtSize(s, sz) > x1 - x0 - 4) sz -= 0.5;
+  page.drawText(s, { x: x0 + (x1 - x0 - f.widthOfTextAtSize(s, sz)) / 2, y, size: sz, font: f, color });
+}
+
 /** The repeated top-of-page band: date and report number boxed left, title right. */
 function header(page: PDFPage, F: Fonts, r: ServiceReport): number {
-  const top = PAGE.h - M;
-  const rowH = 15;
-  const labelW = 62, valueW = 92;
-  const x = M + 18;
+  const top = PAGE.h - 34;
+  const rowH = 15.5;
+  const labelW = 61, valueW = 97;
 
   for (const [i, [label, value]] of [["Date", r.date], ["REPORT #", r.reportNumber]].entries()) {
     const ry = top - rowH * (i + 1);
-    page.drawRectangle({ x, y: ry, width: labelW, height: rowH, color: BAND });
-    page.drawRectangle({ x: x + labelW, y: ry, width: valueW, height: rowH, color: BOX, borderColor: RULE, borderWidth: 0.5 });
-    right(page, label, x + labelW - 6, ry + 4.5, F.bold, 7.5);
-    page.drawText(value, { x: x + labelW + 6, y: ry + 4.5, size: 7.5, font: F.font, color: INK });
+    page.drawRectangle({ x: M, y: ry, width: labelW, height: rowH, color: BAND });
+    page.drawRectangle({ x: M + labelW, y: ry, width: valueW, height: rowH, color: BOX, borderColor: RULE, borderWidth: 0.5 });
+    right(page, label, M + labelW - 6, ry + 4.5, F.bold, S.body);
+    page.drawText(value, { x: M + labelW + 6, y: ry + 4.5, size: S.body, font: F.font, color: INK });
   }
 
-  // The title sits in its own band on the right half.
-  const bandX = PAGE.w / 2 + 24;
-  page.drawRectangle({ x: bandX, y: top - rowH * 2, width: PAGE.w - M - bandX, height: rowH * 2, color: BAND });
-  const title = "SERVICE REPORT";
-  const size = 13;
-  page.drawText(title, {
-    x: bandX + (PAGE.w - M - bandX - F.bold.widthOfTextAtSize(title, size)) / 2,
-    y: top - rowH * 2 + 10, size, font: F.bold, color: INK,
-  });
+  // The title sits in its own band on the right, as tall as both rows.
+  const bandX = 384;
+  page.drawRectangle({ x: bandX, y: top - rowH * 2, width: RIGHT - bandX, height: rowH * 2, color: BAND });
+  centered(page, "SERVICE REPORT", bandX, RIGHT, top - rowH * 2 + 9.5, F.bold, S.title);
 
-  return top - rowH * 2 - 22;
+  return top - rowH * 2;
 }
 
 /** Logo, then the provider and customer columns side by side. */
 function parties(page: PDFPage, F: Fonts, r: ServiceReport, y: number): number {
-  const markX = M + 24, markY = y - 52;
-  for (const seg of MARK) {
+  // The mark, in the left third, with the wordmark typed under it.
+  const markX = M + 17, markY = y - 96;
+  for (let i = 0; i < MARK_POINTS.length - 1; i++) {
+    const [ax, ay] = MARK_POINTS[i], [bx, by] = MARK_POINTS[i + 1];
     page.drawLine({
-      start: { x: markX + seg.from[0], y: markY + seg.from[1] },
-      end: { x: markX + seg.to[0], y: markY + seg.to[1] },
-      thickness: 3.4, color: seg.color,
+      start: { x: markX + ax, y: markY + ay }, end: { x: markX + bx, y: markY + by },
+      thickness: 3.2, color: hex(MARK_COLORS[i]),
     });
+  }
+  for (const [i, [px, py]] of MARK_POINTS.entries()) {
+    page.drawCircle({ x: markX + px, y: markY + py, size: 3.6, color: hex(MARK_COLORS[Math.min(i, MARK_COLORS.length - 1)]) });
   }
   // The wordmark is whoever is issuing the report, letter-spaced the way the
   // original prints it - not a company name baked into the generator.
-  const wordmark = r.provider.name.toUpperCase().split("").join(" ");
-  page.drawText(wordmark, {
-    x: markX - 4, y: markY - 13, size: 6.5, font: F.bold, color: rgb(0.25, 0.25, 0.25),
-  });
+  const words = r.provider.name.trim().toUpperCase().split(/\s+/).filter(Boolean);
+  const wordmark = words.map((w) => [...w].join(" ")).join("   •   ");
+  centered(page, wordmark, markX - 10, markX + 137, markY - 24, F.bold, 7, rgb(0.25, 0.25, 0.25));
 
   const cols = [
-    { x: 244, head: "Service Provider:", who: r.provider },
-    { x: 418, head: "Customer Info:", who: r.customer },
+    { x: 241, head: "Service Provider:", who: r.provider },
+    { x: 412, head: "Customer Info:", who: r.customer },
   ];
   for (const c of cols) {
-    let cy = y - 6;
-    page.drawText(c.head, { x: c.x, y: cy, size: 8, font: F.bold, color: INK });
-    cy -= 11;
+    let cy = y - 24;
+    page.drawText(c.head, { x: c.x, y: cy, size: S.body, font: F.bold, color: INK });
+    cy -= ROW;
     for (const line of [c.who.name, ...c.who.lines]) {
-      page.drawText(line, { x: c.x, y: cy, size: 7.5, font: F.font, color: INK });
-      cy -= 10;
+      page.drawText(line, { x: c.x, y: cy, size: S.body, font: F.font, color: INK });
+      cy -= ROW;
     }
   }
-  return Math.min(markY - 22, y - 6 - 11 - 10 * 4);
+  // The first band sits a fixed distance under the header: the sheet's rows
+  // are the sheet's rows, whether or not an address fills all of them.
+  return y - 139;
 }
 
 /** A grey full-width section header, as used five times in the original. */
-function band(page: PDFPage, F: Fonts, label: string, y: number, centered = false): number {
-  const h = 13;
-  page.drawRectangle({ x: M, y: y - h, width: PAGE.w - 2 * M, height: h, color: BAND });
-  if (centered) {
-    const size = 8.5;
-    page.drawText(label, {
-      x: M + (PAGE.w - 2 * M - F.bold.widthOfTextAtSize(label, size)) / 2,
-      y: y - h + 3.8, size, font: F.bold, color: INK,
-    });
-  } else {
-    page.drawText(label, { x: M + 4, y: y - h + 3.8, size: 7.5, font: F.bold, color: INK });
-  }
+function band(page: PDFPage, F: Fonts, label: string, y: number, o: { centered?: boolean; width?: number } = {}): number {
+  const h = 13.5;
+  const w = o.width ?? RIGHT - M;
+  page.drawRectangle({ x: M, y: y - h, width: w, height: h, color: BAND });
+  if (o.centered) centered(page, label, M, M + w, y - h + 3.5, F.bold, S.band);
+  else page.drawText(label, { x: M + 1, y: y - h + 3.5, size: S.band, font: F.bold, color: INK });
   return y - h;
 }
 
-/** Label-right / value-left pairs, the pattern the whole overview is built from. */
+/**
+ * Label-right / value-left pairs, the pattern the whole overview is built
+ * from. Values are bold in the original unless told otherwise.
+ */
 function pairs(
-  page: PDFPage, F: Fonts, rows: [string, string][], labelRight: number, valueLeft: number, y: number,
+  page: PDFPage, F: Fonts, rows: [string, string, PDFFont?][], labelRight: number, valueLeft: number, y: number,
 ): number {
   let cy = y;
-  for (const [label, value] of rows) {
-    right(page, label, labelRight, cy, F.bold, 7.5);
-    page.drawText(value, { x: valueLeft, y: cy, size: 7.5, font: F.font, color: INK });
-    cy -= 12.5;
+  for (const [label, value, f] of rows) {
+    right(page, label, labelRight, cy, F.bold, S.body);
+    page.drawText(value, { x: valueLeft, y: cy, size: S.body, font: f ?? F.bold, color: INK });
+    cy -= ROW;
   }
   return cy;
 }
 
 function overview(page: PDFPage, F: Fonts, r: ServiceReport, yIn: number): number {
   const y = parties(page, F, r, yIn);
-  let cursor = band(page, F, "Service Overview", y);
-  const boxTop = cursor;
+  const bottom = band(page, F, "Service Overview", y);
 
-  const left = pairs(page, F, [
+  // The label columns are grey, left and right, and the left one runs nine
+  // rows whatever the seven rows under it need - the sheet's cells are the
+  // sheet's cells.
+  const leftRows = 9, rightRows = 4;
+  page.drawRectangle({ x: M, y: bottom - leftRows * ROW - 3, width: 105, height: leftRows * ROW + 3, color: LABEL });
+  page.drawRectangle({ x: 384, y: bottom - rightRows * ROW - 3, width: 106, height: rightRows * ROW + 3, color: LABEL });
+
+  const first = bottom - 9.5;
+  pairs(page, F, [
     ["Date of Visit:", r.visitDate],
     ["Service Type:", r.serviceType],
     ["Service Engineer:", r.engineer],
@@ -269,39 +290,31 @@ function overview(page: PDFPage, F: Fonts, r: ServiceReport, yIn: number): numbe
       ? ["Module:", r.instrument.module.trim()]
       : ["Model Number:", r.instrument.model],
     ["Serial Number:", r.instrument.serial],
-    ["Work Completed:", r.workCompleted],
-  ], 236, 244, cursor - 14);
+    ["Work Completed:", r.workCompleted, F.font],
+  ], 124, 127, first);
 
-  // These two are the contract's figures, not this visit's: the original prints
-  // a dash here while page two totals three thousand dollars of parts.
+  // These are the contract's figures, not this visit's sums.
   pairs(page, F, [
     ["PO Number:", r.poNumber || DASH],
     ["Service Visit:", r.visitNumber || DASH],
     ["Total Parts:", r.balances.partsTotal || DASH],
     ["Parts Balance:", r.balances.partsRemaining || DASH],
-  ], 486, 494, cursor - 14);
+  ], 489, 493, first);
 
-  cursor = left - 6;
-  // The original boxes the overview's left column only.
-  page.drawRectangle({
-    x: M, y: cursor, width: 100, height: boxTop - cursor,
-    borderColor: RULE, borderWidth: 0.5,
-  });
-  return cursor - 18;
+  return bottom - leftRows * ROW - 3 - 21;
 }
 
 function requestBlock(page: PDFPage, F: Fonts, r: ServiceReport, y: number): number {
-  let cursor = band(page, F, "Service Request Information", y);
-  const boxTop = cursor;
-  cursor = pairs(page, F, [["Date:", r.request.date], ["From:", r.request.from]], 236, 244, cursor - 14);
-  const wrapped = wrap(r.request.text, F.font, 7.5, PAGE.w - 2 * M - 12);
-  for (const line of wrapped) {
-    page.drawText(line, { x: M + 4, y: cursor, size: 7.5, font: F.font, color: INK });
-    cursor -= 10;
+  const boxTop = band(page, F, "Service Request Information", y);
+  page.drawRectangle({ x: M, y: boxTop - 2 * ROW - 3, width: 53, height: 2 * ROW + 3, color: LABEL });
+  let cursor = pairs(page, F, [["Date:", r.request.date], ["From:", r.request.from]], 72, 75, boxTop - 9.5);
+  for (const line of wrap(r.request.text, F.font, S.body, RIGHT - M - 4)) {
+    page.drawText(line, { x: M, y: cursor, size: S.body, font: F.font, color: INK });
+    cursor -= ROW;
   }
-  cursor -= 6;
-  page.drawRectangle({ x: M, y: cursor, width: PAGE.w - 2 * M, height: boxTop - cursor, borderColor: RULE, borderWidth: 0.5 });
-  return cursor - 18;
+  cursor += 4;
+  page.drawRectangle({ x: M, y: cursor, width: RIGHT - M, height: boxTop - cursor, borderColor: RULE, borderWidth: 0.5 });
+  return cursor - 22;
 }
 
 /**
@@ -317,97 +330,97 @@ function requestBlock(page: PDFPage, F: Fonts, r: ServiceReport, y: number): num
 function notesBlock(
   page: PDFPage, F: Fonts, r: ServiceReport, y: number, lines: string[], continued: boolean,
 ): { left: string[] } {
-  let cursor = band(page, F, continued ? "Service Engineer Notes (continued)" : "Service Engineer Notes", y);
-  const boxTop = cursor;
-  if (!continued) cursor = pairs(page, F, [["Date:", r.notes.date]], 236, 244, cursor - 14);
-  else cursor -= 12;
-  cursor -= 2;
+  const boxTop = band(page, F, continued ? "Service Engineer Notes (continued)" : "Service Engineer Notes", y);
+  let cursor = boxTop - 9.5;
+  if (!continued) {
+    page.drawRectangle({ x: M, y: boxTop - ROW - 3, width: 53, height: ROW + 3, color: LABEL });
+    cursor = pairs(page, F, [["Date:", r.notes.date, F.font]], 72, 75, cursor);
+  }
 
   // The floor is the paper, not the last line. A visit with sixty checks on it
   // used to draw them off the bottom edge, where they were in the file and
   // invisible on the page.
-  const FLOOR = M + 24;
+  const FLOOR = M + 36;
   let i = 0;
   for (; i < lines.length; i++) {
     const line = lines[i].trimEnd();
-    if (!line.trim()) { cursor -= 7; continue; }
+    if (!line.trim()) { cursor -= ROW / 2; continue; }
     const isHeading = !line.startsWith("-") && !line.startsWith(">") && !/^Expected:/.test(line)
       && (line.endsWith(":") || line === line.toUpperCase() || /^(Replaced|Performed|Installed|Cleaned|Verified)\b/.test(line));
     const f = isHeading ? F.bold : F.font;
-    const segs = wrap(line, f, 7.5, PAGE.w - 2 * M - 12);
-    if (cursor - segs.length * 10 < FLOOR) break;
+    const indent = line.startsWith("-") ? 2 : 0;
+    const segs = wrap(line, f, S.body, RIGHT - M - 4 - indent);
+    if (cursor - (segs.length - 1) * ROW < FLOOR) break;
     for (const [n, seg] of segs.entries()) {
-      page.drawText(seg, { x: M + 4 + (n ? 8 : 0), y: cursor, size: 7.5, font: f, color: INK });
-      cursor -= 10;
+      page.drawText(seg, { x: M + indent + (n ? 8 : 0), y: cursor, size: S.body, font: f, color: INK });
+      cursor -= ROW;
     }
   }
-  cursor -= 8;
-  page.drawRectangle({ x: M, y: cursor, width: PAGE.w - 2 * M, height: boxTop - cursor, borderColor: RULE, borderWidth: 0.5 });
+  cursor += 4;
+  page.drawRectangle({ x: M, y: cursor, width: RIGHT - M, height: boxTop - cursor, borderColor: RULE, borderWidth: 0.5 });
   return { left: lines.slice(i) };
 }
 
 /** Column geometry shared by the three tables, so their grids line up. */
 const COLS = [
-  { x: M, w: 196, align: "left" as const },
-  { x: M + 196, w: 84, align: "center" as const },
-  { x: M + 280, w: 54, align: "center" as const },
-  { x: M + 334, w: 68, align: "center" as const },
-  { x: M + 402, w: 60, align: "center" as const },
-  { x: M + 462, w: PAGE.w - 2 * M - 462, align: "right" as const },
+  { x: M, w: 210, align: "left" as const },
+  { x: 230, w: 104, align: "center" as const },
+  { x: 334, w: 52, align: "center" as const },
+  { x: 386, w: 51, align: "center" as const },
+  { x: 437, w: 54, align: "center" as const },
+  { x: 491, w: RIGHT - 491, align: "right" as const },
 ];
 
-
-function cell(page: PDFPage, s: string, i: number, y: number, f: PDFFont, size = 7) {
+function cell(page: PDFPage, s: string, i: number, y: number, f: PDFFont, size = S.cell) {
   const c = COLS[i];
-  const w = f.widthOfTextAtSize(s, size);
-  const x = c.align === "left" ? c.x + 4 : c.align === "right" ? c.x + c.w - 4 - w : c.x + (c.w - w) / 2;
-  page.drawText(s, { x, y, size, font: f, color: INK });
+  let sz = size;
+  while (sz > 5 && f.widthOfTextAtSize(s, sz) > c.w - 6) sz -= 0.5;
+  const w = f.widthOfTextAtSize(s, sz);
+  const x = c.align === "left" ? c.x + 2 : c.align === "right" ? c.x + c.w - 4 - w : c.x + (c.w - w) / 2;
+  page.drawText(s, { x, y, size: sz, font: f, color: INK });
+}
+
+/** A dollar sign against the left of a column and the figure against the right, the way a ledger sets it. */
+function moneyCell(page: PDFPage, F: Fonts, i: number, amount: string, y: number, f = F.font) {
+  const c = COLS[i];
+  page.drawText("$", { x: c.x + 4, y, size: S.cell, font: f, color: INK });
+  right(page, amount, c.x + c.w - 4, y, f, S.cell);
 }
 
 function lineTable(
   page: PDFPage, F: Fonts, title: string, heads: string[], rows: ReportLine[], y: number,
   kind: "calibration" | "billed", minRows: number,
 ): number {
-  let cursor = band(page, F, title, y, true);
+  let cursor = band(page, F, title, y, { centered: true });
 
-  const rowH = 13.5;
-  page.drawRectangle({ x: M, y: cursor - rowH, width: PAGE.w - 2 * M, height: rowH, color: HEAD });
-  for (const [i, h] of heads.entries()) cell(page, h, i, cursor - rowH + 4, F.bold, 6.5);
-  cursor -= rowH;
+  page.drawRectangle({ x: M, y: cursor - ROW, width: RIGHT - M, height: ROW, color: HEAD });
+  for (const [i, h] of heads.entries()) cell(page, h, i, cursor - ROW + 3.5, F.bold);
+  cursor -= ROW;
 
   const count = Math.max(rows.length, minRows);
   const gridTop = cursor;
   for (let i = 0; i < count; i++) {
-    const ry = cursor - rowH;
+    const ry = cursor - ROW;
     const row = rows[i];
     if (row) {
-      cell(page, row.description, 0, ry + 4, F.font);
-      cell(page, row.partNumber, 1, ry + 4, F.font);
-      cell(page, String(row.quantity), 2, ry + 4, F.font);
+      cell(page, row.description, 0, ry + 3.5, F.font);
+      cell(page, row.partNumber, 1, ry + 3.5, F.font);
+      cell(page, String(row.quantity), 2, ry + 3.5, F.font);
       if (kind === "calibration") {
-        cell(page, row.lot || DASH, 3, ry + 4, F.font);
-        cell(page, row.cal || DASH, 4, ry + 4, F.font);
-        cell(page, row.expires || DASH, 5, ry + 4, F.font);
+        cell(page, row.lot || DASH, 3, ry + 3.5, F.font);
+        cell(page, row.cal || DASH, 4, ry + 3.5, F.font);
+        cell(page, row.expires || DASH, 5, ry + 3.5, F.font);
       } else {
-        // Currency sits against the left of its column and the figure against
-        // the right, the way a ledger sets it.
-        page.drawText("$", { x: COLS[3].x + 4, y: ry + 4, size: 7, font: F.font, color: INK });
-        const amount = money(row.unitCents ?? 0);
-        page.drawText(amount, {
-          x: COLS[3].x + COLS[3].w - 4 - F.font.widthOfTextAtSize(amount, 7), y: ry + 4,
-          size: 7, font: F.font, color: INK,
-        });
-        if (row.taxExempt) cell(page, "X", 4, ry + 4, F.font);
-        page.drawText("$", { x: COLS[5].x + 4, y: ry + 4, size: 7, font: F.font, color: INK });
-        const total = row.quantity ? money((row.unitCents ?? 0) * row.quantity) : DASH;
-        cell(page, total, 5, ry + 4, F.font);
+        moneyCell(page, F, 3, money(row.unitCents ?? 0), ry + 3.5);
+        if (row.taxExempt) cell(page, "X", 4, ry + 3.5, F.font);
+        moneyCell(page, F, 5, row.quantity ? money((row.unitCents ?? 0) * row.quantity) : DASH, ry + 3.5);
       }
     }
-    page.drawLine({ start: { x: M, y: ry }, end: { x: PAGE.w - M, y: ry }, thickness: 0.4, color: RULE });
+    page.drawLine({ start: { x: M, y: ry }, end: { x: RIGHT, y: ry }, thickness: 0.4, color: RULE });
     cursor = ry;
   }
   // Verticals last, so they sit over the row rules like the original's grid.
-  for (const c of [...COLS.map((c) => c.x), PAGE.w - M]) {
+  for (const c of [...COLS.map((c) => c.x), RIGHT]) {
     page.drawLine({ start: { x: c, y: gridTop }, end: { x: c, y: cursor }, thickness: 0.4, color: RULE });
   }
   return cursor - 16;
@@ -415,51 +428,59 @@ function lineTable(
 
 function balancesAndTotals(page: PDFPage, F: Fonts, r: ServiceReport, y: number): number {
   const t = reportTotals(r);
+  const leftW = 210;
 
-  page.drawRectangle({ x: M, y: y - 13, width: 196, height: 13, color: BAND });
-  page.drawText("Remaining Balances:", { x: M + 4, y: y - 9.2, size: 8, font: F.bold, color: INK });
-  let ly = y - 26;
-  for (const line of [
-    "Remaining balances for current contract upon",
-    "completion of this service visit.",
-  ]) {
-    page.drawText(line, { x: M + 12, y: ly, size: 7, font: F.italic, color: INK });
-    ly -= 10;
+  // Left: the contract's balances, under their own short band.
+  band(page, F, "Remaining Balances:", y, { width: leftW });
+  let ly = y - 13.5 - 9.5;
+  for (const line of ["Remaining balances for current contract upon", "completion of this service visit."]) {
+    centered(page, line, M, M + leftW, ly, F.italic, S.body);
+    ly -= ROW;
   }
-  ly -= 2;
-  pairs(page, F, [
+  for (const [label, value] of [
     ["Service Visits Remaining:", r.balances.visitsRemaining || DASH],
     ["Parts Allowance Remaining:", r.balances.partsRemaining || DASH],
-  ], 168, 176, ly);
+  ]) {
+    page.drawRectangle({ x: 125, y: ly - 3.5, width: M + leftW - 125, height: ROW, color: LABEL });
+    right(page, label, 122, ly, F.bold, S.body);
+    centered(page, value, 125, M + leftW, ly, F.bold, S.body);
+    ly -= ROW;
+  }
 
-  // The totals stack, right-hand side, label boxed and figure boxed.
+  // Right: the totals stack, in the table's own columns - the label across
+  // Quantity and Unit Price, a spare cell where the sheet shows a tax rate,
+  // then the figure under Total.
+  const labelCell = { x: COLS[2].x, w: COLS[2].w + COLS[3].w };
   const rows: [string, string, boolean][] = [
     ["Total Parts", t.parts ? money(t.parts) : DASH, false],
     ["Total Labor", t.labor ? money(t.labor) : DASH, false],
     ["Sub Total", t.sub ? money(t.sub) : DASH, false],
-    ["Adjustments", t.adjustment ? `(${money(Math.abs(t.adjustment))})` : DASH, false],
+    ["Adjustments", t.adjustment ? `(${money(Math.abs(t.adjustment))})` : DASH, true],
     ["Total Amount Due", t.due ? money(t.due) : DASH, true],
   ];
-  const labelX = 366, labelW = 108, figX = labelX + labelW, figW = PAGE.w - M - figX;
   let ty = y;
-  for (const [label, value, emphasis] of rows) {
-    const h = 14;
-    page.drawRectangle({ x: labelX, y: ty - h, width: labelW, height: h, color: emphasis ? BAND : BOX, borderColor: RULE, borderWidth: 0.5 });
-    page.drawRectangle({ x: figX, y: ty - h, width: figW, height: h, color: emphasis ? BAND : BOX, borderColor: RULE, borderWidth: 0.5 });
-    right(page, label, figX - 6, ty - h + 4.2, emphasis ? F.bold : F.font, 7.5);
-    page.drawText("$", { x: figX + 5, y: ty - h + 4.2, size: 7.5, font: F.font, color: emphasis ? MONEY_GREEN : INK });
-    right(page, value, PAGE.w - M - 5, ty - h + 4.2, emphasis ? F.bold : F.font, 7.5, emphasis ? MONEY_GREEN : INK);
-    ty -= h;
+  for (const [i, [label, value, strong]] of rows.entries()) {
+    const last = i === rows.length - 1;
+    const f = strong ? F.bold : F.font;
+    for (const c of [labelCell, COLS[4], COLS[5]]) {
+      page.drawRectangle({
+        x: c.x, y: ty - ROW, width: c.w, height: ROW,
+        color: last ? BAND : BOX, borderColor: RULE, borderWidth: 0.5,
+      });
+    }
+    right(page, label, labelCell.x + labelCell.w - 4, ty - ROW + 3.5, f, S.body);
+    moneyCell(page, F, 5, value, ty - ROW + 3.5, f);
+    ty -= ROW;
   }
-  return Math.min(ly - 30, ty - 24);
+  return Math.min(ly, ty) - 88;
 }
 
-async function signatures(doc: PDFDocument, page: PDFPage, F: Fonts, r: ServiceReport, y: number) {
+async function signatures(doc: PDFDocument, page: PDFPage, F: Fonts, r: ServiceReport, lineY: number) {
+  const provider = r.signatures.providerOrg?.trim() || "Service";
   const blocks = [
-    { x: M + 30, w: 200, role: `${r.signatures.providerOrg?.trim() || "Service"} Representative`, name: r.signatures.providerName, img: r.signatures.providerImage },
-    { x: PAGE.w / 2 + 24, w: 200, role: `${r.signatures.customerOrg} Rep`, name: r.signatures.customerName, img: r.signatures.customerImage },
+    { x: 75, w: 206, role: `${provider} Field Service Engineer:`, name: r.signatures.providerName, img: r.signatures.providerImage },
+    { x: 331, w: 209, role: `${r.signatures.customerOrg} Representative Signature`, name: `Rep Name: ${r.signatures.customerName || "Unspecified"}`, img: r.signatures.customerImage },
   ];
-  const lineY = y - 44;
   for (const b of blocks) {
     if (b.img) {
       // Sits on the rule, scaled to the block - a captured signature arrives at
@@ -474,35 +495,27 @@ async function signatures(doc: PDFDocument, page: PDFPage, F: Fonts, r: ServiceR
         });
       } catch { /* an unreadable signature must not cost the whole report */ }
     }
-    page.drawLine({ start: { x: b.x, y: lineY }, end: { x: b.x + b.w, y: lineY }, thickness: 0.8, color: INK });
-    const role = b.role;
-    page.drawText(role, {
-      x: b.x + (b.w - F.boldItalic.widthOfTextAtSize(role, 7.5)) / 2, y: lineY - 11,
-      size: 7.5, font: F.boldItalic, color: INK,
-    });
-    page.drawText(b.name, {
-      x: b.x + (b.w - F.font.widthOfTextAtSize(b.name, 7.5)) / 2, y: lineY - 21,
-      size: 7.5, font: F.font, color: INK,
-    });
+    page.drawLine({ start: { x: b.x, y: lineY }, end: { x: b.x + b.w, y: lineY }, thickness: 1.2, color: INK });
+    centered(page, b.role, b.x, b.x + b.w, lineY - 10, F.boldItalic, S.body);
+    centered(page, b.name, b.x, b.x + b.w, lineY - 23, F.boldItalic, S.body);
   }
 
-  let cy = lineY - 44;
-  const centered = (s: string, f: PDFFont, size: number, color = INK) => {
-    page.drawText(s, { x: (PAGE.w - f.widthOfTextAtSize(s, size)) / 2, y: cy, size, font: f, color });
-    cy -= 13;
+  let cy = lineY - 49;
+  const line = (s: string, f: PDFFont, size: number, color = INK) => {
+    centered(page, s, M, RIGHT, cy, f, size, color);
+    cy -= ROW;
   };
-  centered("Signatures acknowledge to all information in this document to be true and service to have been completed as described.",
-    F.boldItalic, 7);
-  cy -= 8;
-  centered("THIS IS NOT AN INVOICE", F.bold, 8);
-  centered("Should you have any questions or require additional details about this service visit please don't hesitate to contact:",
-    F.bold, 7.5);
-  centered(r.contact, F.font, 7.5, MUT);
+  line("Signatures acknowledge to all information in this document to be true and service to have been completed as described.",
+    F.boldItalic, 8);
+  cy -= ROW;
+  line("THIS IS NOT AN INVOICE", F.boldItalic, 9);
+  line("Should you have any questions or require additional details about this service visit please don't hesitate to contact:",
+    F.bold, S.body);
+  line(r.contact, F.font, S.body, MUT);
 }
 
 function footer(page: PDFPage, F: Fonts, n: number) {
-  const s = `[Page ${n}]`;
-  right(page, s, PAGE.w - M, M - 12, F.font, 7, MUT);
+  right(page, `[Page ${n}]`, RIGHT, 44, F.bold, 8, MUT);
 }
 
 /** Greedy wrap on width, which is all any of these blocks needs. */

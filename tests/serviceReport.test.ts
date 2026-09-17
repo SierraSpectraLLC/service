@@ -131,8 +131,9 @@ describe("the report keeps its shape", () => {
     const two = pageText(await load(visit()), 1);
     expect(two).toContain("THIS IS NOT AN INVOICE");
     expect(two).toContain("Signatures acknowledge");
-    expect(two).toContain("Sierra Spectra Representative");
-    expect(two).toContain("Modesto Irrigation District Rep");
+    expect(two).toContain("Sierra Spectra Field Service Engineer:");
+    expect(two).toContain("Modesto Irrigation District Representative Signature");
+    expect(two).toContain("Rep Name: Harpreet Saini");
   });
 
   it("names the issuing company from the report, never from the generator", async () => {
@@ -142,8 +143,8 @@ describe("the report keeps its shape", () => {
         customerOrg: "Modesto Irrigation District", providerOrg: "Acme Engineering",
       },
     })), 1);
-    expect(two).toContain("Acme Engineering Representative");
-    expect(two).not.toContain("Sierra Spectra Representative");
+    expect(two).toContain("Acme Engineering Field Service Engineer:");
+    expect(two).not.toContain("Sierra Spectra Field Service Engineer:");
   });
 
   it("falls back to a plain role rather than somebody else's name", async () => {
@@ -153,7 +154,7 @@ describe("the report keeps its shape", () => {
         customerOrg: "Modesto Irrigation District",
       },
     })), 1);
-    expect(two).toContain("Service Representative");
+    expect(two).toContain("Service Field Service Engineer:");
   });
 
   it("prints the engineer's notes with their headings and results intact", async () => {
