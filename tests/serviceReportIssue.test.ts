@@ -163,6 +163,29 @@ describe("issuing a report", () => {
     expect(t.due).toBe(0);
   }, SLOW);
 
+  it("shows the hours worked whether or not anybody is charging for them", async () => {
+    // The visit Ridgeline logged for UCSF: four hours driving and one on the
+    // bench, both unticked because the contract covers them. A report that
+    // dropped them said an engineer spent no time on a day he spent five
+    // hours on.
+    await client.exec(`UPDATE time_entries SET billable = false WHERE work_order_id = 1;`);
+    const { issueServiceReport } = await import("@/app/actions");
+    const { reportTotals } = await import("@/lib/serviceReport");
+    await issueServiceReport(1);
+
+    const [row] = await testDb.select().from(schema.serviceReports);
+    const r = row.data as import("@/lib/serviceReport").ServiceReport;
+    expect(r.labor).toEqual([
+      { description: "Labor, on site - Joe Harris - covered by 030182_Ar2", partNumber: "", quantity: 4, unitCents: 0, taxExempt: true },
+      { description: "Travel - Joe Harris - covered by 030182_Ar2", partNumber: "", quantity: 2, unitCents: 0, taxExempt: true },
+    ]);
+    // Nothing at nothing is still nothing: the totals are the parts alone.
+    const t = reportTotals(r);
+    expect(t.labor).toBe(0);
+    expect(t.parts).toBeGreaterThan(0);
+    expect(t.due).toBe(0);
+  }, SLOW);
+
   it("counts the visit it is about, whether or not the job is closed yet", async () => {
     const { issueServiceReport } = await import("@/app/actions");
     await issueServiceReport(1);
