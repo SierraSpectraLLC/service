@@ -40,7 +40,7 @@ export type JobFacts = {
 
 /** One priced row, as lib/billing composed it for this job. */
 export type ReportItem = {
-  /** part | labor | travel | expense - lib/billing.LINE_KINDS. */
+  /** part | labor | travel - lib/billing.LINE_KINDS. */
   kind: string;
   description: string;
   partNumber: string;
@@ -189,9 +189,18 @@ const sum = (items: ReportItem[]): number =>
  */
 export function serviceReportDoc(input: ReportInput): ServiceReport {
   const parts = input.items.filter((it) => it.kind === "part");
-  // Travel and the expenses of travelling sit with labour, the way the
-  // original's second table is titled.
-  const labor = input.items.filter((it) => ["labor", "travel", "expense"].includes(it.kind));
+  /*
+   * Labour and travel, and nothing else.
+   *
+   * What it costs US to get an engineer to a bench - a per diem, a tank of
+   * fuel, the parking at the door - is the shop's own expense claim, and
+   * belongs on the invoice where it is charged rather than on the page a
+   * client signs to say the work was done. Listing it here turned a record of
+   * a visit into an itemised account of somebody's day out. The expense rows
+   * still reach the invoice untouched; they are dropped by the loader before
+   * they ever arrive here.
+   */
+  const labor = input.items.filter((it) => ["labor", "travel"].includes(it.kind));
   const covered = input.items.filter((it) => it.covered);
 
   return {

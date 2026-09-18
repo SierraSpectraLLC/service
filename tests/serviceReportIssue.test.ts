@@ -243,6 +243,32 @@ describe("issuing a report", () => {
   }, SLOW);
 });
 
+describe("what the client's page leaves out", () => {
+  it("shows no expense claim of the engineer's, billable or not", async () => {
+    await client.exec(`
+      INSERT INTO expenses (tenant_org_id, work_order_id, kind, description, amount_cents, incurred_on, billable) VALUES
+        (${SIERRA}, 1, 'per_diem', 'Per diem, day trip - HAL Primary Lab', 3000, '2026-09-14', true),
+        (${SIERRA}, 1, 'other',    'Parking',                             3100, '2026-09-14', true),
+        (${SIERRA}, 1, 'mileage',  'Travel fuel',                         4250, '2026-09-14', false);
+    `);
+    const { issueServiceReport } = await import("@/app/actions");
+    const { reportTotals } = await import("@/lib/serviceReport");
+    await issueServiceReport(1);
+
+    const [row] = await testDb.select().from(schema.serviceReports);
+    const r = row.data as import("@/lib/serviceReport").ServiceReport;
+    expect(r.labor.map((l) => l.description)).toEqual([
+      "Labor, on site - Joe Harris", "Travel - Joe Harris",
+    ]);
+    expect(JSON.stringify(r)).not.toContain("Per diem");
+    expect(JSON.stringify(r)).not.toContain("Parking");
+    // The invoice still charges them; this document never counted them - the
+    // labour total is the four hours and the two of travel, and nothing else.
+    expect(reportTotals(r).labor).toBe(280_000);
+    await client.exec(`DELETE FROM expenses;`);
+  }, SLOW);
+});
+
 describe("taking one back, and drawing it again", () => {
   it("redraws in place, under the same number, from the job as it stands", async () => {
     const { issueServiceReport, reissueServiceReport } = await import("@/app/actions");

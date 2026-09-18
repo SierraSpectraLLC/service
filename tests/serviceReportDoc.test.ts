@@ -96,6 +96,23 @@ describe("the two tables", () => {
     expect(r.labor.every((l) => l.taxExempt)).toBe(true);
   });
 
+  it("keeps the shop's own costs of getting there off a client's signature page", () => {
+    // A per diem, the parking and a tank of fuel are an engineer's expense
+    // claim. They belong on the invoice that charges them, not on the page a
+    // client signs to say the work was done.
+    const r = serviceReportDoc(input({
+      items: [
+        ...input().items,
+        { kind: "expense", description: "Per diem, day trip - HAL Primary Lab", partNumber: "", qty: 1, unitCents: 3_000, covered: false },
+        { kind: "expense", description: "Parking", partNumber: "", qty: 1, unitCents: 3_100, covered: false },
+      ],
+    }));
+    expect(r.labor.map((l) => l.description)).toEqual(["Travel - Joe Harris", "Labor, on site - Joe Harris"]);
+    expect(JSON.stringify(r)).not.toContain("Parking");
+    // And they are not quietly summed into the money either.
+    expect(reportTotals(r).due).toBe(513_300);
+  });
+
   it("marks parts exempt where that site has no tax, and not where it has", () => {
     expect(serviceReportDoc(input()).parts.every((l) => l.taxExempt)).toBe(true);
     expect(serviceReportDoc(input({ partsTaxed: true })).parts.some((l) => l.taxExempt)).toBe(false);
