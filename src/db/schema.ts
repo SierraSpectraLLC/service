@@ -2345,6 +2345,14 @@ export const workOrders = pgTable("work_orders", {
   orgId: integer("org_id").references(() => orgs.id, { onDelete: "set null" }),
   requestedBy: text("requested_by").notNull().default(""),
   requestedByEmail: text("requested_by_email").notNull().default(""),
+  /**
+   * Who signs the service report for the client, when that is not the person
+   * who asked. The requester raised the call from their desk; the signature
+   * belongs to whoever was standing at the bench when the engineer packed up,
+   * and on a big site those are rarely the same person. Blank means the
+   * requester, which is the ordinary case.
+   */
+  clientSignatory: text("client_signatory").notNull().default(""),
   title: text("title").notNull(),
   // The ask in the requester's own words, kept unedited. What was DONE goes in
   // closeSummary; keeping the two apart is what makes the history readable.

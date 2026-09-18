@@ -4758,3 +4758,7 @@ DO $$ BEGIN
       FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- Who signs the service report for the client, when that is not the person who
+-- asked for the work. Blank means the requester.
+ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "client_signatory" text NOT NULL DEFAULT '';

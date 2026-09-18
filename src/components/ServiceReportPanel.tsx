@@ -3,8 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "@/components/ui/Toast";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { Id } from "@/components/ui";
-import { issueServiceReport } from "@/app/actions";
+import { deleteServiceReport, issueServiceReport, reissueServiceReport } from "@/app/actions";
 
 export type IssuedReport = {
   id: number;
@@ -63,6 +64,42 @@ export default function ServiceReportPanel({ workOrderId, number, reports, ready
               >
                 PDF
               </a>
+              {/* Issued before somebody noticed the system had no serial on
+                  it: fix the record, then draw this one again under its own
+                  number. */}
+              <button
+                className="btn sm"
+                disabled={pending}
+                onClick={() => startTransition(async () => {
+                  const res = await reissueServiceReport(r.id);
+                  if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
+                  toast({ message: `Redrew ${r.number} from the job as it stands` });
+                  router.refresh();
+                })}
+              >
+                Reissue
+              </button>
+              <button
+                className="btn sm link"
+                style={{ color: "var(--t-bad-fg)" }}
+                disabled={pending}
+                onClick={async () => {
+                  const ok = await confirmDialog({
+                    title: `Delete ${r.number}?`,
+                    body: "The log keeps a line naming it, and its number goes back to the end of the series. If the client already has a copy, reissue it instead.",
+                    action: "Delete", tone: "bad",
+                  });
+                  if (!ok) return;
+                  startTransition(async () => {
+                    const res = await deleteServiceReport(r.id);
+                    if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
+                    toast({ message: `Deleted ${r.number}` });
+                    router.refresh();
+                  });
+                }}
+              >
+                Delete
+              </button>
             </div>
           ))}
         </div>

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
   appSettings, assets, attachments, auditLog, checklistItems, expenseCategories, instruments, itemNotes, orgs, orgSites, parts, poLines,
@@ -283,7 +283,11 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
   // A job with no record could turn out to be about one - offered only while
   // it is still taking work, and only the systems that could honestly take it:
   // this client's own, plus the shop's own bench.
-  const adoptableRows = !inst && !asset && staff && woAcceptsWork(wo.state)
+  // Every system this job could be on: its client's own, plus the shop's own
+  // bench. Read for staff on every job rather than only a record-less one -
+  // Edit can re-file a job that landed on the wrong stack, and a call taken
+  // over the phone often does.
+  const pickableRows = staff
     ? await db.select({
         id: instruments.id, externalId: instruments.externalId, model: instruments.model,
         ownerOrgId: instruments.ownerOrgId,
@@ -295,10 +299,32 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         ))
         .orderBy(asc(instruments.externalId))
     : [];
-  const adoptableLabels = await getSystemLabels(adoptableRows);
-  const adoptable = adoptableRows.map((r) => ({
-    id: r.id, externalId: r.externalId, label: adoptableLabels.get(r.id) ?? r.model,
+  const pickableLabels = await getSystemLabels(pickableRows);
+  const pickable = pickableRows.map((r) => ({
+    id: r.id, externalId: r.externalId, label: pickableLabels.get(r.id) ?? r.model,
   }));
+  // And every unit fitted to one of them, so Edit can name the module a visit
+  // was really about - which is the serial the report prints.
+  const pickableAssets = pickableRows.length
+    ? (await db.select({
+        id: assets.id, instrumentId: assets.instrumentId, kind: assets.kind,
+        model: assets.model, serial: assets.serial,
+      }).from(assets)
+        .where(and(
+          inArray(assets.instrumentId, pickableRows.map((r) => r.id)),
+          // A unit that has left the building is not a unit a visit was on.
+          ne(assets.status, "Decommissioned"),
+        ))
+        .orderBy(asc(assets.sortOrder), asc(assets.kind)))
+      .map((a) => ({
+        id: a.id, instrumentId: a.instrumentId,
+        label: [a.kind, a.model].filter(Boolean).join(" ") + (a.serial ? ` · ${a.serial}` : ""),
+      }))
+    : [];
+
+  // The quick "put it on a system" control is for a job with no record at all;
+  // Edit is where one that has the wrong record is corrected.
+  const adoptable = !inst && !asset && staff && woAcceptsWork(wo.state) ? pickable : [];
 
   // Where the job lives. With no record it is the client's own page - which is
   // the honest answer to "where is this job", and the page that holds the rest
@@ -482,6 +508,10 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           people={directoryNames(people)}
           systems={adoptable}
           bookedOn={wo.bookedOn} bookedUntil={wo.bookedUntil}
+          requestedBy={wo.requestedBy} clientSignatory={wo.clientSignatory}
+          equipment={staff
+            ? { instrumentId: wo.instrumentId, assetId: wo.assetId, systems: pickable, assets: pickableAssets }
+            : undefined}
         />
       </div>
           ) },
