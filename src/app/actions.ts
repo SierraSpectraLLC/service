@@ -6924,7 +6924,19 @@ export async function bookWorkOrder(
 }
 
 export async function updateWorkOrder(
-  woId: number, data: { title: string; body: string; severity: string; assignee: string },
+  woId: number,
+  data: {
+    title: string; body: string; severity: string; assignee: string;
+    /** Who asked, and who signs the report for them. Omitted means unchanged. */
+    requestedBy?: string; clientSignatory?: string;
+    /**
+     * Which machine the job is about. Omitted leaves it alone; null takes it
+     * off. A job filed against the wrong system - or against a system when it
+     * was really about one module of it - is corrected here rather than
+     * deleted and retyped, and its hours, parts, tasks and files follow.
+     */
+    instrumentId?: number | null; assetId?: number | null;
+  },
 ): Promise<{ error?: string }> {
   const u = await requireUser();
   const found = await loadWorkOrder(u, woId);
@@ -6937,7 +6949,50 @@ export async function updateWorkOrder(
   const next = {
     title, body: data.body.trim().slice(0, 4000),
     severity: severityOf(data.severity).key, assignee: data.assignee.trim(),
+    requestedBy: (data.requestedBy ?? wo.requestedBy).trim().slice(0, 120),
+    clientSignatory: (data.clientSignatory ?? wo.clientSignatory).trim().slice(0, 120),
   };
+
+  /*
+   * The equipment, when the form sent any.
+   *
+   * Checked the way attachWorkOrderSystem checks it - same workspace, this
+   * job's client, a system this person may edit - because moving a job onto
+   * somebody else's instrument is somebody else's hours on somebody else's
+   * bill, whether it arrives through that door or this one.
+   */
+  const wantsInstrument = data.instrumentId !== undefined;
+  const wantsAsset = data.assetId !== undefined;
+  const instrumentId = wantsInstrument ? data.instrumentId ?? null : wo.instrumentId;
+  const assetId = wantsAsset ? data.assetId ?? null : wo.assetId;
+  let instLabel = "";
+  let assetLabel = "";
+  if (instrumentId !== wo.instrumentId || assetId !== wo.assetId) {
+    if (instrumentId !== null) {
+      const [target] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+      if (!target) return { error: "Not found" };
+      if (!(await canEditSystem(u, instrumentId))) return { error: "Not found" };
+      if (target.tenantOrgId !== wo.tenantOrgId) return { error: "That system is in another workspace." };
+      if (wo.orgId !== null && target.ownerOrgId !== null && target.ownerOrgId !== wo.orgId) {
+        const [o] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, target.ownerOrgId));
+        return { error: `${target.externalId} belongs to ${o?.name ?? "another client"}, not to this job's client.` };
+      }
+      instLabel = target.externalId;
+    }
+    if (assetId !== null) {
+      const [target] = await db.select().from(assets).where(eq(assets.id, assetId));
+      if (!target) return { error: "Not found" };
+      if (!(await assetAccess(u, assetId)).edit) return { error: "Not found" };
+      if (target.tenantOrgId !== wo.tenantOrgId) return { error: "That unit is in another workspace." };
+      // A module belongs to the system it is fitted to. Naming one that sits
+      // in another system would put this visit on the wrong machine's history
+      // - and print the wrong serial on the client's report.
+      if (instrumentId !== null && target.instrumentId !== null && target.instrumentId !== instrumentId) {
+        return { error: `That unit is fitted to another system, not to ${instLabel || "this one"}.` };
+      }
+      assetLabel = [target.kind, target.model].filter(Boolean).join(" ") || "the unit";
+    }
+  }
   // Naming an engineer is the moment a van and a day get committed. Only the
   // change is gated: an order that already has somebody on it can still have
   // its title fixed while the account is held.
@@ -6945,13 +7000,35 @@ export async function updateWorkOrder(
     const refusal = await creditRefusal(wo.orgId, "dispatch");
     if (refusal) return { error: refusal };
   }
-  await db.update(workOrders).set(next).where(eq(workOrders.id, woId));
+  const moved = instrumentId !== wo.instrumentId || assetId !== wo.assetId;
+  await db.update(workOrders).set({ ...next, instrumentId, assetId }).where(eq(workOrders.id, woId));
+
+  /*
+   * The work goes with the job.
+   *
+   * Hours, parts, tasks and files carry their own instrument so they show on a
+   * system's history whether or not a work order is ever raised; a job that
+   * turns out to have been about another machine has to take them with it, or
+   * the old system keeps a visit it never had. Only this job's rows, and only
+   * the ones that pointed where the job pointed.
+   */
+  if (moved && instrumentId !== null) {
+    for (const table of [tasks, timeEntries, parts, attachments]) {
+      await db.update(table).set({ instrumentId })
+        .where(and(
+          eq(table.workOrderId, woId),
+          wo.instrumentId === null ? isNull(table.instrumentId) : eq(table.instrumentId, wo.instrumentId),
+        ));
+    }
+  }
 
   // One line per field that moved, because "edited WO-1042" answers nothing
   // three months later when somebody asks why it stopped being urgent.
   for (const [field, before, after] of [
     ["title", wo.title, next.title], ["severity", wo.severity, next.severity],
     ["assignee", wo.assignee, next.assignee], ["body", wo.body, next.body],
+    ["requestedBy", wo.requestedBy, next.requestedBy],
+    ["clientSignatory", wo.clientSignatory, next.clientSignatory],
   ] as const) {
     if (before === after) continue;
     await audit({
@@ -6961,6 +7038,16 @@ export async function updateWorkOrder(
         ? `rewrote what ${wo.number} asks for`
         : `set ${wo.number} ${field} to ${after || "(none)"}`,
       field, oldValue: before, newValue: after,
+    });
+  }
+  if (moved) {
+    const now = [instLabel, assetLabel].filter(Boolean).join(" - ") || "no record";
+    await audit({
+      actor: u.email, instrumentId, assetId, entityType: "work_order", entityId: wo.id,
+      action: `put ${wo.number} on ${now}, with the work already filed on it`,
+      field: "equipment",
+      oldValue: found.inst?.externalId || (wo.assetId === null ? "(no record)" : "a unit"),
+      newValue: now,
     });
   }
   if (next.assignee && next.assignee !== wo.assignee) {
@@ -16125,6 +16212,70 @@ export async function issueServiceReport(workOrderId: number): Promise<{ error?:
     }
   }
   throw last;
+}
+
+/**
+ * Draw an issued report again, from the job as it stands now.
+ *
+ * A report freezes at issue so that the copy a client countersigned cannot
+ * quietly change under them - but the first one off a job is often issued
+ * before somebody notices the system had no serial on it, or that the visit
+ * was logged against the wrong module. Correcting the record and reissuing is
+ * the honest fix; the alternative is a shop that keeps its paperwork wrong
+ * because the software would not let it be right.
+ *
+ * Same number, same row, redrawn and re-dated, and the log says it happened.
+ * A client who has the old copy can tell: the number is the same and the date
+ * is not.
+ */
+export async function reissueServiceReport(id: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(serviceReports).where(eq(serviceReports.id, id));
+  if (!row || !houseOf(u, row.tenantOrgId)) return { error: "Not found" };
+  const found = await loadWorkOrder(u, row.workOrderId);
+  if ("error" in found) return found;
+
+  const draft = await serviceReportDraft(row.workOrderId);
+  if (!draft) return { error: "Not found" };
+  await db.update(serviceReports)
+    .set({ data: { ...draft.report, reportNumber: row.number }, issuedOn: shopToday(), issuedBy: u.email })
+    .where(eq(serviceReports.id, id));
+  await audit({
+    actor: u.email, instrumentId: found.wo.instrumentId, assetId: found.wo.assetId,
+    entityType: "service_report", entityId: id, tenantOrgId: row.tenantOrgId,
+    action: `reissued ${row.number} for ${found.wo.number} - redrawn from the job as it stands now`,
+    field: "issuedOn", oldValue: row.issuedOn, newValue: shopToday(),
+  });
+  revalidatePath(`/work/${row.workOrderId}`);
+  return {};
+}
+
+/**
+ * Take an issued report back.
+ *
+ * For the one issued against the wrong job, or issued twice by two people in
+ * the same minute. The row goes; the audit line stays, naming the number, so
+ * a gap in the series is explainable a year later. Its number returns to the
+ * end of the series and is handed out again, which is right for a document
+ * nobody received and is the reason to delete rather than reissue when the
+ * client has never seen it.
+ */
+export async function deleteServiceReport(id: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(serviceReports).where(eq(serviceReports.id, id));
+  if (!row || !houseOf(u, row.tenantOrgId)) return { error: "Not found" };
+  const found = await loadWorkOrder(u, row.workOrderId);
+  if ("error" in found) return found;
+
+  await db.delete(serviceReports).where(eq(serviceReports.id, id));
+  await audit({
+    actor: u.email, instrumentId: found.wo.instrumentId, assetId: found.wo.assetId,
+    entityType: "service_report", entityId: id, tenantOrgId: row.tenantOrgId,
+    action: `deleted ${row.number}, the service report for ${found.wo.number}`,
+    field: "number", oldValue: row.number, newValue: "(deleted)",
+  });
+  revalidatePath(`/work/${row.workOrderId}`);
+  return {};
 }
 
 /**

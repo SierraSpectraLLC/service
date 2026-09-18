@@ -32,7 +32,7 @@ vi.mock("next/headers", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {}, revalidateTag: () => {} }));
 
-const SIERRA = 1, EMERY = 2;
+const SIERRA = 1, EMERY = 2, CASCADE = 3;
 const SLOW = 30_000;
 
 const OWNER: Who = {
@@ -57,7 +57,8 @@ beforeAll(async () => {
       (${SIERRA}, 'Sierra Spectra', 'provider', true,  NULL, '${SCHEME}',
        '6770 Stanford Ranch Rd.\nSuite #1220\nRoseville, CA 95678'),
       (${EMERY},  'Emery Pharma',   'client',   false, ${SIERRA}, '',
-       '1000 Atlantic Ave.,\nSuite #110\nAlameda, CA 94501');
+       '1000 Atlantic Ave.,\nSuite #110\nAlameda, CA 94501'),
+      (${CASCADE}, 'Cascade Instrument', 'provider', true, NULL, '', '');
     INSERT INTO app_settings (id, operator_org_id) VALUES (1, ${SIERRA});
     INSERT INTO house_members (email, org_id, role, name) VALUES
       ('joe@sierra.test', ${SIERRA}, 'owner', 'Joe Harris');
@@ -239,6 +240,89 @@ describe("issuing a report", () => {
     expect(entry.entityType).toBe("service_report");
     expect(entry.action).toContain("issued 030182_SR1 for 030182");
     expect(entry.tenantOrgId).toBe(SIERRA);
+  }, SLOW);
+});
+
+describe("taking one back, and drawing it again", () => {
+  it("redraws in place, under the same number, from the job as it stands", async () => {
+    const { issueServiceReport, reissueServiceReport } = await import("@/app/actions");
+    await issueServiceReport(1);
+    const [before] = await testDb.select().from(schema.serviceReports);
+    expect((before.data as import("@/lib/serviceReport").ServiceReport).workCompleted).toBe("Repair on Pump B");
+
+    // The record is corrected after the fact - a serial nobody had typed in,
+    // a title that named the wrong pump. Reissuing is the honest fix.
+    await client.exec(`UPDATE work_orders SET title = 'Repair on Pump A' WHERE id = 1;`);
+    const res = await reissueServiceReport(before.id);
+    expect(res.error).toBeUndefined();
+
+    const rows = await testDb.select().from(schema.serviceReports);
+    expect(rows).toHaveLength(1);                       // redrawn, not added to
+    expect(rows[0].id).toBe(before.id);
+    expect(rows[0].number).toBe("030182_SR1");          // and it keeps its name
+    expect((rows[0].data as import("@/lib/serviceReport").ServiceReport).workCompleted).toBe("Repair on Pump A");
+
+    const log = await testDb.select().from(schema.auditLog).orderBy(schema.auditLog.id);
+    expect(log[log.length - 1].action).toContain("reissued 030182_SR1");
+  }, SLOW);
+
+  it("deletes one, says so in the log, and hands its number back", async () => {
+    const { issueServiceReport, deleteServiceReport } = await import("@/app/actions");
+    await issueServiceReport(1);
+    const [row] = await testDb.select().from(schema.serviceReports);
+
+    const res = await deleteServiceReport(row.id);
+    expect(res.error).toBeUndefined();
+    expect(await testDb.select().from(schema.serviceReports)).toHaveLength(0);
+
+    const log = await testDb.select().from(schema.auditLog).orderBy(schema.auditLog.id);
+    const last = log[log.length - 1];
+    expect(last.entityType).toBe("service_report");
+    expect(last.action).toContain("deleted 030182_SR1");
+
+    // Nothing was sent, so the number is free. The next report is SR1 again.
+    await issueServiceReport(1);
+    const [again] = await testDb.select().from(schema.serviceReports);
+    expect(again.number).toBe("030182_SR1");
+  }, SLOW);
+
+  it("is not another workspace's to touch", async () => {
+    const { issueServiceReport, deleteServiceReport, reissueServiceReport } = await import("@/app/actions");
+    await issueServiceReport(1);
+    const [row] = await testDb.select().from(schema.serviceReports);
+
+    // Another operator on the same instance - not platform staff, whose own
+    // workspace this is not. See lib/tenants.isHouseOf.
+    who = { ...OWNER, email: "someone@cascade.test", operatorOrgId: CASCADE, rootOperatorOrgId: SIERRA };
+    expect((await deleteServiceReport(row.id)).error).toBe("Not found");
+    expect((await reissueServiceReport(row.id)).error).toBe("Not found");
+    expect(await testDb.select().from(schema.serviceReports)).toHaveLength(1);
+  }, SLOW);
+});
+
+describe("who asked, and who signs", () => {
+  it("prints the signatory the job names, and the requester when it names none", async () => {
+    const { issueServiceReport, updateWorkOrder } = await import("@/app/actions");
+    await issueServiceReport(1);
+    const [first] = await testDb.select().from(schema.serviceReports);
+    const a = first.data as import("@/lib/serviceReport").ServiceReport;
+    expect(a.request.from).toBe("Prajita Pandey");
+    expect(a.signatures.customerName).toBe("Prajita Pandey");
+
+    // The person who called is at their desk; the person who watched the
+    // engineer pack up signs for the visit.
+    await updateWorkOrder(1, {
+      title: "Repair on Pump B", body: "Customer states Pump B not working.",
+      severity: "Down", assignee: "Joe Harris",
+      requestedBy: "Prajita Pandey", clientSignatory: "Brianna White",
+    });
+    const { reissueServiceReport } = await import("@/app/actions");
+    await reissueServiceReport(first.id);
+
+    const [row] = await testDb.select().from(schema.serviceReports);
+    const b = row.data as import("@/lib/serviceReport").ServiceReport;
+    expect(b.request.from).toBe("Prajita Pandey");        // who asked, unchanged
+    expect(b.signatures.customerName).toBe("Brianna White");
   }, SLOW);
 });
 

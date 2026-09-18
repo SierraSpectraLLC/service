@@ -176,7 +176,9 @@ export async function serviceReportDraft(woId: number): Promise<ReportDraft | nu
     customer: {
       name: customer?.name ?? "",
       address: site?.address || customer?.billingAddress || "",
-      representative: wo.requestedBy,
+      // Whoever signs for them: the person named on the job, or the person
+      // who asked for it when nobody has named one.
+      representative: wo.clientSignatory || wo.requestedBy,
     },
     /*
      * Which machine, and which part of it.

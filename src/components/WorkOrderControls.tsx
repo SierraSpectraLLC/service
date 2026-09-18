@@ -25,6 +25,7 @@ import { WO_LABEL, WO_SEVERITIES, bookingSpan, checkBooking, woLive, woMoves, ty
 export default function WorkOrderControls({
   id, number, state, mover, title, body, severity, assignee, people, systems = [],
   bookedOn = "", bookedUntil = "",
+  requestedBy = "", clientSignatory = "", equipment,
 }: {
   id: number;
   number: string;
@@ -45,12 +46,32 @@ export default function WorkOrderControls({
   /** The days it is booked for, blank when it is not on the calendar. */
   bookedOn?: string;
   bookedUntil?: string;
+  /** Who asked, and who signs the service report for them. */
+  requestedBy?: string;
+  clientSignatory?: string;
+  /**
+   * What the job is on, and what it could be on instead. Passed to staff on
+   * every job, not only a record-less one: a call taken over the phone lands
+   * on the stack, and the module it turns out to be about is chosen after
+   * somebody has looked at it.
+   */
+  equipment?: {
+    instrumentId: number | null;
+    assetId: number | null;
+    systems: { id: number; externalId: string; label: string }[];
+    /** Every candidate system's units, filtered to the chosen one below. */
+    assets: { id: number; instrumentId: number | null; label: string }[];
+  };
 }) {
   const [mode, setMode] = useState<"" | "resolve" | "edit" | "book">("");
   const [booking, setBooking] = useState({ bookedOn, bookedUntil });
   const [systemId, setSystemId] = useState(0);
   const [summary, setSummary] = useState("");
-  const [form, setForm] = useState({ title, body, severity, assignee });
+  const [form, setForm] = useState({
+    title, body, severity, assignee, requestedBy, clientSignatory,
+    instrumentId: equipment?.instrumentId ?? 0,
+    assetId: equipment?.assetId ?? 0,
+  });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -234,7 +255,12 @@ export default function WorkOrderControls({
               <DialogStatus error={error} problem={editProblem} />
               <button className="btn" onClick={() => setMode("")} disabled={pending}>Cancel</button>
               <button className="btn accent" disabled={pending || !!editProblem}
-                onClick={() => run(() => updateWorkOrder(id, form), `Saved ${number}`)}>
+                onClick={() => run(() => updateWorkOrder(id, {
+                  ...form,
+                  // Untouched stays untouched: a form that always sent the
+                  // equipment would re-file the job on every typo fix.
+                  ...(equipment ? { instrumentId: form.instrumentId || null, assetId: form.assetId || null } : {}),
+                }), `Saved ${number}`)}>
                 {pending ? "Saving..." : `Save ${number}`}
               </button>
             </>
@@ -262,6 +288,64 @@ export default function WorkOrderControls({
               </select>
             </div>
           </div>
+
+          {/* The client's two people: the one who called, and the one who
+              signs for the visit. On a big site they are rarely the same. */}
+          <div className="dialog-section">The client&apos;s people</div>
+          <div className="pf2" style={{ marginBottom: 8 }}>
+            <div>
+              <label>Who asked</label>
+              <input value={form.requestedBy} maxLength={120} placeholder="Their name"
+                onChange={(e) => setForm({ ...form, requestedBy: e.target.value })} />
+            </div>
+            <div>
+              <label>Who signs the report</label>
+              <input value={form.clientSignatory} maxLength={120}
+                placeholder={form.requestedBy.trim() || "Whoever asked"}
+                onChange={(e) => setForm({ ...form, clientSignatory: e.target.value })} />
+              <div className="mut t-meta" style={{ marginTop: 3 }}>
+                Prints beside &quot;Rep Name:&quot; on the service report. Blank means whoever asked.
+              </div>
+            </div>
+          </div>
+
+          {equipment && (
+            <>
+              <div className="dialog-section">What it is on</div>
+              <div className="pf2" style={{ marginBottom: 8 }}>
+                <div>
+                  <label>System</label>
+                  <select value={form.instrumentId || ""} aria-label="System this job is on"
+                    onChange={(e) => {
+                      const instrumentId = parseInt(e.target.value) || 0;
+                      // A module belongs to its system, so moving the system
+                      // takes the module off rather than carrying a unit that
+                      // is fitted somewhere else.
+                      const keep = equipment.assets.some((a) => a.id === form.assetId && a.instrumentId === instrumentId);
+                      setForm({ ...form, instrumentId, assetId: keep ? form.assetId : 0 });
+                    }}>
+                    <option value="">No system</option>
+                    {equipment.systems.map((x) => (
+                      <option key={x.id} value={x.id}>{x.externalId}{x.label ? ` - ${x.label}` : ""}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label>Module</label>
+                  <select value={form.assetId || ""} aria-label="Module this job is on"
+                    onChange={(e) => setForm({ ...form, assetId: parseInt(e.target.value) || 0 })}>
+                    <option value="">The whole system</option>
+                    {equipment.assets
+                      .filter((a) => a.instrumentId === form.instrumentId)
+                      .map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+                  </select>
+                  <div className="mut t-meta" style={{ marginTop: 3 }}>
+                    The unit the work was on. Its own model and serial are what the report names.
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </Dialog>
       )}
 
