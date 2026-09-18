@@ -477,6 +477,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
       {tab === "sites" && <SitesCard
         orgId={org.id} orgName={org.name} billingAddress={org.billingAddress}
         contactEmail={org.contactEmail}
+        ownCompany={user.operatorOrgId === org.id}
         canEdit={mayConfigure}
         sites={siteRows.map((r) => ({
           id: r.id, name: r.name, address: r.address, accessNotes: r.accessNotes,
