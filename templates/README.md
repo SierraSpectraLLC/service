@@ -40,3 +40,10 @@ Two conventions the app relies on:
 
 Renaming a sheet tab breaks the export with a clear error naming the sheet
 it expected - so don't rename the tabs.
+
+## Adding a file here
+
+Name it in `outputFileTracingIncludes` in `next.config.mjs`, against the
+route that reads it. Serverless bundling traces what code imports and
+nothing else, so a file added here without that line is present in the
+repo, present in dev, and missing from the deployed function.
