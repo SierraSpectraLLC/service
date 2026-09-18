@@ -8936,6 +8936,9 @@ async function ruleAllowance(
     oneWayMiles: site?.miles ?? null,
     nights,
     siteName: site?.name ?? "",
+    // Which end could not be measured, so the flag names it - see
+    // tripMiles.workOrderTrip.
+    why: site?.why || trip?.why || "",
   });
   const verdict = allowanceFor(offer, input.amountCents);
   return { ...verdict, siteId: site?.siteId ?? null, nights };
