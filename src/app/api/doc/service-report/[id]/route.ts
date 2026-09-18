@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/authz";
 import { readTenant } from "@/lib/tenancy";
 import { docFileName, docHeaders } from "@/lib/docStyle";
-import { issuedReport } from "@/lib/serviceReportData";
+import { brandForTenant } from "@/lib/brand";
+import { issuedReport, reportLogo } from "@/lib/serviceReportData";
 import { buildServiceReport } from "@/lib/serviceReport";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +31,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const bytes = await buildServiceReport(found.report);
+  // The mark is not part of the frozen report - see ServiceReport.logo.
+  const logo = await reportLogo(await brandForTenant(found.row.tenantOrgId));
+  const bytes = await buildServiceReport({ ...found.report, logo });
   const name = docFileName("Report", found.row.number, found.report.customer.name, "pdf");
   return new NextResponse(new Uint8Array(bytes), { headers: docHeaders(name, "pdf") });
 }

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { PDFArray, PDFDocument, PDFRawStream, decodePDFRawStream } from "pdf-lib";
 import { buildServiceReport, reportTotals, type ServiceReport } from "@/lib/serviceReport";
@@ -104,6 +105,16 @@ describe("the report keeps its shape", () => {
     const one = pageText(await load(visit()), 0);
     expect(one).toContain("Shimadzu UV-1900 UV-Vis");
     expect(one).toContain("A12425650267");
+  });
+
+  it("embeds the mark it is handed, and types the name when it has none", async () => {
+    const png = readFileSync("templates/ServiceReportLogo.png");
+    const withLogo = Buffer.from(await buildServiceReport(visit({ logo: new Uint8Array(png) }))).toString("latin1");
+    expect(withLogo).toContain("/Subtype /Image");
+    // No mark: the operator's name is typed, letter-spaced. Never a stand-in.
+    const bare = await load(visit({ provider: { name: "Acme Engineering", lines: [] } }));
+    expect(Buffer.from(await bare.save()).toString("latin1")).not.toContain("/Subtype /Image");
+    expect(pageText(bare, 0)).toContain("A C M E");
   });
 
   it("names the module instead of the model when the work was on one", async () => {

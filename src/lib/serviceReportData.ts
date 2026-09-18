@@ -7,6 +7,8 @@
 // contract's balances from lib/agreements, which is what the coverage panel
 // shows. A report that disagreed with either would be worse than no report.
 
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -14,7 +16,7 @@ import {
 } from "@/db/schema";
 import { countsAsVisit, drawdown } from "@/lib/agreements";
 import { usageFor } from "@/lib/agreementUsage";
-import { brandForTenant } from "@/lib/brand";
+import { brandForTenant, type Brand } from "@/lib/brand";
 import { draftSourceFor } from "@/lib/invoiceData";
 import { shopToday } from "@/lib/shopday";
 import { docContactLine } from "@/lib/xlsxDocData";
@@ -203,4 +205,28 @@ export async function issuedReport(id: number): Promise<
   const [row] = await db.select().from(serviceReports).where(eq(serviceReports.id, id));
   if (!row) return null;
   return { row, report: row.data as ServiceReport };
+}
+
+/**
+ * The mark for page one.
+ *
+ * templates/ServiceReportLogo.png first - it sits beside the invoice and
+ * quote workbooks because it is the same kind of thing, the shop's own
+ * artwork on the shop's own paperwork, made for this page at this size. A
+ * deployment without one falls back to the logo uploaded under the
+ * operator's appearance, which was drawn for a 30px email header and may
+ * not suit; and one with neither gets its name typed. Never another
+ * company's mark.
+ */
+export async function reportLogo(brand: Pick<Brand, "operatorLogoUrl">): Promise<Uint8Array | undefined> {
+  try {
+    return new Uint8Array(await readFile(path.join(process.cwd(), "templates", "ServiceReportLogo.png")));
+  } catch { /* no file shipped */ }
+  if (brand.operatorLogoUrl) {
+    try {
+      const res = await fetch(brand.operatorLogoUrl);
+      if (res.ok) return new Uint8Array(await res.arrayBuffer());
+    } catch { /* an unreachable blob costs the mark, not the report */ }
+  }
+  return undefined;
 }

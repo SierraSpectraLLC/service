@@ -40,21 +40,8 @@ const BOX = rgb(0.98, 0.98, 0.98);       // a value cell
  */
 const S = { title: 13.5, band: 9.5, body: 8.5, cell: 8, foot: 8.5 };
 
-/**
- * The spectrum mark: five segments through six points, a dot at every
- * vertex, drawn rather than embedded so no image has to travel with the code.
- * The points are the original's, in points from the mark's own origin.
- *
- * NOTE: this is ONE service company's logo. Everything else on this page is
- * data, so a report can be issued by whichever operator did the work; this is
- * not. Before this generator is wired to a page on a multi-operator instance,
- * it has to come from that operator's uploaded logo (orgs.logo_url, already on
- * brandForTenant) - printing one company's mark on another's service report is
- * a false statement about who did the work.
- */
-const MARK_POINTS: [number, number][] = [[0, 2], [27, 33], [44, 20], [75, 60], [102, 20], [127, 0]];
-const MARK_COLORS = ["E8756A", "E8A370", "C5D44A", "7BAFD4", "9B8EB8"];
-const hex = (h: string) => rgb(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255);
+/** The mark on page one is an IMAGE the caller hands in - see ServiceReport.logo. */
+const LOGO_W = 150;
 
 export type ReportLine = {
   description: string;
@@ -113,6 +100,15 @@ export type ServiceReport = {
     providerImage?: Uint8Array; customerImage?: Uint8Array;
   };
   contact: string;
+  /**
+   * The mark on the first page: PNG or JPEG bytes, embedded as given. It is
+   * the one thing on the page that is the operator's rather than the
+   * layout's, and it is NOT part of the frozen report - the loader supplies it
+   * at render time from templates/ServiceReportLogo.png, or from the logo
+   * uploaded under the operator's appearance. Absent, the operator's name is
+   * typed where the mark would be, and no other company's mark stands in.
+   */
+  logo?: Uint8Array;
 };
 
 const money = (cents: number) =>
@@ -143,7 +139,7 @@ export async function buildServiceReport(r: ServiceReport): Promise<Uint8Array> 
 
   const page1 = doc.addPage([PAGE.w, PAGE.h]);
   let y = header(page1, F, r);
-  y = overview(page1, F, r, y);
+  y = await overview(doc, page1, F, r, y);
   y = requestBlock(page1, F, r, y);
   let left = notesBlock(page1, F, r, y, r.notes.body.split("\n"), false).left;
   // A long visit gets more paper rather than a shorter record.
@@ -205,24 +201,27 @@ function header(page: PDFPage, F: Fonts, r: ServiceReport): number {
 }
 
 /** Logo, then the provider and customer columns side by side. */
-function parties(page: PDFPage, F: Fonts, r: ServiceReport, y: number): number {
-  // The mark, in the left third, with the wordmark typed under it.
-  const markX = M + 17, markY = y - 96;
-  for (let i = 0; i < MARK_POINTS.length - 1; i++) {
-    const [ax, ay] = MARK_POINTS[i], [bx, by] = MARK_POINTS[i + 1];
-    page.drawLine({
-      start: { x: markX + ax, y: markY + ay }, end: { x: markX + bx, y: markY + by },
-      thickness: 3.2, color: hex(MARK_COLORS[i]),
-    });
+async function parties(doc: PDFDocument, page: PDFPage, F: Fonts, r: ServiceReport, y: number): Promise<number> {
+  // The mark fills the left third under the header, at the width the sheet
+  // gives it. PNG or JPEG, told apart by their first bytes; anything else,
+  // or bytes that will not decode, cost the mark and not the report.
+  let drawn = false;
+  if (r.logo && r.logo.length > 4) {
+    try {
+      const isPng = r.logo[0] === 0x89 && r.logo[1] === 0x50;
+      const img = isPng ? await doc.embedPng(r.logo) : await doc.embedJpg(r.logo);
+      const h = (LOGO_W * img.height) / img.width;
+      page.drawImage(img, { x: M, y: y - 1 - h, width: LOGO_W, height: h });
+      drawn = true;
+    } catch { /* no mark rather than no report */ }
   }
-  for (const [i, [px, py]] of MARK_POINTS.entries()) {
-    page.drawCircle({ x: markX + px, y: markY + py, size: 3.6, color: hex(MARK_COLORS[Math.min(i, MARK_COLORS.length - 1)]) });
+  if (!drawn) {
+    // Whoever is issuing the report, letter-spaced the way the wordmark is
+    // typed - not a company name baked into the generator.
+    const words = r.provider.name.trim().toUpperCase().split(/\s+/).filter(Boolean);
+    const wordmark = words.map((w) => [...w].join(" ")).join("   \u2022   ");
+    centered(page, wordmark, M, M + LOGO_W, y - 80, F.bold, 7, rgb(0.25, 0.25, 0.25));
   }
-  // The wordmark is whoever is issuing the report, letter-spaced the way the
-  // original prints it - not a company name baked into the generator.
-  const words = r.provider.name.trim().toUpperCase().split(/\s+/).filter(Boolean);
-  const wordmark = words.map((w) => [...w].join(" ")).join("   •   ");
-  centered(page, wordmark, markX - 10, markX + 137, markY - 24, F.bold, 7, rgb(0.25, 0.25, 0.25));
 
   const cols = [
     { x: 241, head: "Service Provider:", who: r.provider },
@@ -268,8 +267,8 @@ function pairs(
   return cy;
 }
 
-function overview(page: PDFPage, F: Fonts, r: ServiceReport, yIn: number): number {
-  const y = parties(page, F, r, yIn);
+async function overview(doc: PDFDocument, page: PDFPage, F: Fonts, r: ServiceReport, yIn: number): Promise<number> {
+  const y = await parties(doc, page, F, r, yIn);
   const bottom = band(page, F, "Service Overview", y);
 
   // The label columns are grey, left and right, and the left one runs nine

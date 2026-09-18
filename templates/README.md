@@ -7,6 +7,14 @@ These three workbooks ARE the layout of the paperwork the app exports:
 | `InvoiceTemplate.xlsx` | an invoice's page → **Excel** | `/api/export/invoice/{id}` |
 | `QuoteTemplate.xlsx` | a quote's page → **Excel** | `/api/export/quote/{id}` |
 | `POTemplate.xlsx` | a purchase order's page → **Excel** | `/api/export/po/{id}` |
+| `ServiceReportLogo.png` | the mark on a service report's first page | `/api/doc/service-report/{id}` |
+
+The service report itself is drawn in code (`src/lib/serviceReport.ts`),
+because its notes and tables have to grow with the visit; the logo is the
+one part of it that is yours rather than the layout's, so it lives here
+with the other paperwork. Replace the file to change the mark. Without
+it, the report types the operator's name where the mark would be, or
+embeds the logo uploaded under the operator's workspace appearance.
 
 ## Changing the layout
 
