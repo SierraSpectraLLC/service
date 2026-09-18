@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { addOrgSite, archiveOrgSite, setOrgBillingAddress, updateOrgSite } from "@/app/actions";
+import { addOrgSite, archiveOrgSite, setOrgBillingAddress, setOrgContactEmail, updateOrgSite } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { addressLine, siteLabel } from "@/lib/sites";
@@ -30,10 +30,12 @@ const emptySite = { name: "", address: "", accessNotes: "", contactName: "", con
  * BUILDING, so it is here rather than on the company - where it would be noise
  * on an invoice screen and wrong the day they open a second lab.
  */
-export default function SitesCard({ orgId, orgName, billingAddress, sites, canEdit, showBilling = true }: {
+export default function SitesCard({ orgId, orgName, billingAddress, contactEmail, sites, canEdit, showBilling = true }: {
   orgId: number;
   orgName: string;
   billingAddress: string;
+  /** The address on the documents this company signs. See setOrgContactEmail. */
+  contactEmail: string;
   sites: SiteRow[];
   canEdit: boolean;
   /**
@@ -45,6 +47,8 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
 }) {
   const [billing, setBilling] = useState(billingAddress);
   const [billingMsg, setBillingMsg] = useState("");
+  const [contact, setContact] = useState(contactEmail);
+  const [contactMsg, setContactMsg] = useState("");
   const [sheet, setSheet] = useState<null | { id?: number }>(null);
   const [draft, setDraft] = useState(emptySite);
   const [error, setError] = useState("");
@@ -140,6 +144,34 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
             {billingMsg}
           </span>
         )}
+
+        {/* The address the paperwork tells a client to write to. Its own field
+            because it is not where invoices go and not the platform's support
+            desk - it is this company, on this company's documents. */}
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+          <div className="card-title" style={{ marginBottom: 4 }}>Contact address</div>
+          <div className="mut t-small" style={{ marginBottom: 8 }}>
+            Printed on the documents {orgName} signs - the footer of a service report.
+            Blank falls back to this instance&apos;s own contact address.
+          </div>
+          <input type="email" value={contact} disabled={!canEdit || pending} aria-label="Contact email"
+            placeholder="service@example.com" className="t-body" style={{ marginBottom: 6 }}
+            onChange={(e) => { setContact(e.target.value); setContactMsg(""); }} />
+          {canEdit && (
+            <button className="btn sm" disabled={pending || contact === contactEmail}
+              onClick={() => startTransition(async () => {
+                const res = await setOrgContactEmail(orgId, contact);
+                setContactMsg(res?.error ?? "Saved ✓");
+              })}>
+              Save
+            </button>
+          )}
+          {contactMsg && (
+            <span className="t-small" style={{ marginLeft: 8, color: contactMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>
+              {contactMsg}
+            </span>
+          )}
+        </div>
       </div>}
 
       <div className="card">

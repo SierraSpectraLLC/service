@@ -36,6 +36,7 @@ export default async function OrganizationSitesPage() {
       title="Site locations"
       sub={`Where ${org.name} is. An employee's staffed location is one of these.`}>
       <SitesCard orgId={org.id} orgName={org.name} billingAddress={org.billingAddress}
+        contactEmail={org.contactEmail}
         showBilling={false} canEdit={canEdit}
         sites={siteRows.map((r) => ({
           id: r.id, name: r.name, address: r.address, accessNotes: r.accessNotes,

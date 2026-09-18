@@ -15,6 +15,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 const { PGlite } = await import("@electric-sql/pglite");
 const { drizzle } = await import("drizzle-orm/pglite");
 const schema = await import("@/db/schema");
+const { eq } = await import("drizzle-orm");
 
 const client = new PGlite();
 const testDb = drizzle(client, { schema });
@@ -240,6 +241,37 @@ describe("issuing a report", () => {
     expect(entry.entityType).toBe("service_report");
     expect(entry.action).toContain("issued 030182_SR1 for 030182");
     expect(entry.tenantOrgId).toBe(SIERRA);
+  }, SLOW);
+});
+
+describe("whose address the footer carries", () => {
+  it("is the service company's own, not the platform's support desk", async () => {
+    const { issueServiceReport, setOrgContactEmail, reissueServiceReport } = await import("@/app/actions");
+    await client.exec(`UPDATE app_settings SET public_contact_email = 'support@ridgelinefield.com' WHERE id = 1;`);
+    await issueServiceReport(1);
+    const [first] = await testDb.select().from(schema.serviceReports);
+    // Nothing set, so the instance's own address stands in - right for a
+    // one-company instance, wrong the moment the platform is somebody else.
+    expect((first.data as import("@/lib/serviceReport").ServiceReport).contact)
+      .toBe("Sierra Spectra | support@ridgelinefield.com");
+
+    expect((await setOrgContactEmail(SIERRA, " service@sierraspectra.com ")).error).toBeUndefined();
+    await reissueServiceReport(first.id);
+
+    const [row] = await testDb.select().from(schema.serviceReports);
+    expect((row.data as import("@/lib/serviceReport").ServiceReport).contact)
+      .toBe("Sierra Spectra | service@sierraspectra.com");
+    await client.exec(`UPDATE orgs SET contact_email = '' WHERE id = ${SIERRA};`);
+  }, SLOW);
+
+  it("refuses something that is not an address, and takes a blank as clearing it", async () => {
+    const { setOrgContactEmail } = await import("@/app/actions");
+    expect((await setOrgContactEmail(SIERRA, "service.sierraspectra.com")).error)
+      .toMatch(/does not look like an email/);
+    expect((await setOrgContactEmail(SIERRA, "service@sierraspectra.com")).error).toBeUndefined();
+    expect((await setOrgContactEmail(SIERRA, "")).error).toBeUndefined();
+    const [org] = await testDb.select().from(schema.orgs).where(eq(schema.orgs.id, SIERRA));
+    expect(org.contactEmail).toBe("");
   }, SLOW);
 });
 
