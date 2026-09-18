@@ -78,16 +78,29 @@ export const getBrand = cache(async (): Promise<Brand> => {
  */
 export const brandForTenant = cache(async (tenantOrgId: number | null): Promise<Brand> => {
   const base = await getBrand();
-  if (tenantOrgId === null || tenantOrgId === base.operatorOrgId) return base;
+  // The instance's own operator when no workspace is named - so a document
+  // about the house's own bench signs the same way as everything else.
+  const orgId = tenantOrgId ?? base.operatorOrgId;
+  if (orgId === null) return base;
   try {
-    const [o] = await db.select({ name: orgs.name, logoUrl: orgs.logoUrl })
-      .from(orgs).where(eq(orgs.id, tenantOrgId));
+    const [o] = await db.select({ name: orgs.name, logoUrl: orgs.logoUrl, contactEmail: orgs.contactEmail })
+      .from(orgs).where(eq(orgs.id, orgId));
     if (!o) return base;
     return {
       ...base,
       operatorName: o.name || base.operatorName,
-      operatorOrgId: tenantOrgId,
-      operatorLogoUrl: o.logoUrl,
+      operatorOrgId: orgId,
+      operatorLogoUrl: o.logoUrl || (orgId === base.operatorOrgId ? base.operatorLogoUrl : ""),
+      /*
+       * The company's own address, where it has one.
+       *
+       * The fallback is the PLATFORM's public enquiry address, which is right
+       * for a one-company instance where they are the same desk and wrong the
+       * moment they are not: a service report signed by Sierra Spectra told
+       * the client to write to the platform's support address. Set the
+       * company's own and its documents carry it.
+       */
+      contactEmail: o.contactEmail.trim() || base.contactEmail,
     };
   } catch {
     return base;

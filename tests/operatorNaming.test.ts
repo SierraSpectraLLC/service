@@ -75,10 +75,14 @@ function filesRenderingOperatorName(): string[] {
 describe("a page names the workspace whose record it is", () => {
   it("brandForTenant resolves per tenant and falls back to the instance", async () => {
     // Guards the primitive itself, so the static check below cannot be passing
-    // over a function that stopped distinguishing anything.
+    // over a function that stopped distinguishing anything: it has to resolve a
+    // workspace - its own, or the instance's operator when none is named - and
+    // it has to fall back to the instance when that resolves to nothing.
     const src = readFileSync("src/lib/brand.ts", "utf8");
     expect(src).toContain("export const brandForTenant");
-    expect(src).toContain("tenantOrgId === null || tenantOrgId === base.operatorOrgId");
+    expect(src).toContain("tenantOrgId ?? base.operatorOrgId");
+    expect(src).toContain("if (orgId === null) return base;");
+    expect(src).toContain("if (!o) return base;");
   });
 
   it("every page resolving operatorName from getBrand() is a public surface", () => {

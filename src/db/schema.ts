@@ -416,6 +416,15 @@ export const orgs = pgTable("orgs", {
   // be several, and conflating the two is what makes a service business print
   // the wrong thing on paper.
   billingAddress: text("billing_address").notNull().default(""),
+  /**
+   * How a client reaches this company: the address printed on the documents it
+   * signs - a service report's footer, a quote's contact line. Distinct from
+   * app_settings.public_contact_email, which is where a stranger writes to the
+   * PLATFORM; a report about Sierra Spectra's visit carrying the platform's
+   * support desk is a false statement about who did the work. Blank falls back
+   * to the platform's address, which is what a one-company instance wants.
+   */
+  contactEmail: text("contact_email").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   /*

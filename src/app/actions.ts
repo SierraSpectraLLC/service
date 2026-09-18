@@ -14323,6 +14323,36 @@ export async function setOrgBillingAddress(orgId: number, address: string): Prom
   return {};
 }
 
+/**
+ * How a client reaches this company - the address its documents carry.
+ *
+ * Its own rather than the platform's: a service report signed by one service
+ * company that tells the client to write to the software vendor's support desk
+ * is a false statement about who did the work. Blank falls back to the
+ * platform's address, which is what a one-company instance wants.
+ */
+export async function setOrgContactEmail(orgId: number, email: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  try { await assertOrgConfigurable(u, org); } catch { return { error: "Not found" }; }
+  const next = email.trim().slice(0, 160);
+  // Loose on purpose - the shapes an address can take are not worth arguing
+  // with - but an address with no @ in it is a typo every time.
+  if (next && !/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(next)) {
+    return { error: "That does not look like an email address." };
+  }
+  if (next === org.contactEmail) return {};
+  await db.update(orgs).set({ contactEmail: next }).where(eq(orgs.id, orgId));
+  await audit({
+    actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: orgTenant(org),
+    action: next ? `set ${org.name}'s contact address to ${next}` : `cleared ${org.name}'s contact address`,
+    field: "contactEmail", oldValue: org.contactEmail, newValue: next,
+  });
+  revalidatePath(`/settings/organizations/${orgId}`);
+  return {};
+}
+
 // ── PM plans ────────────────────────────────────────────────────────────────
 // What a client is owed in preventive maintenance, per class of system. The
 // promise, not the machine: nothing here generates work, and pm_schedules is

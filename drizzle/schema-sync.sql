@@ -4762,3 +4762,7 @@ END $$;
 -- Who signs the service report for the client, when that is not the person who
 -- asked for the work. Blank means the requester.
 ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "client_signatory" text NOT NULL DEFAULT '';
+
+-- How a client reaches a service company: the address on the documents it
+-- signs. Blank falls back to the platform's own contact address.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "contact_email" text NOT NULL DEFAULT '';
