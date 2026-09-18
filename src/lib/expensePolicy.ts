@@ -152,6 +152,13 @@ export type Trip = {
   nights: number;
   /** The lab, for the sentence. "" when there isn't one to name. */
   siteName: string;
+  /**
+   * Why the distance is unknown, when it is - see tripMiles.TripSite.why. A
+   * reviewer told "no home base on file for them, or the job's site has no
+   * address" has two records to check and no idea which; told "Bill Harner's
+   * trips start from LabZen HQ, which has no map pin" they have one.
+   */
+  why?: string;
 };
 
 export type PerDiemOffer = {
@@ -223,8 +230,9 @@ export function perDiemOffer(p: ExpensePolicy, trip: Trip): PerDiemOffer {
       ruled: true,
       allowedCents: p.dayPerDiemCents,
       description: `Per diem, day trip${at}`,
-      flag: "The distance from home could not be worked out - no home base on file for them,"
-        + " or the job's site has no address. Check the trip before approving this one.",
+      flag: `The distance could not be worked out - ${trip.why?.trim()
+        || "no home base on file for them, or the job's site has no address"}.`
+        + " Check the trip before approving this one.",
     };
   }
 

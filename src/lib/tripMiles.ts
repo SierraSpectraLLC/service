@@ -8,7 +8,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { driveCache, houseMembers, instruments, orgSites, workOrders } from "@/db/schema";
-import { coordsMoved, drivingMiles, type LatLng } from "@/lib/geo";
+import { coordsMoved, drivingMiles, geocode, type LatLng } from "@/lib/geo";
 import { siteLabel } from "@/lib/sites";
 
 export type SiteMiles = {
@@ -29,6 +29,38 @@ export type SiteMiles = {
  * Null is a real answer the callers handle (the site's typed default, then
  * "somebody has to look at this").
  */
+/**
+ * Put a pin on a site that has an address and never got one.
+ *
+ * Coordinates are fetched when an address is SAVED, so a site saved while the
+ * geocoder was unreachable keeps an address and no pin for ever - and every
+ * per diem against it is flagged for a distance nobody can work out, months
+ * after the hiccup that caused it. Retried here, where the answer is about to
+ * be used, and written back so it is retried once rather than always.
+ *
+ * Returns the point, or null when there is no address or nobody could place
+ * it. Never throws: an unplaceable address costs a distance, not a page.
+ */
+async function placeSite(site: { id: number; address: string; lat: number | null; lng: number | null }): Promise<LatLng | null> {
+  if (site.lat !== null && site.lng !== null) return { lat: site.lat, lng: site.lng };
+  if (!site.address.trim()) return null;
+  const hit = await geocode(site.address).catch(() => null);
+  if (!hit) return null;
+  await db.update(orgSites).set({ lat: hit.lat, lng: hit.lng }).where(eq(orgSites.id, site.id));
+  return { lat: hit.lat, lng: hit.lng };
+}
+
+/** The same, for the address somebody's own trips start from. */
+async function placeHome(member: { email: string; homeAddress: string; homeLat: number | null; homeLng: number | null }): Promise<LatLng | null> {
+  if (member.homeLat !== null && member.homeLng !== null) return { lat: member.homeLat, lng: member.homeLng };
+  if (!member.homeAddress.trim()) return null;
+  const hit = await geocode(member.homeAddress).catch(() => null);
+  if (!hit) return null;
+  await db.update(houseMembers).set({ homeLat: hit.lat, homeLng: hit.lng })
+    .where(eq(houseMembers.email, member.email));
+  return { lat: hit.lat, lng: hit.lng };
+}
+
 export async function tripOrigin(
   member: { siteId: number | null; homeLat: number | null; homeLng: number | null },
 ): Promise<LatLng | null> {
@@ -103,12 +135,24 @@ export type TripSite = {
   miles: number | null;
   /** True when it is a straight-line guess because the router was unreachable. */
   estimated: boolean;
+  /** Why `miles` is null, in words a reviewer can act on. Blank when it is not. */
+  why: string;
 };
 
 export type WorkOrderTrip = {
   sites: TripSite[];
   /** The job's own lab - its system's site - when it has one. */
   defaultSiteId: number | null;
+  /**
+   * Why no distance could be worked out, named rather than implied. Blank when
+   * one could.
+   *
+   * "No home base on file for them, or the job's site has no address" sent a
+   * reviewer to check two records, neither of which was necessarily the one at
+   * fault - and the commonest cause was a third thing: an engineer whose site
+   * location points at a client's building. So it says which end it was.
+   */
+  why: string;
 };
 
 /**
@@ -134,11 +178,12 @@ export type WorkOrderTrip = {
 export async function workOrderTrip(
   claimantEmail: string, workOrderId: number,
 ): Promise<WorkOrderTrip> {
-  const none: WorkOrderTrip = { sites: [], defaultSiteId: null };
+  const none = (why: string): WorkOrderTrip => ({ sites: [], defaultSiteId: null, why });
   const [wo] = await db.select({
     orgId: workOrders.orgId, instrumentId: workOrders.instrumentId, assetId: workOrders.assetId,
   }).from(workOrders).where(eq(workOrders.id, workOrderId));
-  if (!wo || wo.orgId === null) return none;
+  if (!wo) return none("");
+  if (wo.orgId === null) return none("the job has no client on it, so it has no lab to measure to");
 
   const [siteRows, instRows] = await Promise.all([
     db.select().from(orgSites)
@@ -149,25 +194,88 @@ export async function workOrderTrip(
     wo.instrumentId === null ? Promise.resolve([]) : db.select({ siteId: instruments.siteId })
       .from(instruments).where(eq(instruments.id, wo.instrumentId)),
   ]);
-  if (!siteRows.length) return none;
+  if (!siteRows.length) {
+    return none("their client has no site on file, so there is no address to measure to");
+  }
 
-  const routed = await tripMilesFor(claimantEmail, siteRows.map((s) => s.id)).catch(() => []);
+  /*
+   * Place whatever can be placed before measuring: a site whose address never
+   * geocoded, and the claimant's own origin. Both are one write each and then
+   * never again, and both are the difference between a claim that rules itself
+   * and one that waits for somebody to look at two records.
+   */
+  const who = await originOf(claimantEmail);
+  for (const s of siteRows) await placeSite(s).catch(() => null);
+
+  const routed = who.point
+    ? await tripMilesFor(claimantEmail, siteRows.map((s) => s.id)).catch(() => [])
+    : [];
   /* One live lab and no system to name it: that IS the job's site. Nobody
      should have to pick from a list of one. */
   const defaultSiteId = instRows[0]?.siteId ?? (siteRows.length === 1 ? siteRows[0].id : null);
   return {
     sites: siteRows.map((s) => {
       const hit = routed.find((r) => r.siteId === s.id);
+      // The routed answer first; the site's own typed default second; then
+      // null, which the rulebook reads as "somebody has to look at this".
+      const miles = hit ? hit.miles : (s.onewayMiles > 0 ? s.onewayMiles : null);
       return {
         siteId: s.id,
         name: siteLabel(s),
-        // The routed answer first; the site's own typed default second; then
-        // null, which the rulebook reads as "somebody has to look at this".
-        miles: hit ? hit.miles : (s.onewayMiles > 0 ? s.onewayMiles : null),
+        miles,
         estimated: hit?.estimated ?? false,
+        // Whichever end is actually at fault. The origin first: with nowhere to
+        // measure FROM, no site could have been measured to.
+        why: miles !== null ? ""
+          : who.why || (s.address.trim()
+            ? `${siteLabel(s)} has an address but could not be placed on the map - re-save it, or type its one-way miles`
+            : `${siteLabel(s)} has no address on file`),
       };
     }),
     // Only when that site is actually one of the live ones offered.
     defaultSiteId: siteRows.some((s) => s.id === defaultSiteId) ? defaultSiteId : null,
+    why: who.why,
+  };
+}
+
+/**
+ * Where one person's trips start, and what stopped it when nothing does.
+ *
+ * Placing on the way: an address typed into a profile is a person saying where
+ * they live, and the app failing to turn it into a pin is the app's problem to
+ * retry rather than theirs to notice.
+ */
+async function originOf(email: string): Promise<{ point: LatLng | null; why: string }> {
+  const [member] = await db.select().from(houseMembers)
+    .where(eq(houseMembers.email, email.toLowerCase()));
+  if (!member) return { point: null, why: `there is no staff record for ${email}` };
+  const name = member.name || email;
+
+  if (member.siteId !== null) {
+    const [site] = await db.select().from(orgSites).where(eq(orgSites.id, member.siteId));
+    if (!site) return { point: null, why: `${name}'s site location no longer exists - set it on their file` };
+    const point = await placeSite(site).catch(() => null);
+    if (point) return { point, why: "" };
+    /* The commonest cause, and the one the old wording never mentioned: a
+       staffed site is an OVERRIDE, so an engineer who works from home but has
+       a client's building on their file is measured from that building - and
+       from nowhere at all when it has no pin. */
+    return {
+      point: null,
+      why: `${name}'s trips start from ${siteLabel(site)}, which has no map pin`
+        + (member.homeAddress.trim() ? ` - set their site location to "Works from home" to measure from their own address instead` : ""),
+    };
+  }
+
+  /* The pin first, then the address that could make one: somebody pinned on a
+     map without ever typing an address still has a home base, and telling them
+     they have none would be a lie about a record that works. */
+  const point = await placeHome(member).catch(() => null);
+  if (point) return { point, why: "" };
+  return {
+    point: null,
+    why: member.homeAddress.trim()
+      ? `${name}'s home address could not be placed on the map - check it reads as a real address`
+      : `there is no home address on ${name}'s file`,
   };
 }

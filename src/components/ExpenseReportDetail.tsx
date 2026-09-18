@@ -43,7 +43,11 @@ export type ReportExpense = {
 };
 
 /** One of the job's labs, with the claimant's road miles to it. */
-export type TripSite = { siteId: number; name: string; miles: number | null; estimated: boolean };
+export type TripSite = {
+  siteId: number; name: string; miles: number | null; estimated: boolean;
+  /** Why the distance is unknown, when it is. See lib/tripMiles.TripSite. */
+  why?: string;
+};
 
 /**
  * One expense report, opened like a record: the rows it claims, the receipt
@@ -191,6 +195,7 @@ export default function ExpenseReportDetail({
     oneWayMiles: site?.miles ?? null,
     nights: parseInt(tripDraft.nights, 10) || 0,
     siteName: site?.name ?? "",
+    why: site?.why ?? "",
   });
   /* Only when the rulebook is on, the claim names a job, and the category the
      engineer just picked is a per diem. Anything else and the dialog is the

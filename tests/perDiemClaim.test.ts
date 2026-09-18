@@ -220,12 +220,15 @@ describe("the verdict is the server's", () => {
   it("flags a claim it cannot measure rather than guessing", async () => {
     // The shop's own van service: no client, so no lab, so no distance. The
     // honest answer is that a person has to look - not a guessed zero, which
-    // would read as "next door" and flag it for the wrong reason.
+    // would read as "next door" and flag it for the wrong reason. And the note
+    // says which end was missing, so the look takes a second rather than a
+    // trawl through two records that may both be fine.
     const id = await openReport({ workOrderId: WO_NOSITE });
     await logPerDiem(id, { siteId: null });
     const [row] = await rows();
     expect(row.allowanceState).toBe("flagged");
-    expect(row.allowanceNote).toContain("distance from home could not be worked out");
+    expect(row.allowanceNote).toContain("The distance could not be worked out");
+    expect(row.allowanceNote).toContain("the job has no client on it");
   });
 
   it("finds the client's only lab even when the job names no system", async () => {
@@ -355,7 +358,7 @@ describe("the facts under a verdict can move", () => {
     // Onto the shop's own job, which has no lab: still a flag, for a different
     // reason, and the note now says the new one.
     expect((await setReportWorkOrder(id, WO_NOSITE)).error).toBeUndefined();
-    expect((await rows())[0].allowanceNote).toContain("distance from home could not be worked out");
+    expect((await rows())[0].allowanceNote).toContain("the job has no client on it");
   });
 
   it("spends an approval when the trip it was given for changes", async () => {

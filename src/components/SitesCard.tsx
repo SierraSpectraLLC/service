@@ -30,7 +30,10 @@ const emptySite = { name: "", address: "", accessNotes: "", contactName: "", con
  * BUILDING, so it is here rather than on the company - where it would be noise
  * on an invoice screen and wrong the day they open a second lab.
  */
-export default function SitesCard({ orgId, orgName, billingAddress, contactEmail, sites, canEdit, showBilling = true }: {
+export default function SitesCard({
+  orgId, orgName, billingAddress, contactEmail, sites, canEdit,
+  showBilling = true, ownCompany = false,
+}: {
   orgId: number;
   orgName: string;
   billingAddress: string;
@@ -44,6 +47,15 @@ export default function SitesCard({ orgId, orgName, billingAddress, contactEmail
    * stationed, and "where the invoices go" is a fact about a customer.
    */
   showBilling?: boolean;
+  /**
+   * Whether this is the workspace's OWN company rather than a customer.
+   *
+   * Nobody invoices you through your own instance, so "where the invoices go"
+   * is the wrong name for the field on your own record - there it is the
+   * address your documents are written from, and labelling it for accounts
+   * payable is how a service report goes out with a blank provider block.
+   */
+  ownCompany?: boolean;
 }) {
   const [billing, setBilling] = useState(billingAddress);
   const [billingMsg, setBillingMsg] = useState("");
@@ -122,13 +134,21 @@ export default function SitesCard({ orgId, orgName, billingAddress, contactEmail
   return (
     <>
       {showBilling && <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Billing address</div>
-        <div className="mut t-small" style={{ marginBottom: 8 }}>
-          Where {orgName}&apos;s invoices go. One per company - the labs are below.
+        <div className="card-title" style={{ marginBottom: 4 }}>
+          {ownCompany ? "Company address" : "Billing address"}
         </div>
-        <AddressField value={billing} rows={4} disabled={!canEdit || pending} ariaLabel="Billing address"
+        <div className="mut t-small" style={{ marginBottom: 8 }}>
+          {ownCompany
+            ? <>Printed on the documents {orgName} signs - the provider block at the top of a
+                service report. One per company; the places your people work are below.</>
+            : <>Where {orgName}&apos;s invoices go. One per company - the labs are below.</>}
+        </div>
+        <AddressField value={billing} rows={4} disabled={!canEdit || pending}
+          ariaLabel={ownCompany ? "Company address" : "Billing address"}
           onChange={(next) => { setBilling(next); setBillingMsg(""); }}
-          placeholder={"Accounts Payable\n123 Cedar St, Suite 400\nReno NV 89501"}
+          placeholder={ownCompany
+            ? "6770 Stanford Ranch Rd.\nSuite #1220\nRoseville, CA 95678"
+            : "Accounts Payable\n123 Cedar St, Suite 400\nReno NV 89501"}
           className="t-body" style={{ marginBottom: 6 }} />
         {canEdit && (
           <button className="btn sm" disabled={pending || billing === billingAddress}

@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allowanceFor, isPerDiemKind, needsApproval, perDiemOffer, resolveExpensePolicy,
-  DEFAULT_EXPENSE_POLICY,
+  DEFAULT_EXPENSE_POLICY, type Trip,
 } from "@/lib/expensePolicy";
 
 /** The owner's numbers: 80 mi radius, $30 lunch, $65 a night, $85 past 3. */
@@ -27,8 +27,8 @@ const POLICY = resolveExpensePolicy({
   hotelNightCapCents: 18000,
 });
 
-const trip = (over: Partial<{ oneWayMiles: number | null; nights: number; siteName: string }> = {}) =>
-  ({ oneWayMiles: 96 as number | null, nights: 0, siteName: "Pier Road", ...over });
+const trip = (over: Partial<Trip> = {}): Trip =>
+  ({ oneWayMiles: 96, nights: 0, siteName: "Pier Road", ...over });
 
 describe("which categories the rulebook speaks about", () => {
   it("recognises a per diem however the workspace spells it", () => {
@@ -127,8 +127,26 @@ describe("when the distance is unknowable", () => {
   const o = perDiemOffer(POLICY, trip({ oneWayMiles: null }));
 
   it("says so instead of guessing, and sends it to a reviewer", () => {
-    expect(o.flag).toContain("distance from home could not be worked out");
+    expect(o.flag).toContain("The distance could not be worked out");
     expect(allowanceFor(o, 3000).state).toBe("flagged");
+  });
+
+  it("names the end that failed when the trip knows which it was", () => {
+    // "No home base on file for them, or the job's site has no address" sent a
+    // reviewer to check two records, neither necessarily the one at fault.
+    const named = perDiemOffer(POLICY, trip({
+      oneWayMiles: null,
+      why: "Bill Harner's trips start from LabZen HQ, which has no map pin",
+    }));
+    expect(named.flag).toContain("start from LabZen HQ, which has no map pin");
+    expect(named.flag).not.toContain("or the job's site has no address");
+    // And it still offers the day rate and still asks for a signature.
+    expect(named.allowedCents).toBe(3000);
+    expect(allowanceFor(named, 3000).state).toBe("flagged");
+  });
+
+  it("keeps the old either/or when nothing can say which end it was", () => {
+    expect(o.flag).toContain("no home base on file for them, or the job's site has no address");
   });
 
   it("still offers the day rate, so the claim is not left blank", () => {
