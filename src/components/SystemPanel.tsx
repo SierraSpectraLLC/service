@@ -25,6 +25,8 @@ type Inst = {
   /** Whose block it is - null is the operator's own. See lib/blocks. */
   blockedOrgId: number | null;
   location: string; name: string;
+  /** The nameplate: who made it, its model number, its serial. */
+  manufacturer: string; model: string; serial: string;
   forSale: boolean; saleNote: string; listingToken: string;
   /**
    * Where to fetch the picture that represents the system: its cover photo, or
@@ -95,7 +97,10 @@ export default function SystemPanel({ instrument, label, clients, categories, st
   /** Today's client-report line, when the EOD module is on and the viewer may see it. */
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", notes: "", location: "", name: "", gxp: false });
+  const [draft, setDraft] = useState({
+    externalId: "", client: "", category: "", priority: "", notes: "", location: "", name: "", gxp: false,
+    manufacturer: "", model: "", serial: "",
+  });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -104,6 +109,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
       externalId: instrument.externalId, client: instrument.client, category: instrument.category,
       priority: String(instrument.priority), notes: instrument.notes, location: instrument.location,
       name: instrument.name, gxp: instrument.gxp,
+      manufacturer: instrument.manufacturer, model: instrument.model, serial: instrument.serial,
     });
     setError("");
     setEditing(true);
@@ -117,6 +123,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
           externalId: draft.externalId, client: draft.client, category: draft.category,
           priority: parseInt(draft.priority) || instrument.priority,
           location: draft.location, name: draft.name, gxp: draft.gxp,
+          manufacturer: draft.manufacturer, model: draft.model, serial: draft.serial,
         });
         if (res?.error) { setError(res.error); return; } // keep the form open with the bad value
       }
@@ -288,6 +295,30 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                     ? "Yours - the assets will never overwrite it."
                     : `Empty, so it's named from its assets: ${label || "nothing listed yet"}`}
                 </div>
+              </div>
+              {/* The nameplate. Its own row because these three are read
+                  together off the machine, and printed together on a service
+                  report - where a blank serial is the client's question. */}
+              <div className="pf3" style={{ marginBottom: 8 }}>
+                <div>
+                  <label>Make</label>
+                  <input value={draft.manufacturer} onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })}
+                    placeholder="Agilent" />
+                </div>
+                <div>
+                  <label>Model</label>
+                  <input className="mono" value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })}
+                    placeholder="G6410B" />
+                </div>
+                <div>
+                  <label>Serial</label>
+                  <input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })}
+                    placeholder="US93911385" />
+                </div>
+              </div>
+              <div className="mut t-meta" style={{ margin: "0 0 8px" }}>
+                Printed at the top of every service report for this system. A module's own
+                make, model and serial live on the module, under Assets.
               </div>
               <div className="pf2" style={{ marginBottom: 8 }}>
                 <div>

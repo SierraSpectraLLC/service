@@ -34,6 +34,21 @@ function drawnYs(doc: PDFDocument, ix: number): number[] {
   return [...raw.matchAll(/1 0 0 1 (-?[\d.]+) (-?[\d.]+) Tm/g)].map((m) => parseFloat(m[2]));
 }
 
+/**
+ * Every rectangle drawn on a page, as {x, y, w, h} in points. pdf-lib writes a
+ * box as a translate and a path, so the numbers are read back out of both.
+ */
+function boxes(doc: PDFDocument, ix: number): { x: number; y: number; w: number; h: number }[] {
+  const contents = doc.getPage(ix).node.Contents();
+  const streams = contents instanceof PDFArray ? contents.asArray().map((r) => doc.context.lookup(r)) : [contents];
+  let raw = "";
+  for (const s of streams) {
+    if (s instanceof PDFRawStream) raw += Buffer.from(decodePDFRawStream(s).decode()).toString("latin1");
+  }
+  return [...raw.matchAll(/1 0 0 1 ([\d.]+) ([\d.]+) cm\s+1 0 0 1 0 0 cm\s+1 0 0 1 0 0 cm\s+0 0 m\s+0 ([\d.]+) l\s+([\d.]+) [\d.]+ l/g)]
+    .map((m) => ({ x: parseFloat(m[1]), y: parseFloat(m[2]), h: parseFloat(m[3]), w: parseFloat(m[4]) }));
+}
+
 /** The August visit to Modesto Irrigation District, as it was actually sent. */
 function visit(over: Partial<ServiceReport> = {}): ServiceReport {
   return {
@@ -173,6 +188,40 @@ describe("the report keeps its shape", () => {
     expect(one).toContain("Instrument as found:");
     expect(one).toContain("- Checked 550nm Green Slit | OK");
     expect(one).toContain("ALL PASS. ALL OK");
+  });
+});
+
+describe("the paper, not the words", () => {
+  it("runs the notes box to the foot of the page however short the visit was", async () => {
+    // The sheet prints its cells where its cells are. A two-line close-out
+    // used to get a two-line box floating in half a page of white.
+    const short = boxes(await load(visit({ notes: { date: "2025-08-25", body: "Looked at it. Fine." } })), 0);
+    const long = boxes(await load(visit()), 0);
+    const full = (bs: typeof short) => bs.filter((b) => b.w > 560 && b.h > 150);
+    expect(full(short)).toHaveLength(1);
+    // Bottom edge on the original's rule, a line and a half above the footer.
+    expect(full(short)[0].y).toBe(66);
+    // And the long one ends in the same place, so two reports stack.
+    expect(full(long)[0].y).toBe(66);
+    expect(full(short)[0].h).toBeCloseTo(full(long)[0].h, 5);
+  });
+
+  it("puts the signatures and the closing lines where the sheet puts them", async () => {
+    // Anchored to the paper: a visit with thirty parts on it must not push
+    // the contact line into the page number.
+    const busy = visit({
+      parts: Array.from({ length: 9 }, (_, i) => ({
+        description: `Part ${i + 1}`, partNumber: `P-${i}`, quantity: 1, unitCents: 1000, taxExempt: true,
+      })),
+    });
+    for (const r of [visit(), busy]) {
+      const doc = await load(r);
+      const ys = drawnYs(doc, doc.getPageCount() - 1);
+      // The statement, THIS IS NOT AN INVOICE, the question, the contact.
+      for (const y of [109, 83, 70, 57]) expect(ys).toContain(y);
+      // Nothing below the page number.
+      expect(Math.min(...ys)).toBeGreaterThanOrEqual(44);
+    }
   });
 });
 

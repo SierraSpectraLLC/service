@@ -176,7 +176,7 @@ export async function serviceReportDraft(woId: number): Promise<ReportDraft | nu
       // is, which is how the original names the machine. The model number gets
       // its own row under it.
       type: inst
-        ? [inst.manufacturer, inst.name || inst.model].filter(Boolean).join(" ")
+        ? [inst.manufacturer, inst.name || inst.category || inst.model].filter(Boolean).join(" ")
         : [asset?.manufacturer, asset?.kind].filter(Boolean).join(" "),
       model: (asset && inst ? "" : asset?.model) || inst?.model || "",
       serial: asset?.serial || inst?.serial || "",
