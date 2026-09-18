@@ -120,9 +120,15 @@ export async function serviceReportDraft(woId: number): Promise<ReportDraft | nu
     .from(parts).where(eq(parts.workOrderId, woId));
   const byId = new Map(partRows.map((p) => [p.id, p]));
   const items: ReportItem[] = src.lines
-    // Tax is settled on the invoice. The report shows what was done and what
-    // the contract absorbed, and marks its lines exempt or not.
-    .filter((l) => l.kind !== "tax" && l.kind !== "fee_ref" && l.kind !== "retainer")
+    /*
+     * What the visit put into the machine, and what it took to do it.
+     *
+     * Tax is settled on the invoice, and so are the shop's own costs of
+     * getting there: a per diem, parking, a tank of fuel are an engineer's
+     * expense claim, not something a client's signature page itemises. Both
+     * still reach the invoice; neither reaches this document.
+     */
+    .filter((l) => !["tax", "fee_ref", "retainer", "expense"].includes(l.kind))
     .map((l) => {
       const part = l.kind === "part" && l.sourceId !== null ? byId.get(l.sourceId) : undefined;
       return {
