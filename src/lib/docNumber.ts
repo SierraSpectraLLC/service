@@ -18,7 +18,7 @@
 // back at you a year later, so the rule that makes them has to be arguable
 // against a filing cabinet without a database in the room.
 
-export const DOC_KINDS = ["work_order", "quote", "invoice", "purchase_order"] as const;
+export const DOC_KINDS = ["work_order", "quote", "invoice", "purchase_order", "service_report"] as const;
 export type DocKind = (typeof DOC_KINDS)[number];
 
 export const DOC_LABEL: Record<DocKind, string> = {
@@ -26,6 +26,7 @@ export const DOC_LABEL: Record<DocKind, string> = {
   quote: "Quotes",
   invoice: "Invoices",
   purchase_order: "Purchase orders",
+  service_report: "Service reports",
 };
 
 /**
@@ -61,6 +62,10 @@ export const DEFAULT_SCHEME: Scheme = {
     quote: "Q-{seq}",
     invoice: "INV-{seq}",
     purchase_order: "PO-{seq}",
+    // A report is the record of one visit, and a job may take several - so
+    // in a job-numbered shop this is {job:6}_SR{seq} and the fourth visit's
+    // report is 030182_SR4, which is how the filing cabinet reads.
+    service_report: "SR-{seq}",
   },
   jobStart: 1001,
 };

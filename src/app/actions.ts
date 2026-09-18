@@ -15,6 +15,7 @@ import {
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
+  serviceReports,
   awards, shareLinkSystems, providerProfiles, providerLinks, clientShares, referralFees,
   leads, leadOffers, calendarNotes,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
@@ -146,6 +147,7 @@ import { systemParties, systemPartiesFor } from "@/lib/partyData";
 import { VIEW_LABEL, isViewPref, viewAllowed, type ViewMode } from "@/lib/viewMode";
 import { gasesForSystemWithUnits, gasesForUnit, missingGases } from "@/lib/catalogGas";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
+import { serviceReportDraft } from "@/lib/serviceReportData";
 import { composeEodEmail, isOffSystem } from "@/lib/eodEmail";
 import { isOwnEodRow } from "@/lib/eodLines";
 import {
@@ -16030,6 +16032,75 @@ export async function draftInvoice(workOrderId: number): Promise<{ error?: strin
       });
       revInvoice(inv);
       return { id: inv.id };
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+/**
+ * Issue the service report for a finished visit.
+ *
+ * The document the client actually signs: what they asked for, what was found,
+ * what was fitted, and what their agreement just absorbed. It is not an
+ * invoice and says so across its foot - a contract visit prints three thousand
+ * dollars of parts and nothing due, which is the sentence that makes a
+ * retainer visible to the people who pay for it.
+ *
+ * Issued from a RESOLVED job as readily as a closed one. Resolving is the
+ * engineer saying the work is done; closing is the client agreeing - and the
+ * report is most of what they are agreeing to, so it cannot wait for the
+ * agreement it is meant to produce.
+ *
+ * Frozen at issue. A report is countersigned and filed on the client's side,
+ * so re-rendering it next year from a rate card since changed would produce a
+ * different document under the same number. Issue another one instead: a job
+ * that takes three visits issues three reports, _SR1 to _SR3.
+ *
+ * Numbers race exactly as invoice numbers do, and the unique index is what
+ * makes two people pressing the button at once a failed insert rather than
+ * two SR4s. This retries.
+ */
+export async function issueServiceReport(workOrderId: number): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const found = await loadWorkOrder(u, workOrderId);
+  if ("error" in found) return found;
+  const { wo } = found;
+  if (wo.state !== "resolved" && wo.state !== "closed") {
+    return { error: `${wo.number} is ${WO_LABEL[wo.state]?.toLowerCase() ?? wo.state} - a service report says what was done, so the work has to be done first.` };
+  }
+  // A report whose notes are blank is the one thing this document must never
+  // be: a signature under an empty page. The close-out is written when the job
+  // is resolved, so there is always something to carry.
+  if (!wo.closeSummary.trim()) {
+    return { error: `Nothing is written on ${wo.number} about what was done - resolve it with a close-out first.` };
+  }
+
+  const draft = await serviceReportDraft(workOrderId);
+  if (!draft) return { error: "Not found" };
+
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    // The job's own thread: job 030182's reports are 030182_SR1, _SR2.
+    const number = await nextDocNumber("service_report", wo.tenantOrgId, {
+      job: await jobFrom("work_order", wo.number, wo.tenantOrgId),
+    });
+    try {
+      const [row] = await db.insert(serviceReports).values({
+        tenantOrgId: wo.tenantOrgId, workOrderId, orgId: wo.orgId,
+        number, issuedOn: shopToday(), issuedBy: u.email,
+        data: { ...draft.report, reportNumber: number },
+      }).returning();
+      await audit({
+        actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+        entityType: "service_report", entityId: row.id, tenantOrgId: wo.tenantOrgId,
+        action: `issued ${number} for ${wo.number}: ${draft.report.serviceType.toLowerCase()} visit on `
+          + `${draft.report.visitDate}, ${draft.report.parts.length} part${draft.report.parts.length === 1 ? "" : "s"}`
+          + (draft.report.adjustmentCents < 0 ? `, ${formatCents(-draft.report.adjustmentCents)} covered` : ""),
+      });
+      revalidatePath(`/work/${workOrderId}`);
+      return { id: row.id };
     } catch (e) {
       last = e;
     }
