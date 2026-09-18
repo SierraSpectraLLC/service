@@ -20,7 +20,7 @@ import { brandForTenant, type Brand } from "@/lib/brand";
 import { draftSourceFor } from "@/lib/invoiceData";
 import { shopToday } from "@/lib/shopday";
 import { docContactLine } from "@/lib/xlsxDocData";
-import { serviceReportDoc, usd, type ReportItem } from "@/lib/serviceReportDoc";
+import { serviceReportDoc, unbilledTime, usd, type ReportItem } from "@/lib/serviceReportDoc";
 import type { ServiceReport } from "@/lib/serviceReport";
 
 export type ReportDraft = {
@@ -72,7 +72,10 @@ export async function serviceReportDraft(woId: number): Promise<ReportDraft | nu
     wo.assetId === null ? Promise.resolve(null)
       : db.select().from(assets).where(eq(assets.id, wo.assetId)).then((r) => r[0] ?? null),
     brandForTenant(wo.tenantOrgId),
-    db.select({ date: timeEntries.date }).from(timeEntries).where(eq(timeEntries.workOrderId, woId)),
+    db.select({
+      date: timeEntries.date, minutes: timeEntries.minutes, category: timeEntries.category,
+      person: timeEntries.person, billable: timeEntries.billable,
+    }).from(timeEntries).where(eq(timeEntries.workOrderId, woId)),
   ]);
 
   // Where the work was done, which is the address a service report carries -
@@ -130,6 +133,20 @@ export async function serviceReportDraft(woId: number): Promise<ReportDraft | nu
       };
     });
 
+  /*
+   * And the hours nobody is charging for.
+   *
+   * The draft an invoice is built from carries the billable ones only -
+   * rightly, since it is a bill. The report is not a bill: an hour under the
+   * contract is the thing the contract bought, and a client who reads "1 h"
+   * beside a day on their bench is being told something untrue. They price at
+   * nothing and say why. See serviceReportDoc.unbilledTime.
+   */
+  items.push(...unbilledTime(
+    hourRows,
+    src.coverage.labor && !src.coverage.exhausted ? src.coverage.agreementNumber : "",
+  ));
+
   const customer = src.org;
   const report = serviceReportDoc({
     // The number is minted when the report is ISSUED, not here: a draft nobody
@@ -176,7 +193,7 @@ export async function serviceReportDraft(woId: number): Promise<ReportDraft | nu
       // is, which is how the original names the machine. The model number gets
       // its own row under it.
       type: inst
-        ? [inst.manufacturer, inst.name || inst.model].filter(Boolean).join(" ")
+        ? [inst.manufacturer, inst.name || inst.category || inst.model].filter(Boolean).join(" ")
         : [asset?.manufacturer, asset?.kind].filter(Boolean).join(" "),
       model: (asset && inst ? "" : asset?.model) || inst?.model || "",
       serial: asset?.serial || inst?.serial || "",

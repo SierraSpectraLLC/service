@@ -25,6 +25,16 @@ const PAGE = { w: 612, h: 792 };
 const M = 20;                        // outer margin
 const RIGHT = PAGE.w - M;            // the right edge of everything
 const ROW = 13;                      // the pitch of every row of text
+/**
+ * Where the first page's notes box ends, and where the second page's closing
+ * block begins. Both are FIXED on the original, and measured off it: the notes
+ * rule runs the width of the page at y=66, and the two signature rules at
+ * y=156. A sheet prints its cells where its cells are, however few words went
+ * into them - which is why a short visit still gets a full-height notes box
+ * rather than a caption-sized one floating in white space.
+ */
+const NOTES_FLOOR = 66;
+const SIGNATURE_RULE = 156;
 const INK = rgb(0.05, 0.05, 0.05);
 const MUT = rgb(0.35, 0.35, 0.35);
 const RULE = rgb(0.72, 0.72, 0.72);
@@ -157,8 +167,9 @@ export async function buildServiceReport(r: ServiceReport): Promise<Uint8Array> 
     ["Description", "Part Num.", "Quantity", "Unit Price", "Tax Exempt", "Total"], r.parts, y2, "billed", 11);
   y2 = lineTable(page2, F, "Labor & Travel Summary",
     ["Description", "Part Num.", "Quantity", "Unit Price", "Tax Exempt", "Total"], r.labor, y2, "billed", 4);
-  y2 = balancesAndTotals(page2, F, r, y2);
-  await signatures(doc, page2, F, r, y2);
+  balancesAndTotals(page2, F, r, y2);
+  // Anchored to the paper, not to the tables above it - see SIGNATURE_RULE.
+  await signatures(doc, page2, F, r);
 
   for (const [i, p] of doc.getPages().entries()) footer(p, F, i + 1);
   return doc.save();
@@ -338,8 +349,8 @@ function notesBlock(
 
   // The floor is the paper, not the last line. A visit with sixty checks on it
   // used to draw them off the bottom edge, where they were in the file and
-  // invisible on the page.
-  const FLOOR = M + 36;
+  // invisible on the page; the rest go over to another sheet.
+  const FLOOR = NOTES_FLOOR + 4;
   let i = 0;
   for (; i < lines.length; i++) {
     const line = lines[i].trimEnd();
@@ -355,8 +366,11 @@ function notesBlock(
       cursor -= ROW;
     }
   }
-  cursor += 4;
-  page.drawRectangle({ x: M, y: cursor, width: RIGHT - M, height: boxTop - cursor, borderColor: RULE, borderWidth: 0.5 });
+  // Down to the floor, not down to the last line.
+  page.drawRectangle({
+    x: M, y: NOTES_FLOOR, width: RIGHT - M, height: boxTop - NOTES_FLOOR,
+    borderColor: RULE, borderWidth: 0.5,
+  });
   return { left: lines.slice(i) };
 }
 
@@ -370,12 +384,16 @@ const COLS = [
   { x: 491, w: RIGHT - 491, align: "right" as const },
 ];
 
-function cell(page: PDFPage, s: string, i: number, y: number, f: PDFFont, size = S.cell) {
+function cell(page: PDFPage, s: string, i: number, y: number, f: PDFFont, size = S.cell, head = false) {
   const c = COLS[i];
   let sz = size;
   while (sz > 5 && f.widthOfTextAtSize(s, sz) > c.w - 6) sz -= 0.5;
   const w = f.widthOfTextAtSize(s, sz);
-  const x = c.align === "left" ? c.x + 2 : c.align === "right" ? c.x + c.w - 4 - w : c.x + (c.w - w) / 2;
+  // A column heading is centred over its column whatever the column's own
+  // alignment is - including Total, which the original centres and whose
+  // figures it still sets against the right.
+  const align = head ? "center" : c.align;
+  const x = align === "left" ? c.x + 2 : align === "right" ? c.x + c.w - 4 - w : c.x + (c.w - w) / 2;
   page.drawText(s, { x, y, size: sz, font: f, color: INK });
 }
 
@@ -393,7 +411,7 @@ function lineTable(
   let cursor = band(page, F, title, y, { centered: true });
 
   page.drawRectangle({ x: M, y: cursor - ROW, width: RIGHT - M, height: ROW, color: HEAD });
-  for (const [i, h] of heads.entries()) cell(page, h, i, cursor - ROW + 3.5, F.bold);
+  for (const [i, h] of heads.entries()) cell(page, h, i, cursor - ROW + 3.5, F.bold, S.cell, true);
   cursor -= ROW;
 
   const count = Math.max(rows.length, minRows);
@@ -425,7 +443,7 @@ function lineTable(
   return cursor - 16;
 }
 
-function balancesAndTotals(page: PDFPage, F: Fonts, r: ServiceReport, y: number): number {
+function balancesAndTotals(page: PDFPage, F: Fonts, r: ServiceReport, y: number): void {
   const t = reportTotals(r);
   const leftW = 210;
 
@@ -471,10 +489,17 @@ function balancesAndTotals(page: PDFPage, F: Fonts, r: ServiceReport, y: number)
     moneyCell(page, F, 5, value, ty - ROW + 3.5, f);
     ty -= ROW;
   }
-  return Math.min(ly, ty) - 88;
 }
 
-async function signatures(doc: PDFDocument, page: PDFPage, F: Fonts, r: ServiceReport, lineY: number) {
+/**
+ * The signatures and the three lines under them.
+ *
+ * Anchored to the paper rather than flowed from the tables above: on the
+ * original these sit at the same height on every report, and a long parts
+ * table must not push the contact line into the footer.
+ */
+async function signatures(doc: PDFDocument, page: PDFPage, F: Fonts, r: ServiceReport) {
+  const lineY = SIGNATURE_RULE;
   const provider = r.signatures.providerOrg?.trim() || "Service";
   const blocks = [
     { x: 75, w: 206, role: `${provider} Field Service Engineer:`, name: r.signatures.providerName, img: r.signatures.providerImage },
@@ -499,18 +524,15 @@ async function signatures(doc: PDFDocument, page: PDFPage, F: Fonts, r: ServiceR
     centered(page, b.name, b.x, b.x + b.w, lineY - 23, F.boldItalic, S.body);
   }
 
-  let cy = lineY - 49;
-  const line = (s: string, f: PDFFont, size: number, color = INK) => {
-    centered(page, s, M, RIGHT, cy, f, size, color);
-    cy -= ROW;
-  };
+  // 109, 83, 70, 57 on the original, with the page number under them at 44.
+  const line = (s: string, y: number, f: PDFFont, size: number, color = INK) =>
+    centered(page, s, M, RIGHT, y, f, size, color);
   line("Signatures acknowledge to all information in this document to be true and service to have been completed as described.",
-    F.boldItalic, 8);
-  cy -= ROW;
-  line("THIS IS NOT AN INVOICE", F.boldItalic, 9);
+    109, F.boldItalic, 8);
+  line("THIS IS NOT AN INVOICE", 83, F.boldItalic, 9);
   line("Should you have any questions or require additional details about this service visit please don't hesitate to contact:",
-    F.bold, S.body);
-  line(r.contact, F.font, S.body, MUT);
+    70, F.bold, S.body);
+  line(r.contact, 57, F.font, S.body, MUT);
 }
 
 function footer(page: PDFPage, F: Fonts, n: number) {

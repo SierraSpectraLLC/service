@@ -51,6 +51,50 @@ export type ReportItem = {
   covered: boolean;
 };
 
+/** One person's hours on the job, as the time panel logged them. */
+export type TimeRow = {
+  minutes: number;
+  /** onsite | remote | travel - lib/rates.TIME_CATEGORIES. */
+  category: string;
+  person: string;
+  billable: boolean;
+};
+
+/**
+ * The hours nobody is charging for, as lines that price at nothing.
+ *
+ * An hour under a contract, an hour the shop chose to absorb, an hour that
+ * overran the estimate: none of them reach an invoice, and all of them are
+ * the client's to see. A report that showed only the billable ones would say
+ * an engineer spent one hour on a bench he spent five on, which is a worse
+ * misstatement than any price on the page.
+ *
+ * Priced at zero and labelled, rather than quietly left at the rate card: the
+ * document has a Total column and a client reads down it.
+ *
+ * Hours are the hours logged, not the hours a bill would round to. A
+ * minimum-increment is a billing rule, and nothing here is being billed.
+ */
+export function unbilledTime(rows: TimeRow[], coveredBy = ""): ReportItem[] {
+  const out: ReportItem[] = [];
+  for (const category of ["onsite", "remote", "travel"]) {
+    const mine = rows.filter((t) => !t.billable && t.category === category && t.minutes > 0);
+    if (!mine.length) continue;
+    const minutes = mine.reduce((n, t) => n + t.minutes, 0);
+    const who = [...new Set(mine.map((t) => t.person.trim()).filter(Boolean))].join(", ");
+    const what = category === "travel" ? "Travel" : category === "remote" ? "Labor, remote" : "Labor, on site";
+    out.push({
+      kind: category === "travel" ? "travel" : "labor",
+      description: `${what}${who ? ` - ${who}` : ""} - ${coveredBy.trim() ? `covered by ${coveredBy.trim()}` : "no charge"}`,
+      partNumber: "",
+      qty: Math.round((minutes / 60) * 100) / 100,
+      unitCents: 0,
+      covered: false,
+    });
+  }
+  return out;
+}
+
 export type ReportInput = {
   /** The report's own number - 030182_SR6. */
   number: string;

@@ -621,7 +621,18 @@ export async function updateInstrument(
   // Every field is optional: the record's own page changes one fact at a time
   // - the type, from beside the name - and must not have to restate the rest
   // to do it. Omitted means unchanged.
-  data: { externalId?: string; client?: string; category?: string; priority?: number; location?: string; name?: string; gxp?: boolean },
+  data: {
+    externalId?: string; client?: string; category?: string; priority?: number;
+    location?: string; name?: string; gxp?: boolean;
+    /**
+     * What the machine IS, as a service report names it: who made it, its
+     * model number, its serial. Held on the system rather than composed from
+     * its assets, because a stack of six modules has one nameplate and it is
+     * that nameplate a client reads off the top of a report. Assets keep
+     * their own three - a module's serial is the module's.
+     */
+    manufacturer?: string; model?: string; serial?: string;
+  },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
@@ -642,7 +653,13 @@ export async function updateInstrument(
   // A chosen name wins over the composed one; clearing it hands naming back to
   // the assets rather than freezing whatever they last spelled out.
   const name = (data.name ?? inst.name).trim().slice(0, 120);
+  const manufacturer = (data.manufacturer ?? inst.manufacturer).trim().slice(0, 120);
+  const model = (data.model ?? inst.model).trim().slice(0, 120);
+  const serial = (data.serial ?? inst.serial).trim().slice(0, 120);
   const changed: [string, string, string][] = [];
+  if (manufacturer !== inst.manufacturer) changed.push(["manufacturer", inst.manufacturer, manufacturer]);
+  if (model !== inst.model) changed.push(["model", inst.model, model]);
+  if (serial !== inst.serial) changed.push(["serial", inst.serial, serial]);
   if (name !== inst.name) changed.push(["name", inst.name || "(from assets)", name || "(from assets)"]);
   if (externalId !== inst.externalId) changed.push(["externalId", inst.externalId, externalId]);
   if (location !== inst.location) changed.push(["location", inst.location, location]);
@@ -654,7 +671,9 @@ export async function updateInstrument(
   const gxp = data.gxp ?? inst.gxp;
   if (gxp !== inst.gxp) changed.push(["gxp", inst.gxp ? "regulated" : "not regulated", gxp ? "regulated" : "not regulated"]);
   if (!changed.length) return {};
-  await db.update(instruments).set({ externalId, client, category, priority, location, name, gxp, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  await db.update(instruments)
+    .set({ externalId, client, category, priority, location, name, gxp, manufacturer, model, serial, updatedAt: new Date() })
+    .where(eq(instruments.id, instrumentId));
   for (const [field, oldValue, newValue] of changed) {
     await audit({
       // Log under the new ID so the entry is findable, but the old value is in the row.

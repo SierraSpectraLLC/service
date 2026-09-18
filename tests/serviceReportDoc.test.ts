@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { reportTotals } from "@/lib/serviceReport";
 import {
-  addressLines, longVisitDate, serviceReportDoc, serviceTypeOf, usd,
+  addressLines, longVisitDate, serviceReportDoc, serviceTypeOf, unbilledTime, usd,
   type JobFacts, type ReportInput,
 } from "@/lib/serviceReportDoc";
 
@@ -107,6 +107,44 @@ describe("the two tables", () => {
     expect(t.labor).toBe(240_000);
     expect(t.sub).toBe(513_300);
     expect(t.adjustment).toBe(0);
+    expect(t.due).toBe(513_300);
+  });
+});
+
+describe("the hours nobody is charging for", () => {
+  const rows = [
+    { minutes: 240, category: "onsite", person: "Bill Harner", billable: false },
+    { minutes: 60, category: "onsite", person: "Joe Harris", billable: false },
+    { minutes: 150, category: "travel", person: "Bill Harner", billable: false },
+    { minutes: 120, category: "onsite", person: "Bill Harner", billable: true },
+  ];
+
+  it("shows them at nothing, one line a category, whoever worked them", () => {
+    expect(unbilledTime(rows)).toEqual([
+      { kind: "labor", description: "Labor, on site - Bill Harner, Joe Harris - no charge", partNumber: "", qty: 5, unitCents: 0, covered: false },
+      { kind: "travel", description: "Travel - Bill Harner - no charge", partNumber: "", qty: 2.5, unitCents: 0, covered: false },
+    ]);
+  });
+
+  it("names the agreement that bought them, where one did", () => {
+    expect(unbilledTime(rows, "030182_Ar2")[0].description)
+      .toBe("Labor, on site - Bill Harner, Joe Harris - covered by 030182_Ar2");
+  });
+
+  it("leaves the billable ones to the invoice's own loader, and skips empty rows", () => {
+    // 120 billable minutes are not here: they price at the rate card and
+    // arrive with the rest of the draft.
+    expect(unbilledTime(rows).reduce((n, i) => n + i.qty, 0)).toBe(7.5);
+    expect(unbilledTime([{ minutes: 0, category: "remote", person: "Bill", billable: false }])).toEqual([]);
+  });
+
+  it("adds nothing to the money, which is the point of a zero", () => {
+    const r = serviceReportDoc(input({
+      items: [...input().items, ...unbilledTime(rows, "030182_Ar2")],
+    }));
+    const t = reportTotals(r);
+    expect(r.labor).toHaveLength(4);
+    expect(t.labor).toBe(240_000);          // the billable travel and labour, unchanged
     expect(t.due).toBe(513_300);
   });
 });

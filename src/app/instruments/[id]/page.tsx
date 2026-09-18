@@ -778,6 +778,7 @@ export default async function InstrumentPage({ params, searchParams }: {
             <SystemPanel
               instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, gxp: inst.gxp, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy, name: inst.name, blockedReason: inst.blockedReason, blockedOrgId: inst.blockedOrgId,
                 location: inst.location, forSale: inst.forSale, saleNote: inst.saleNote, listingToken: inst.listingToken,
+                manufacturer: inst.manufacturer, model: inst.model, serial: inst.serial,
                 photoSrc: coverSrc, photoFraming: coverId !== null ? coverFraming : systemStock?.photoFraming ?? "",
                 photoIsStock: coverId === null && systemStock !== null }}
               gxpStanding={gxpStanding}
