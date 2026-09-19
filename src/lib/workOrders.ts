@@ -219,6 +219,10 @@ export type WoLike = {
   state: string;
   openedOn: string;      // YYYY-MM-DD
   assignee: string;
+  /** The day agreed with the client, where one was. See dueDay. */
+  dueOn?: string;
+  /** The first day booked on site, which is a date somebody committed to. */
+  bookedOn?: string;
 };
 
 /** Days since it was asked for. Negative clock skew reads as 0, not as -1 day. */
@@ -229,9 +233,51 @@ export function ageDays(openedOn: string, today: string): number {
   return Math.max(0, Math.round((b - a) / 86_400_000));
 }
 
-/** Past the day its kind says it should have been answered, and still open. */
-export const woLate = (wo: Pick<WoLike, "severity" | "state" | "openedOn">, today: string): boolean =>
-  woOpen(wo.state) && targetDay(wo.severity, wo.openedOn) < today;
+/**
+ * The day this job is wanted by: what was agreed, else what was booked, else
+ * what its kind assumes.
+ *
+ * The severity rule is a guess made when nobody knew anything except how badly
+ * the machine was wanted - and it stays exactly right until somebody learns
+ * more. What they learn arrives in two ways. Sometimes it is a date agreed on
+ * the phone ("we'll fit the pump on the 20th, that is when they can take the
+ * downtime"), and that is `dueOn`. Sometimes it is simply that the visit is
+ * booked, and a job with an engineer committed to a day next week is not
+ * overdue today whatever its severity says.
+ *
+ * Either way the job was never late; the rulebook was just working from less
+ * than the shop knew. A list that reddens a job somebody has already agreed a
+ * date for teaches people to read past red, which costs the genuinely late
+ * ones their only signal.
+ *
+ * A BOOKING ONLY EVER PUSHES THE DAY OUT. It is a commitment to a visit, not a
+ * deadline for the job, and the two part company the moment a visit happens
+ * without finishing the work - which is the case this was written for: the
+ * engineer went on the 17th, found the pump serviceable, and ordered a
+ * replacement. Read as a deadline, that spent booking would call a planned job
+ * late the morning after a visit that went exactly to plan, and would do it
+ * sooner than the severity rule ever would have. So a booking is heard when it
+ * says "later than you thought" and ignored when it says "sooner".
+ *
+ * An agreed date is not filtered that way. Somebody typing the 15th on a job
+ * whose severity assumed the 20th means the 15th, and means the job to go red
+ * on the 16th.
+ */
+export function dueDay(
+  wo: Pick<WoLike, "severity" | "openedOn"> & { dueOn?: string; bookedOn?: string },
+): string {
+  const agreed = (wo.dueOn ?? "").trim();
+  if (agreed) return agreed;
+  const assumed = targetDay(wo.severity, wo.openedOn);
+  const booked = (wo.bookedOn ?? "").trim();
+  return booked > assumed ? booked : assumed;
+}
+
+/** Past the day it is wanted by, and still open. */
+export const woLate = (
+  wo: Pick<WoLike, "severity" | "state" | "openedOn"> & { dueOn?: string; bookedOn?: string },
+  today: string,
+): boolean => woOpen(wo.state) && dueDay(wo) < today;
 
 /**
  * The order a list of them should be read in: what is still owed, worst first.
@@ -241,7 +287,7 @@ export const woLate = (wo: Pick<WoLike, "severity" | "state" | "openedOn">, toda
  * to the bottom newest-first, because down there the question is "what did we do
  * recently", not "what should I do next".
  */
-export function sortWorkOrders<T extends Pick<WoLike, "severity" | "state" | "openedOn" | "number">>(
+export function sortWorkOrders<T extends Pick<WoLike, "severity" | "state" | "openedOn" | "number" | "dueOn" | "bookedOn">>(
   list: T[], today: string,
 ): T[] {
   const key = (w: T) => [
@@ -267,7 +313,7 @@ export function sortWorkOrders<T extends Pick<WoLike, "severity" | "state" | "op
  * what they wanted to know when they opened the page.
  */
 export function woLine(
-  wo: Pick<WoLike, "state" | "severity" | "openedOn" | "assignee">,
+  wo: Pick<WoLike, "state" | "severity" | "openedOn" | "assignee" | "dueOn" | "bookedOn">,
   today: string,
   counts: { tasks: number; done: number } = { tasks: 0, done: 0 },
 ): string {

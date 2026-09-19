@@ -49,8 +49,19 @@ type SaveState = "dirty" | "saving" | "saved";
 
 const SEP = "-".repeat(50);
 const AUTOSAVE_MS = 900;
-// One system can carry several people's lines, so the author is part of the key.
-const keyOf = (e: EodLine) => `${e.kind}:${e.id}:${e.author}`;
+/**
+ * What a draft box IS, for the keeping of what has been typed into it.
+ *
+ * One system can carry several people's lines, so the author is part of it -
+ * and so is THE DAY, which it was missing. Moving between days is a
+ * `router.push` to the same route, so this panel is never unmounted and its
+ * state survives the move: keyed without the day, yesterday's text came up in
+ * today's box, `draftOf` preferred it to what the server had just sent, and
+ * one keystroke saved yesterday's words onto today. The report itself was
+ * always right, being rendered per day on the server - which is exactly how it
+ * looked from outside: "the email preview says what I want it to say".
+ */
+const keyOf = (e: EodLine, day: string) => `${day}:${e.kind}:${e.id}:${e.author}`;
 /** What a line is about: two people's lines on one system are one thing. */
 const aboutOf = (e: EodLine) => (e.kind === "offsystem" ? `off:${e.id}` : `${e.kind}:${e.id}`);
 /** A unit's line filed under its system. */
@@ -127,8 +138,13 @@ export default function EodPanel({
   /** The composed report, so the preview shows the bytes that would be sent. */
   emailSubject?: string; emailHtml?: string; recipients?: string[];
 }) {
+  /* The day this panel is writing about: the one in the URL, else today. Every
+     draft key and every save carries it, so moving between days - which does
+     not remount this component - cannot mix them up. */
+  const day = writeOn || "today";
+  const key = (e: EodLine) => keyOf(e, day);
   const [drafts, setDrafts] = useState<Record<string, Draft>>(
-    Object.fromEntries(entries.map((e) => [keyOf(e), { systemUpdate: e.systemUpdate, actionItem: e.actionItem }]))
+    Object.fromEntries(entries.map((e) => [key(e), { systemUpdate: e.systemUpdate, actionItem: e.actionItem }]))
   );
   const [status, setStatus] = useState<Record<string, SaveState>>({});
   const [copied, setCopied] = useState(false);
@@ -163,15 +179,21 @@ export default function EodPanel({
    * without resetting anything already typed here.
    */
   const draftOf = (e: EodLine): Draft =>
-    drafts[keyOf(e)] ?? { systemUpdate: e.systemUpdate, actionItem: e.actionItem };
+    drafts[key(e)] ?? { systemUpdate: e.systemUpdate, actionItem: e.actionItem };
 
-  const flush = (e: EodLine) => {
-    const k = keyOf(e);
+  /*
+   * `on` is the day the edit was made on, captured when the timer was set
+   * rather than read when it fires. A pause of a second is long enough to
+   * click to another day, and a save that read the day at fire time would put
+   * what was typed about Thursday onto Friday.
+   */
+  const flush = (e: EodLine, on: string) => {
+    const k = keyOf(e, on || "today");
     if (timers.current[k]) { clearTimeout(timers.current[k]); delete timers.current[k]; }
     const d = draftsRef.current[k] ?? { systemUpdate: e.systemUpdate, actionItem: e.actionItem };
     setStatus((s) => ({ ...s, [k]: "saving" }));
     startTransition(async () => {
-      const res = await saveEodUpdate(targetOf(e), d, writeOn || undefined);
+      const res = await saveEodUpdate(targetOf(e), d, on || undefined);
       // A refusal used to be invisible here, which was survivable while every
       // save was for today and could not be refused. A backdated one can.
       if (res?.error) {
@@ -185,11 +207,12 @@ export default function EodPanel({
   };
 
   const setDraft = (e: EodLine, patch: Partial<Draft>) => {
-    const k = keyOf(e);
+    const k = key(e);
+    const on = writeOn;
     setDrafts((d) => ({ ...d, [k]: { ...(d[k] ?? { systemUpdate: e.systemUpdate, actionItem: e.actionItem }), ...patch } }));
     setStatus((s) => ({ ...s, [k]: "dirty" }));
     if (timers.current[k]) clearTimeout(timers.current[k]);
-    timers.current[k] = setTimeout(() => flush(e), AUTOSAVE_MS);
+    timers.current[k] = setTimeout(() => flush(e, on ?? ""), AUTOSAVE_MS);
   };
 
   const hasText = (e: EodLine) => {
@@ -280,7 +303,7 @@ export default function EodPanel({
   const anyUnsaved = Object.values(status).some((s) => s === "dirty" || s === "saving");
 
   const editable = (e: EodLine, num: number) => (
-    <div key={keyOf(e)} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 8, background: "#FAFBFD" }}>
+    <div key={key(e)} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 8, background: "#FAFBFD" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <span className="t-body" style={{ fontWeight: 700 }}>
           {/* A module reads under its system's number: "System 2 › SQ Detector".
@@ -305,7 +328,7 @@ export default function EodPanel({
         )}
         {e.internal && <span className="pill warn">internal only</span>}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-          <span className="mut t-meta">{saveLabel(status[keyOf(e)])}</span>
+          <span className="mut t-meta">{saveLabel(status[key(e)])}</span>
           {e.mine && canAutofill(e) && (
             <button className="btn link" onClick={() => autofill(e)} disabled={pending} title="Draft from today's activity and open items">autofill</button>
           )}
@@ -350,14 +373,14 @@ export default function EodPanel({
           <Field label={updateWord(e)}>
             <textarea rows={2} value={draftOf(e).systemUpdate}
               onChange={(ev) => setDraft(e, { systemUpdate: ev.target.value })}
-              onBlur={() => { if (status[keyOf(e)] === "dirty") flush(e); }}
+              onBlur={() => { if (status[key(e)] === "dirty") flush(e, writeOn ?? ""); }}
               placeholder={e.suggestedUpdate || (e.kind === "offsystem" ? "What was asked, and what you told them" : "What happened today")}
               style={{ resize: "vertical" }} />
           </Field>
           <Field label="Action Item">
             <input value={draftOf(e).actionItem}
               onChange={(ev) => setDraft(e, { actionItem: ev.target.value })}
-              onBlur={() => { if (status[keyOf(e)] === "dirty") flush(e); }}
+              onBlur={() => { if (status[key(e)] === "dirty") flush(e, writeOn ?? ""); }}
               placeholder={e.suggestedAction || "Next step / what we need"} />
           </Field>
         </>
@@ -431,7 +454,7 @@ export default function EodPanel({
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
           <span className="mut t-meta">Skipped:</span>
           {skipped.map((e) => (
-            <span key={keyOf(e)} className="pill neutral" style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+            <span key={key(e)} className="pill neutral" style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
               {e.externalId}
               <button className="btn link" style={{ fontSize: 10 }} disabled={pending}
                 onClick={() => startTransition(async () => {

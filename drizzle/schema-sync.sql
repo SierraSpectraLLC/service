@@ -4438,6 +4438,9 @@ ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "discussions_enabled" boolea
 -- schema.ts and lib/workOrders.checkBooking for the bound on the span.
 ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "booked_on" text NOT NULL DEFAULT '';
 ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "booked_until" text NOT NULL DEFAULT '';
+-- The day the job is actually wanted by, where somebody agreed one with the
+-- client. Blank means "whatever its severity implies" - see lib/workOrders.
+ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "due_on" text NOT NULL DEFAULT '';
 
 -- What an invoice is for, in one line, printed under its number on every copy.
 ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "title" text NOT NULL DEFAULT '';

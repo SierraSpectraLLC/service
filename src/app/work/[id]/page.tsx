@@ -21,7 +21,7 @@ import { PO_LABEL, PO_TONE, poTotals } from "@/lib/po";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { storeQuota } from "@/lib/storeUsage";
 import { getSystemLabels, systemLabel } from "@/lib/systemLabel";
-import { bookingSpan, moverOf, severityOf, targetDay, WO_LABEL, WO_TONE, woAcceptsWork, woLate, woLive, woOpen } from "@/lib/workOrders";
+import { bookingSpan, dueDay, moverOf, severityOf, WO_LABEL, WO_TONE, woAcceptsWork, woLate, woLive, woOpen } from "@/lib/workOrders";
 import ActivityFeed from "@/components/ActivityFeed";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import HoursPanel from "@/components/HoursPanel";
@@ -402,7 +402,12 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
   const heroStats: HeroStat[] = [
     { value: WO_LABEL[wo.state] ?? wo.state, label: "", tone: tone === "neutral" ? undefined : tone },
     { value: sev.label, label: "" },
-    ...(woLate(wo, today) ? [{ value: `wanted by ${targetDay(wo.severity, wo.openedOn)}`, label: "", tone: "bad" as const }] : []),
+    ...(woLate(wo, today) ? [{ value: `wanted by ${dueDay(wo)}`, label: "", tone: "bad" as const }] : []),
+    /* Agreed with the client, so it is worth reading even when it is not red -
+       "waiting · late" on a job everybody has already planned for the 20th is
+       the thing that sent somebody looking for this field. */
+    ...(wo.dueOn.trim() && !woLate(wo, today)
+      ? [{ value: `due ${wo.dueOn}`, label: "", tone: "info" as const }] : []),
     // The days committed, beside the state: "when are you coming" is the
     // question the job's page gets asked, by the client and by the shop.
     ...(wo.bookedOn && woLive(wo.state) ? [{ value: bookingSpan(wo), label: "on site", tone: "info" as const }] : []),
@@ -514,7 +519,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           title={wo.title} body={wo.body} severity={wo.severity} assignee={wo.assignee}
           people={directoryNames(people)}
           systems={adoptable}
-          bookedOn={wo.bookedOn} bookedUntil={wo.bookedUntil}
+          bookedOn={wo.bookedOn} bookedUntil={wo.bookedUntil} dueOn={wo.dueOn}
           requestedBy={wo.requestedBy} clientSignatory={wo.clientSignatory}
           equipment={staff
             ? { instrumentId: wo.instrumentId, assetId: wo.assetId, systems: pickable, assets: pickableAssets }
