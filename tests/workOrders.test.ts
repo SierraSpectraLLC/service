@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  ageDays, bookingSpan, checkBooking, closeLine, moverOf, nextWoNumber, severityOf, sortWorkOrders, targetDay,
+  ageDays, bookingSpan, checkBooking, closeLine, dueDay, moverOf, nextWoNumber, severityOf, sortWorkOrders, targetDay,
   woAcceptsWork, woLate, woLine, woLive, woMove, woMoves, woOpen, woSettled, BOOKING_MAX_DAYS, WO_STATES,
 } from "@/lib/workOrders";
 
 const wo = (over: Partial<{
   number: string; severity: string; state: string; openedOn: string; assignee: string;
+  dueOn: string; bookedOn: string;
 }> = {}) => ({
   number: "WO-1001", severity: "Degraded", state: "open", openedOn: "2026-08-01",
-  assignee: "", ...over,
+  assignee: "", dueOn: "", bookedOn: "", ...over,
 });
 
 describe("which orders are still owed", () => {
@@ -56,6 +57,61 @@ describe("how urgent, and by when", () => {
     expect(woLate(wo({ severity: "Down" }), "2026-08-02")).toBe(true);
     expect(woLate(wo({ severity: "Down", state: "closed" }), "2026-09-01")).toBe(false);
     expect(woLate(wo({ severity: "Planned" }), "2026-08-15")).toBe(false);
+  });
+
+  /*
+   * What was AGREED beats what the rulebook assumed.
+   *
+   * The severity rule is a guess made when nobody knew anything except how
+   * badly the machine was wanted, and it is right until somebody learns more:
+   * "the pump goes in on the 20th, that is when they can take the downtime".
+   * A list that reddens that job teaches people to read past red, which costs
+   * the genuinely late ones their only signal.
+   */
+  describe("the day it is actually wanted by", () => {
+    it("takes the date somebody agreed with the client over the severity", () => {
+      const planned = wo({ severity: "Down", openedOn: "2026-09-14", dueOn: "2026-10-20" });
+      expect(dueDay(planned)).toBe("2026-10-20");
+      expect(woLate(planned, "2026-09-19")).toBe(false);
+      expect(woLate(planned, "2026-10-20")).toBe(false);   // the day itself is not late
+      expect(woLate(planned, "2026-10-21")).toBe(true);    // and the day after is
+    });
+
+    it("counts a booked visit too, since a committed day is a kind of promise", () => {
+      const booked = wo({ severity: "Down", openedOn: "2026-09-14", bookedOn: "2026-10-20" });
+      expect(dueDay(booked)).toBe("2026-10-20");
+      expect(woLate(booked, "2026-09-19")).toBe(false);
+    });
+
+    it("prefers what was agreed to what was booked, where they differ", () => {
+      // The visit is booked for the 20th but the client wants it by the 15th:
+      // the job is late on the 16th, and somebody should be told.
+      const both = wo({ severity: "Down", openedOn: "2026-09-14", dueOn: "2026-10-15", bookedOn: "2026-10-20" });
+      expect(dueDay(both)).toBe("2026-10-15");
+      expect(woLate(both, "2026-10-16")).toBe(true);
+    });
+
+    it("falls back to the severity when nobody has said anything", () => {
+      expect(dueDay(wo({ severity: "Down", openedOn: "2026-08-12" }))).toBe("2026-08-12");
+      expect(dueDay(wo({ severity: "Planned", openedOn: "2026-12-15" }))).toBe("2027-01-14");
+      // Blank and whitespace both mean "nobody said", not "the epoch".
+      expect(dueDay(wo({ severity: "Degraded", openedOn: "2026-08-12", dueOn: "  " }))).toBe("2026-08-15");
+    });
+
+    it("keeps the word off the line a list shows", () => {
+      // The line is what sent somebody looking for this field: "Waiting -
+      // late" on a job everybody had already planned.
+      expect(woLine(wo({ state: "waiting", severity: "Down", openedOn: "2026-09-14" }), "2026-09-19"))
+        .toContain("late");
+      expect(woLine(wo({ state: "waiting", severity: "Down", openedOn: "2026-09-14", dueOn: "2026-10-20" }), "2026-09-19"))
+        .not.toContain("late");
+    });
+
+    it("stops sorting an agreed job to the top of the worklist", () => {
+      const late = wo({ number: "WO-1", severity: "Down", openedOn: "2026-09-01" });
+      const agreed = wo({ number: "WO-2", severity: "Down", openedOn: "2026-09-01", dueOn: "2026-10-20" });
+      expect(sortWorkOrders([agreed, late], "2026-09-19").map((w) => w.number)).toEqual(["WO-1", "WO-2"]);
+    });
   });
 
   it("counts age in whole days and never backwards", () => {

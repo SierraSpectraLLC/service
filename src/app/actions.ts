@@ -244,7 +244,7 @@ import { parseFrame, serializeFrame } from "@/lib/photoFrame";
 import { isPhotoFile, photoRemovalNote, sharedCover } from "@/lib/photos";
 import { coverOf, photoRecord, photoTwin, type PhotoRecord } from "@/lib/photoPair";
 import { askLabel, pmRequestDue, pmRequestTitle, pmWindow, scheduleLine, visitKind } from "@/lib/pmRequest";
-import { checkNote } from "@/lib/calendarNotes";
+import { checkNote, isDay } from "@/lib/calendarNotes";
 import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/houseRole";
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, scopeMatches, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
@@ -6930,6 +6930,11 @@ export async function updateWorkOrder(
     /** Who asked, and who signs the report for them. Omitted means unchanged. */
     requestedBy?: string; clientSignatory?: string;
     /**
+     * The day it is wanted by, YYYY-MM-DD. Blank puts it back to whatever its
+     * severity implies. Omitted leaves it alone.
+     */
+    dueOn?: string;
+    /**
      * Which machine the job is about. Omitted leaves it alone; null takes it
      * off. A job filed against the wrong system - or against a system when it
      * was really about one module of it - is corrected here rather than
@@ -6946,11 +6951,17 @@ export async function updateWorkOrder(
   const title = data.title.trim().slice(0, 160);
   if (!title) return { error: "Say briefly what the job is" };
 
+  /* A date somebody agreed with the client, or nothing. Anything else is a
+     typo, and a typo here would move a job's deadline silently. */
+  const dueOn = (data.dueOn ?? wo.dueOn).trim();
+  if (dueOn && !isDay(dueOn)) return { error: "Write the due date as YYYY-MM-DD, or leave it empty." };
+
   const next = {
     title, body: data.body.trim().slice(0, 4000),
     severity: severityOf(data.severity).key, assignee: data.assignee.trim(),
     requestedBy: (data.requestedBy ?? wo.requestedBy).trim().slice(0, 120),
     clientSignatory: (data.clientSignatory ?? wo.clientSignatory).trim().slice(0, 120),
+    dueOn,
   };
 
   /*
@@ -7029,6 +7040,7 @@ export async function updateWorkOrder(
     ["assignee", wo.assignee, next.assignee], ["body", wo.body, next.body],
     ["requestedBy", wo.requestedBy, next.requestedBy],
     ["clientSignatory", wo.clientSignatory, next.clientSignatory],
+    ["dueOn", wo.dueOn, next.dueOn],
   ] as const) {
     if (before === after) continue;
     await audit({
@@ -7036,7 +7048,14 @@ export async function updateWorkOrder(
       entityType: "work_order", entityId: wo.id,
       action: field === "body"
         ? `rewrote what ${wo.number} asks for`
-        : `set ${wo.number} ${field} to ${after || "(none)"}`,
+        /* Worth a sentence rather than a field name: moving a deadline is the
+           kind of thing somebody asks about later, and "due date" said in
+           words reads in a log beside the rest. */
+        : field === "dueOn"
+          ? (after
+            ? `${wo.number} is wanted by ${after}${before ? `, was ${before}` : ""}`
+            : `${wo.number} goes back to the date its severity implies`)
+          : `set ${wo.number} ${field} to ${after || "(none)"}`,
       field, oldValue: before, newValue: after,
     });
   }

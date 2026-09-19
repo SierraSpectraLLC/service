@@ -24,7 +24,7 @@ import { WO_LABEL, WO_SEVERITIES, bookingSpan, checkBooking, woLive, woMoves, ty
  */
 export default function WorkOrderControls({
   id, number, state, mover, title, body, severity, assignee, people, systems = [],
-  bookedOn = "", bookedUntil = "",
+  bookedOn = "", bookedUntil = "", dueOn = "",
   requestedBy = "", clientSignatory = "", equipment,
 }: {
   id: number;
@@ -46,6 +46,11 @@ export default function WorkOrderControls({
   /** The days it is booked for, blank when it is not on the calendar. */
   bookedOn?: string;
   bookedUntil?: string;
+  /**
+   * The day it is wanted by, where somebody agreed one with the client. Blank
+   * leaves the job on whatever its severity implies - see lib/workOrders.dueDay.
+   */
+  dueOn?: string;
   /** Who asked, and who signs the service report for them. */
   requestedBy?: string;
   clientSignatory?: string;
@@ -68,7 +73,7 @@ export default function WorkOrderControls({
   const [systemId, setSystemId] = useState(0);
   const [summary, setSummary] = useState("");
   const [form, setForm] = useState({
-    title, body, severity, assignee, requestedBy, clientSignatory,
+    title, body, severity, assignee, requestedBy, clientSignatory, dueOn,
     instrumentId: equipment?.instrumentId ?? 0,
     assetId: equipment?.assetId ?? 0,
   });
@@ -286,6 +291,21 @@ export default function WorkOrderControls({
                 <option value="">Nobody yet</option>
                 {people.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
+            </div>
+          </div>
+
+          {/* What was agreed beats what the severity assumed. A job everybody
+              has planned for the 20th should not sit in a list saying late. */}
+          <div className="pf2" style={{ marginBottom: 8 }}>
+            <div>
+              <label>Wanted by</label>
+              <input type="date" value={form.dueOn} aria-label="The day this job is wanted by"
+                onChange={(e) => setForm({ ...form, dueOn: e.target.value })} />
+              <div className="mut t-meta" style={{ marginTop: 3 }}>
+                {form.dueOn
+                  ? "Not late until this day passes."
+                  : "Blank follows the severity: Down today, Planned in a month. A booked visit counts too."}
+              </div>
             </div>
           </div>
 

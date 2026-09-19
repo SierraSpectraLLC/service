@@ -163,3 +163,72 @@ describe("re-filing a job", () => {
     expect(wo.instrumentId).toBeNull();
   }, SLOW);
 });
+
+/*
+ * The day a job is wanted by.
+ *
+ * "It says waiting - late but we already planned with the client to install
+ * the new pump on 10/20." Lateness was severity plus the day it was raised:
+ * a Down job was red from its second day for ever, whatever anybody had since
+ * agreed. The date beats the assumption.
+ */
+describe("moving the day it is wanted by", () => {
+  it("saves the agreed date and stops calling the job late", async () => {
+    const { updateWorkOrder } = await import("@/app/actions");
+    const { woLate, woLine } = await import("@/lib/workOrders");
+    await client.exec(`UPDATE work_orders SET state = 'waiting' WHERE id = 1;`);
+
+    const before = (await testDb.select().from(schema.workOrders))[0];
+    expect(woLate(before, "2026-09-19")).toBe(true);
+    expect(woLine(before, "2026-09-19")).toContain("late");
+
+    expect((await updateWorkOrder(1, { ...EDIT, dueOn: "2026-10-20" })).error).toBeUndefined();
+    const [after] = await testDb.select().from(schema.workOrders);
+    expect(after.dueOn).toBe("2026-10-20");
+    expect(woLate(after, "2026-09-19")).toBe(false);
+    expect(woLine(after, "2026-09-19")).not.toContain("late");
+    // And it is late again once the day somebody promised has passed.
+    expect(woLate(after, "2026-10-21")).toBe(true);
+  }, SLOW);
+
+  it("says so in the log, in words rather than a field name", async () => {
+    const { updateWorkOrder } = await import("@/app/actions");
+    await updateWorkOrder(1, { ...EDIT, dueOn: "2026-10-20" });
+    const moved = await testDb.select().from(schema.auditLog).where(eq(schema.auditLog.field, "dueOn"));
+    expect(moved[0].action).toContain("is wanted by 2026-10-20");
+
+    await updateWorkOrder(1, { ...EDIT, dueOn: "2026-10-27" });
+    const again = await testDb.select().from(schema.auditLog).where(eq(schema.auditLog.field, "dueOn"));
+    expect(again[again.length - 1].action).toContain("was 2026-10-20");
+  }, SLOW);
+
+  it("clears back to whatever the severity implies", async () => {
+    const { updateWorkOrder } = await import("@/app/actions");
+    const { dueDay } = await import("@/lib/workOrders");
+    await updateWorkOrder(1, { ...EDIT, dueOn: "2026-10-20" });
+    expect((await updateWorkOrder(1, { ...EDIT, dueOn: "" })).error).toBeUndefined();
+
+    const [wo] = await testDb.select().from(schema.workOrders);
+    expect(wo.dueOn).toBe("");
+    expect(dueDay(wo)).toBe("2026-09-14");      // Down, opened that day
+    const cleared = await testDb.select().from(schema.auditLog).where(eq(schema.auditLog.field, "dueOn"));
+    expect(cleared[cleared.length - 1].action).toContain("goes back to the date its severity implies");
+  }, SLOW);
+
+  it("refuses something that is not a date, and changes nothing", async () => {
+    const { updateWorkOrder } = await import("@/app/actions");
+    const res = await updateWorkOrder(1, { ...EDIT, title: "Renamed too", dueOn: "next Tuesday" });
+    expect(res.error).toMatch(/YYYY-MM-DD/);
+    const [wo] = await testDb.select().from(schema.workOrders);
+    expect(wo.dueOn).toBe("");
+    expect(wo.title).not.toBe("Renamed too");   // the whole edit is refused, not half of it
+  }, SLOW);
+
+  it("leaves the date alone when the form does not send one", async () => {
+    const { updateWorkOrder } = await import("@/app/actions");
+    await updateWorkOrder(1, { ...EDIT, dueOn: "2026-10-20" });
+    await updateWorkOrder(1, { ...EDIT, title: "A better title" });
+    const [wo] = await testDb.select().from(schema.workOrders);
+    expect(wo.dueOn).toBe("2026-10-20");
+  }, SLOW);
+});
