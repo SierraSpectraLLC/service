@@ -2432,6 +2432,27 @@ export const serviceReports = pgTable("service_reports", {
   issuedBy: text("issued_by").notNull().default(""),
   /** The whole document as issued - see lib/serviceReport.ServiceReport. */
   data: jsonb("data").notNull(),
+  /**
+   * Which rows of the job this report already accounted for:
+   * `{ timeIds: number[], partIds: number[] }`.
+   *
+   * A job that takes two visits issues two reports, and the second must not
+   * re-bill the first one's hours on a page the client signs. Recorded as IDS
+   * rather than a date window because hours get logged late and a part ordered
+   * in March arrives in April: what a report carried is a fact about that
+   * report, not something to re-derive from dates afterwards. Deleting a
+   * report hands its rows back to the next one, which is what deleting it
+   * should mean.
+   */
+  covers: jsonb("covers").notNull().default({}),
+  /**
+   * What the engineer wrote about THIS visit, when the report is an interim
+   * one. The job's close-out covers the whole job and is not written until it
+   * is resolved; a visit that ends with the machine still waiting on a part
+   * has its own story, and this is where it is kept so a reissue can redraw
+   * the same document rather than a different one.
+   */
+  visitNotes: text("visit_notes").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("service_reports_wo_idx").on(t.workOrderId),

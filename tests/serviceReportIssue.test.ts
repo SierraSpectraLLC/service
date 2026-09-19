@@ -115,6 +115,13 @@ describe("issuing a report", () => {
 
     const first = await issueServiceReport(1);
     expect(first.error).toBeUndefined();
+
+    // A second visit, a second report. Without new work on the job there is
+    // nothing for a second one to be about - see "what it refuses" below.
+    await client.exec(`
+      INSERT INTO time_entries (tenant_org_id, instrument_id, work_order_id, person, date, minutes, category, billable)
+      VALUES (${SIERRA}, 1, 1, 'Joe Harris', '2026-09-21', 90, 'onsite', true);
+    `);
     const second = await issueServiceReport(1);
     expect(second.error).toBeUndefined();
 
@@ -199,7 +206,11 @@ describe("issuing a report", () => {
     // $16,000 less the parts this visit drew.
     expect(a.balances.partsRemaining).toBe("$13,267.00");
 
-    await client.exec(`UPDATE work_orders SET state = 'closed', closed_at = '2026-09-15T12:00:00Z' WHERE id = 1;`);
+    await client.exec(`
+      UPDATE work_orders SET state = 'closed', closed_at = '2026-09-15T12:00:00Z' WHERE id = 1;
+      INSERT INTO time_entries (tenant_org_id, instrument_id, work_order_id, person, date, minutes, category, billable)
+      VALUES (${SIERRA}, 1, 1, 'Joe Harris', '2026-09-15', 60, 'onsite', true);
+    `);
     await issueServiceReport(1);
     const rows = await testDb.select().from(schema.serviceReports).orderBy(schema.serviceReports.id);
     const b = rows[1].data as import("@/lib/serviceReport").ServiceReport;
@@ -384,12 +395,136 @@ describe("who asked, and who signs", () => {
   }, SLOW);
 });
 
-describe("what it refuses", () => {
-  it("will not report on work nobody has finished", async () => {
+describe("a visit on a job that is not finished", () => {
+  /*
+   * The case that made this exist, in the owner's words: "We were onsite
+   * assessing an open service report. We determined the roughing pump is okay
+   * temporarily and they can continue running it. However we're going to order
+   * them a new roughing pump. Client still wants a service report for our
+   * visit today."
+   *
+   * Closing the job would be a lie - the pump is still to be fitted, and a
+   * closed job in this app cannot take the return visit's hours, the PO, or
+   * the booking. So the job stays open and the VISIT gets its paper.
+   */
+  const VISIT = "Roughing pump tested at 42 mTorr - within spec and safe to run.\n"
+    + "Ordering a replacement; return visit to fit it.";
+
+  it("reports the visit and leaves the job open", async () => {
     const { issueServiceReport } = await import("@/app/actions");
-    await seedJob({ state: "active" });
+    await seedJob({ state: "active", closeSummary: "" });
+
+    expect((await issueServiceReport(1, VISIT)).error).toBeUndefined();
+    const [row] = await testDb.select().from(schema.serviceReports);
+    const r = row.data as import("@/lib/serviceReport").ServiceReport;
+
+    expect(row.number).toBe("030182_SR1");
+    expect(r.notes.body).toBe(VISIT);
+    // Dated to the day on site, not to a finish that has not happened.
+    expect(r.notes.date).toBe("2026-09-14");
+    expect(r.visitDate).toBe("Monday, September 14, 2026");
+    // The visit's hours and parts are on it, priced as any other visit's.
+    expect(r.labor.map((l) => l.description)).toEqual([
+      "Labor, on site - Joe Harris", "Travel - Joe Harris",
+    ]);
+    expect(r.parts).toHaveLength(2);
+
+    const [wo] = await testDb.select().from(schema.workOrders).where(eq(schema.workOrders.id, 1));
+    expect(wo.state).toBe("active");
+    expect(wo.closeSummary).toBe("");          // the job's own close-out is still unwritten
+  }, SLOW);
+
+  it("keeps the visit's words with the report, so a reissue redraws the same page", async () => {
+    const { issueServiceReport, reissueServiceReport } = await import("@/app/actions");
+    await seedJob({ state: "active", closeSummary: "" });
+    await issueServiceReport(1, VISIT);
+    const [first] = await testDb.select().from(schema.serviceReports);
+    expect(first.visitNotes).toBe(VISIT);
+
+    // The job is finished weeks later, with its own close-out about the pump
+    // that was finally fitted. SR1 is the page the client signed in September
+    // and must not quietly become a report about October.
+    await client.exec(`
+      UPDATE work_orders SET state = 'resolved', close_summary = 'Fitted the new roughing pump.'
+      WHERE id = 1;
+    `);
+    expect((await reissueServiceReport(first.id)).error).toBeUndefined();
+    const [row] = await testDb.select().from(schema.serviceReports);
+    expect((row.data as import("@/lib/serviceReport").ServiceReport).notes.body).toBe(VISIT);
+  }, SLOW);
+
+  it("gives the second visit its own report, carrying only its own work", async () => {
+    // The whole reason a report records what it covered: the return trip's
+    // page must not re-bill September's four hours and two parts.
+    const { issueServiceReport } = await import("@/app/actions");
+    const { reportTotals } = await import("@/lib/serviceReport");
+    await seedJob({ state: "active", closeSummary: "" });
+    await issueServiceReport(1, VISIT);
+
+    await client.exec(`
+      INSERT INTO parts (id, instrument_id, work_order_id, name, part_number, qty,
+                         cost_cents, status, owner_org_id, installed_at) VALUES
+        (3, 1, 1, 'Roughing Pump', 'PFE-0141', '1', 410000, 'Installed', ${EMERY}, '2026-10-05');
+      INSERT INTO time_entries (tenant_org_id, instrument_id, work_order_id, person, date, minutes, category, billable)
+      VALUES (${SIERRA}, 1, 1, 'Joe Harris', '2026-10-05', 180, 'onsite', true);
+      UPDATE work_orders SET state = 'resolved', close_summary = 'Fitted the new roughing pump. ALL OK'
+      WHERE id = 1;
+    `);
+    expect((await issueServiceReport(1)).error).toBeUndefined();
+
+    const rows = await testDb.select().from(schema.serviceReports).orderBy(schema.serviceReports.id);
+    expect(rows.map((r) => r.number)).toEqual(["030182_SR1", "030182_SR2"]);
+    const second = rows[1].data as import("@/lib/serviceReport").ServiceReport;
+
+    // October's part and October's hours, and September's on neither.
+    expect(second.parts.map((l) => l.partNumber)).toEqual(["PFE-0141"]);
+    expect(second.labor.map((l) => l.description)).toEqual(["Labor, on site - Joe Harris"]);
+    expect(second.visitDate).toBe("Monday, October 5, 2026");
+    expect(second.notes.body).toContain("Fitted the new roughing pump");
+
+    // Neither page carries a line the other one does, which is the point:
+    // between them they state the job once, not twice.
+    const first = rows[0].data as import("@/lib/serviceReport").ServiceReport;
+    expect(first.parts.map((l) => l.partNumber)).toEqual(["6044.5201", "6040.0042"]);
+    expect(reportTotals(second).parts).toBeLessThan(reportTotals(first).parts + reportTotals(second).parts);
+    expect(reportTotals(second).labor).toBeGreaterThan(0);
+    // September's four hours are on September's page and nowhere else.
+    expect(second.labor.every((l) => l.quantity === 3)).toBe(true);
+  }, SLOW);
+
+  it("hands a deleted report's work back to the next one", async () => {
+    // Deleting a report is for one issued in error. Its hours and parts were
+    // never reported, so the next report is the one that carries them.
+    const { issueServiceReport, deleteServiceReport } = await import("@/app/actions");
+    await seedJob({ state: "active", closeSummary: "" });
+    await issueServiceReport(1, VISIT);
+    const [first] = await testDb.select().from(schema.serviceReports);
+    expect((await deleteServiceReport(first.id)).error).toBeUndefined();
+
+    expect((await issueServiceReport(1, VISIT)).error).toBeUndefined();
+    const [again] = await testDb.select().from(schema.serviceReports);
+    expect((again.data as import("@/lib/serviceReport").ServiceReport).parts).toHaveLength(2);
+  }, SLOW);
+
+  it("tells whoever picks the job up that the client already has paper", async () => {
+    const { issueServiceReport } = await import("@/app/actions");
+    await seedJob({ state: "active", closeSummary: "" });
+    await issueServiceReport(1, VISIT);
+    const [note] = await testDb.select().from(schema.workOrderNotes);
+    expect(note.text).toContain("Issued 030182_SR1 for the visit of Monday, September 14, 2026");
+    expect(note.text).toContain("030182 stays open");
+  }, SLOW);
+});
+
+describe("what it refuses", () => {
+  it("will not report on an open job with nothing said about the visit", async () => {
+    // An open job CAN be reported on - see "a visit on a job that is not
+    // finished" - but only with an account of the visit, because there is no
+    // close-out behind it to fall back on.
+    const { issueServiceReport } = await import("@/app/actions");
+    await seedJob({ state: "active", closeSummary: "" });
     const res = await issueServiceReport(1);
-    expect(res.error).toMatch(/the work has to be done first/);
+    expect(res.error).toMatch(/say what was done on this visit/i);
     expect(await testDb.select().from(schema.serviceReports)).toHaveLength(0);
   }, SLOW);
 
@@ -399,5 +534,21 @@ describe("what it refuses", () => {
     const res = await issueServiceReport(1);
     expect(res.error).toMatch(/Nothing is written/);
     expect(await testDb.select().from(schema.serviceReports)).toHaveLength(0);
+  }, SLOW);
+
+  it("will not issue the same page twice under two numbers", async () => {
+    // Every hour and every part is already on a report the client has. A
+    // second one would be the first one again, under a number that implies a
+    // second visit happened.
+    const { issueServiceReport } = await import("@/app/actions");
+    expect((await issueServiceReport(1)).error).toBeUndefined();
+    expect((await issueServiceReport(1)).error).toMatch(/Nothing has been logged on 030182 since the last report/);
+    expect(await testDb.select().from(schema.serviceReports)).toHaveLength(1);
+  }, SLOW);
+
+  it("has nothing to report on a job that was cancelled", async () => {
+    const { issueServiceReport } = await import("@/app/actions");
+    await seedJob({ state: "cancelled" });
+    expect((await issueServiceReport(1, "We were there")).error).toMatch(/was cancelled/);
   }, SLOW);
 });

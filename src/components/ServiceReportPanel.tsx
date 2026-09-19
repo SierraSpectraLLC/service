@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "@/components/ui/Toast";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { Id } from "@/components/ui";
@@ -24,7 +24,7 @@ export type IssuedReport = {
  * a numbered document that no longer changes: a client countersigns it, so
  * issuing a second one is how a correction is made, not editing the first.
  */
-export default function ServiceReportPanel({ workOrderId, number, reports, ready, reason }: {
+export default function ServiceReportPanel({ workOrderId, number, reports, ready, reason, open }: {
   workOrderId: number;
   /** The job's number, for the toast. */
   number: string;
@@ -33,9 +33,16 @@ export default function ServiceReportPanel({ workOrderId, number, reports, ready
   ready: boolean;
   /** Why it is not, said plainly, when it is not. */
   reason: string;
+  /**
+   * The job is still being worked. The report is then about ONE VISIT rather
+   * than the job, so it needs the visit's own account - there is no close-out
+   * to draw on until somebody resolves it.
+   */
+  open: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [notes, setNotes] = useState("");
 
   return (
     <div className="card">
@@ -105,18 +112,46 @@ export default function ServiceReportPanel({ workOrderId, number, reports, ready
         </div>
       )}
 
+      {/* A visit that ends with the machine still waiting on a part is still a
+          visit the client was charged for and wants paper for. What gets
+          typed here is what the report says was done, and it stays with the
+          report so a reissue redraws the same page. */}
+      {open && (
+        <div className="field" style={{ marginTop: 12 }}>
+          <label className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 4 }}>
+            What was done on this visit
+          </label>
+          <textarea
+            rows={4}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            aria-label="What was done on this visit"
+            placeholder="Found the roughing pump within spec and safe to run. Ordered a replacement."
+            className="t-body"
+            style={{ width: "100%" }}
+          />
+          <div className="field-hint">
+            {number} stays open. Each visit gets its own report, and this one carries only the
+            hours and parts no earlier report has.
+          </div>
+        </div>
+      )}
+
       <div className="row-2" style={{ alignItems: "center", marginTop: 12 }}>
         <button
           className="btn sm accent"
-          disabled={pending || !ready}
+          disabled={pending || !ready || (open && !notes.trim())}
           onClick={() => startTransition(async () => {
-            const res = await issueServiceReport(workOrderId);
+            const res = await issueServiceReport(workOrderId, notes);
             if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
+            setNotes("");
             toast({ message: `Wrote the service report for ${number}` });
             router.refresh();
           })}
         >
-          {pending ? "Writing..." : reports.length ? "Issue another" : "Issue service report"}
+          {pending ? "Writing..."
+            : open ? "Issue report for this visit"
+              : reports.length ? "Issue another" : "Issue service report"}
         </button>
         {!ready && reason && <span className="mut t-small">{reason}</span>}
         {ready && reports.length > 0 && (
