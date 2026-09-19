@@ -249,15 +249,28 @@ export function ageDays(openedOn: string, today: string): number {
  * than the shop knew. A list that reddens a job somebody has already agreed a
  * date for teaches people to read past red, which costs the genuinely late
  * ones their only signal.
+ *
+ * A BOOKING ONLY EVER PUSHES THE DAY OUT. It is a commitment to a visit, not a
+ * deadline for the job, and the two part company the moment a visit happens
+ * without finishing the work - which is the case this was written for: the
+ * engineer went on the 17th, found the pump serviceable, and ordered a
+ * replacement. Read as a deadline, that spent booking would call a planned job
+ * late the morning after a visit that went exactly to plan, and would do it
+ * sooner than the severity rule ever would have. So a booking is heard when it
+ * says "later than you thought" and ignored when it says "sooner".
+ *
+ * An agreed date is not filtered that way. Somebody typing the 15th on a job
+ * whose severity assumed the 20th means the 15th, and means the job to go red
+ * on the 16th.
  */
 export function dueDay(
   wo: Pick<WoLike, "severity" | "openedOn"> & { dueOn?: string; bookedOn?: string },
 ): string {
   const agreed = (wo.dueOn ?? "").trim();
   if (agreed) return agreed;
+  const assumed = targetDay(wo.severity, wo.openedOn);
   const booked = (wo.bookedOn ?? "").trim();
-  if (booked) return booked;
-  return targetDay(wo.severity, wo.openedOn);
+  return booked > assumed ? booked : assumed;
 }
 
 /** Past the day it is wanted by, and still open. */

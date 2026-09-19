@@ -304,7 +304,7 @@ export default function WorkOrderControls({
               <div className="mut t-meta" style={{ marginTop: 3 }}>
                 {form.dueOn
                   ? "Not late until this day passes."
-                  : "Blank follows the severity: Down today, Planned in a month. A booked visit counts too."}
+                  : "Blank follows the severity - Down today, Planned in a month - or a booked visit, where one is further out."}
               </div>
             </div>
           </div>

@@ -83,6 +83,29 @@ describe("how urgent, and by when", () => {
       expect(woLate(booked, "2026-09-19")).toBe(false);
     });
 
+    it("never lets a SPENT booking pull the day in", () => {
+      /*
+       * A booking is a commitment to a visit, not a deadline for the job, and
+       * the two part company the moment a visit happens without finishing the
+       * work: the engineer went on the 17th, found the pump serviceable and
+       * ordered a replacement. Read as a deadline, that booking would call a
+       * planned job late on the 18th - sooner than the severity rule would
+       * ever have said, because a visit went exactly to plan.
+       */
+      const went = wo({ severity: "Planned", openedOn: "2026-09-01", bookedOn: "2026-09-17" });
+      expect(dueDay(went)).toBe("2026-10-01");           // what its kind assumed, unmoved
+      expect(woLate(went, "2026-09-18")).toBe(false);
+      expect(woLate(went, "2026-10-02")).toBe(true);
+    });
+
+    it("lets an agreed date pull the day in, because somebody meant it", () => {
+      // The filter above is for bookings, which are guesses about deadlines.
+      // A typed date is not a guess.
+      const soon = wo({ severity: "Planned", openedOn: "2026-09-01", dueOn: "2026-09-10" });
+      expect(dueDay(soon)).toBe("2026-09-10");
+      expect(woLate(soon, "2026-09-11")).toBe(true);
+    });
+
     it("prefers what was agreed to what was booked, where they differ", () => {
       // The visit is booked for the 20th but the client wants it by the 15th:
       // the job is late on the 16th, and somebody should be told.
