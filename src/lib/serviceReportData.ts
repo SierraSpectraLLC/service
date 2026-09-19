@@ -28,6 +28,31 @@ export type ReportDraft = {
   tenantOrgId: number | null;
   orgId: number | null;
   workOrderId: number;
+  /** The job's rows this draft accounts for - stored with it when it is issued. */
+  covers: ReportCovers;
+  /** True when nothing on the job is left for a report to be about. */
+  empty: boolean;
+};
+
+/** What one report accounted for. See db/schema.serviceReports.covers. */
+export type ReportCovers = { timeIds: number[]; partIds: number[] };
+
+const coversOf = (row: { covers: unknown }): ReportCovers => {
+  const c = (row.covers ?? {}) as Partial<ReportCovers>;
+  return { timeIds: c.timeIds ?? [], partIds: c.partIds ?? [] };
+};
+
+export type DraftOptions = {
+  /**
+   * Redrawing THIS report rather than composing a new one: its own rows are
+   * its to keep, and only the other reports' are already spoken for.
+   */
+  forReportId?: number;
+  /**
+   * What the engineer wrote about this visit, where the job is still open and
+   * so has no close-out yet. Blank falls back to the close-out.
+   */
+  visitNotes?: string;
 };
 
 /**
@@ -59,23 +84,50 @@ export function visitDayOf(input: {
  * issues it - the same shape as a draft invoice, for the same reason: what a
  * person looked at and what gets written come from one piece of code.
  */
-export async function serviceReportDraft(woId: number): Promise<ReportDraft | null> {
+export async function serviceReportDraft(
+  woId: number, opts: DraftOptions = {},
+): Promise<ReportDraft | null> {
   const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, woId));
   if (!wo) return null;
 
-  const src = await draftSourceFor(woId);
+  /*
+   * What is left to report on.
+   *
+   * Everything on the job, less whatever an earlier report already put its
+   * name to. A job that takes three visits issues three reports, and each one
+   * is about its own visit: repeating the first visit's hours on the second
+   * page would tell a client they were worked twice. Redrawing an existing
+   * report keeps that report's own rows, because they are the document.
+   */
+  const issued = await db.select().from(serviceReports).where(eq(serviceReports.workOrderId, woId));
+  const spent = issued.filter((r) => r.id !== opts.forReportId).map(coversOf);
+  const takenTime = new Set(spent.flatMap((c) => c.timeIds));
+  const takenParts = new Set(spent.flatMap((c) => c.partIds));
+
+  const [allHours, allParts] = await Promise.all([
+    db.select({
+      id: timeEntries.id, date: timeEntries.date, minutes: timeEntries.minutes,
+      category: timeEntries.category, person: timeEntries.person, billable: timeEntries.billable,
+    }).from(timeEntries).where(eq(timeEntries.workOrderId, woId)),
+    db.select({ id: parts.id, name: parts.name, partNumber: parts.partNumber })
+      .from(parts).where(eq(parts.workOrderId, woId)),
+  ]);
+  const hourRows = allHours.filter((h) => !takenTime.has(h.id));
+  const mineParts = allParts.filter((p) => !takenParts.has(p.id));
+  const covers: ReportCovers = {
+    timeIds: hourRows.map((h) => h.id),
+    partIds: mineParts.map((p) => p.id),
+  };
+
+  const src = await draftSourceFor(woId, { timeIds: covers.timeIds, partIds: covers.partIds });
   if (!src) return null;
 
-  const [inst, asset, brand, hourRows] = await Promise.all([
+  const [inst, asset, brand] = await Promise.all([
     wo.instrumentId === null ? Promise.resolve(null)
       : db.select().from(instruments).where(eq(instruments.id, wo.instrumentId)).then((r) => r[0] ?? null),
     wo.assetId === null ? Promise.resolve(null)
       : db.select().from(assets).where(eq(assets.id, wo.assetId)).then((r) => r[0] ?? null),
     brandForTenant(wo.tenantOrgId),
-    db.select({
-      date: timeEntries.date, minutes: timeEntries.minutes, category: timeEntries.category,
-      person: timeEntries.person, billable: timeEntries.billable,
-    }).from(timeEntries).where(eq(timeEntries.workOrderId, woId)),
   ]);
 
   // Where the work was done, which is the address a service report carries -
@@ -116,9 +168,7 @@ export async function serviceReportDraft(woId: number): Promise<ReportDraft | nu
 
   // Part numbers and names come off the parts themselves; the money comes off
   // the draft, so a report and its invoice cannot price the same part twice.
-  const partRows = await db.select({ id: parts.id, name: parts.name, partNumber: parts.partNumber })
-    .from(parts).where(eq(parts.workOrderId, woId));
-  const byId = new Map(partRows.map((p) => [p.id, p]));
+  const byId = new Map(mineParts.map((p) => [p.id, p]));
   const items: ReportItem[] = src.lines
     /*
      * What the visit put into the machine, and what it took to do it.
@@ -154,22 +204,37 @@ export async function serviceReportDraft(woId: number): Promise<ReportDraft | nu
   ));
 
   const customer = src.org;
+  /* The day the client saw an engineer, and the day the job was finished -
+     which on an interim report is not a day yet. */
+  const visitDay = visitDayOf({
+    hourDays: hourRows.map((h) => h.date),
+    bookedUntil: wo.bookedUntil, bookedOn: wo.bookedOn,
+    closedOn: (wo.closedAt ?? wo.resolvedAt)?.toISOString().slice(0, 10) ?? "",
+    openedOn: wo.openedOn,
+  });
+  const finishedOn = (wo.closedAt ?? wo.resolvedAt)?.toISOString().slice(0, 10) ?? "";
+
   const report = serviceReportDoc({
     // The number is minted when the report is ISSUED, not here: a draft nobody
     // sends must not burn one. See issueServiceReport.
     number: "",
     issuedOn: shopToday(),
-    visitDay: visitDayOf({
-      hourDays: hourRows.map((h) => h.date),
-      bookedUntil: wo.bookedUntil, bookedOn: wo.bookedOn,
-      closedOn: (wo.closedAt ?? wo.resolvedAt)?.toISOString().slice(0, 10) ?? "",
-      openedOn: wo.openedOn,
-    }),
+    visitDay,
     job: {
       number: wo.number, title: wo.title, body: wo.body,
       requestedBy: wo.requestedBy, openedOn: wo.openedOn,
-      closeSummary: wo.closeSummary,
-      closedOn: (wo.closedAt ?? wo.resolvedAt)?.toISOString().slice(0, 10) ?? shopToday(),
+      /*
+       * What was done, in the engineer's own words.
+       *
+       * The close-out where there is one, and what was typed for this visit
+       * where the job is still open - a machine left running on a temporary
+       * fix has a story worth signing for, and it is not the story of a job
+       * nobody has finished. Dated to the visit for the same reason: an
+       * interim report is about a day, not about a finish that has not
+       * happened.
+       */
+      closeSummary: opts.visitNotes?.trim() || wo.closeSummary,
+      closedOn: finishedOn || visitDay || shopToday(),
       engineer: wo.assignee || wo.closedBy,
       origin: wo.origin, severity: wo.severity,
       install: wo.restorationProjectId !== null,
@@ -213,7 +278,14 @@ export async function serviceReportDraft(woId: number): Promise<ReportDraft | nu
     poNumber: src.org?.poNumber || src.coverage.agreementNumber,
   });
 
-  return { report, tenantOrgId: wo.tenantOrgId, orgId: wo.orgId, workOrderId: woId };
+  return {
+    report, tenantOrgId: wo.tenantOrgId, orgId: wo.orgId, workOrderId: woId, covers,
+    /* Nothing new since the last report. A FIRST report with nothing logged is
+       still worth issuing - the engineer's account of the visit is the point,
+       and hours get logged late - but a second one carrying the same nothing
+       is a duplicate of a document the client already has. */
+    empty: issued.length > 0 && !covers.timeIds.length && !covers.partIds.length,
+  };
 }
 
 /** The reports issued for one job, newest first. */

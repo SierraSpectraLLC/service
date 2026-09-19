@@ -83,10 +83,11 @@ describe("inside the radius, on a day trip", () => {
     expect(o.allowedCents).toBe(3000);
   });
 
-  it("flags it, in words a reviewer can act on", () => {
-    expect(o.flag).toContain("22 mi from home");
-    expect(o.flag).toContain("inside the 80 mi radius");
-    expect(o.flag).toContain("car stipend");
+  it("states the fact and stops, leaving the judgement to the reviewer", () => {
+    // The two numbers the decision turns on, and nothing after them. The app
+    // does not know that this client is always a long day, or that the shop
+    // allows a meal there - so it does not argue the case either way.
+    expect(o.flag).toBe("Claimed 22 mi from home, inside the 80 mi radius");
   });
 
   it("parks it until somebody signs for it", () => {

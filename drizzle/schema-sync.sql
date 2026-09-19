@@ -4740,10 +4740,15 @@ CREATE TABLE IF NOT EXISTS "service_reports" (
   "issued_on" text NOT NULL DEFAULT '',
   "issued_by" text NOT NULL DEFAULT '',
   "data" jsonb NOT NULL,
+  "covers" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "visit_notes" text NOT NULL DEFAULT '',
   "created_at" timestamp NOT NULL DEFAULT now(),
   CONSTRAINT "service_report_number_unique" UNIQUE ("tenant_org_id", "number")
 );
 CREATE INDEX IF NOT EXISTS "service_reports_wo_idx" ON "service_reports" ("work_order_id");
+-- What a report already accounted for, and the visit it was written about.
+ALTER TABLE "service_reports" ADD COLUMN IF NOT EXISTS "covers" jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE "service_reports" ADD COLUMN IF NOT EXISTS "visit_notes" text NOT NULL DEFAULT '';
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'service_reports_tenant_org_id_orgs_id_fk') THEN
     ALTER TABLE "service_reports" ADD CONSTRAINT "service_reports_tenant_org_id_orgs_id_fk"

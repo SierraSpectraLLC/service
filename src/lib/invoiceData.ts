@@ -81,17 +81,28 @@ export type DraftSource = {
 };
 
 /**
+ * Which of the job's own rows to price. Omitted, it is all of them, which is
+ * what an invoice wants: a bill settles a job, not a visit.
+ *
+ * A SERVICE REPORT wants a part of them. A job that takes two visits issues a
+ * report after each, and the second must not re-price the first one's hours on
+ * a page the client signs - so it asks for what no earlier report carried.
+ * See serviceReportData.serviceReportDraft, which works out the set.
+ */
+export type DraftRows = { timeIds?: number[]; partIds?: number[] };
+
+/**
  * Everything an invoice for one work order would be, without writing anything.
  *
  * The draft page renders this and the create action re-runs it - deliberately,
  * so that what somebody looked at and what gets written are produced by the
  * same code rather than by a form posting back numbers it was shown.
  */
-export async function draftSourceFor(woId: number): Promise<DraftSource | null> {
+export async function draftSourceFor(woId: number, only?: DraftRows): Promise<DraftSource | null> {
   const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, woId));
   if (!wo) return null;
 
-  const [partRows, timeRows, expenseRows, agreementRows, org, inst] = await Promise.all([
+  const [allParts, allTime, expenseRows, agreementRows, org, inst] = await Promise.all([
     db.select().from(parts).where(eq(parts.workOrderId, woId)),
     db.select().from(timeEntries).where(eq(timeEntries.workOrderId, woId)),
     db.select().from(expenses).where(eq(expenses.workOrderId, woId)),
@@ -100,6 +111,11 @@ export async function draftSourceFor(woId: number): Promise<DraftSource | null> 
     wo.instrumentId === null ? Promise.resolve(null)
       : db.select().from(instruments).where(eq(instruments.id, wo.instrumentId)).then((r) => r[0] ?? null),
   ]);
+
+  /* Narrowed here, before anything prices them, so every figure downstream -
+     the lines, the coverage draw, the margin - is about the same subset. */
+  const partRows = only?.partIds ? allParts.filter((p) => only.partIds!.includes(p.id)) : allParts;
+  const timeRows = only?.timeIds ? allTime.filter((t) => only.timeIds!.includes(t.id)) : allTime;
 
   const context = await billingContext(wo.orgId);
   const today = shopToday();

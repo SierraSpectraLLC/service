@@ -255,9 +255,11 @@ export function perDiemOffer(p: ExpensePolicy, trip: Trip): PerDiemOffer {
     // what the rule costs.
     allowedCents: p.dayPerDiemCents,
     description: `Lunch per diem - ${miles} mi from home, inside the ${p.radiusMiles} mi radius${at}`,
-    flag: `Claimed ${miles} mi from home, inside the ${p.radiusMiles} mi radius`
-      + " - the car stipend already covers meals on a trip this short."
-      + " Approve it only if the day genuinely earned it.",
+    // The fact, and nothing after it. Whether a short day earned a meal is the
+    // reviewer's call and the shop's own business - a long day at one client is
+    // a standing exception somewhere - and a note that argues the case reads as
+    // the app telling them how to answer.
+    flag: `Claimed ${miles} mi from home, inside the ${p.radiusMiles} mi radius`,
   };
 }
 

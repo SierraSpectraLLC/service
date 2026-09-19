@@ -21,7 +21,7 @@ import { PO_LABEL, PO_TONE, poTotals } from "@/lib/po";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { storeQuota } from "@/lib/storeUsage";
 import { getSystemLabels, systemLabel } from "@/lib/systemLabel";
-import { bookingSpan, moverOf, severityOf, targetDay, WO_LABEL, WO_TONE, woAcceptsWork, woLate, woLive } from "@/lib/workOrders";
+import { bookingSpan, moverOf, severityOf, targetDay, WO_LABEL, WO_TONE, woAcceptsWork, woLate, woLive, woOpen } from "@/lib/workOrders";
 import ActivityFeed from "@/components/ActivityFeed";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import HoursPanel from "@/components/HoursPanel";
@@ -273,12 +273,19 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
   // the engineer saying so, closing is the client agreeing, and the report is
   // most of what they agree to.
   const reportRows = staff ? await reportsForJob(woId) : [];
-  const reportReady = wo.state === "resolved" || wo.state === "closed";
-  const reportReason = !reportReady
-    ? "Resolve the job with a close-out first - the report says what was done."
-    : !wo.closeSummary.trim()
-      ? "Nothing is written about what was done yet."
-      : "";
+  /*
+   * A job still being worked can report on a VISIT: an engineer who leaves a
+   * machine running on a temporary fix and orders the replacement owes the
+   * client a page for the day they were there, and owes it that week rather
+   * than whenever the part lands. It needs the visit's own account, since no
+   * close-out is written until the job is resolved.
+   */
+  const reportOpen = woOpen(wo.state);
+  const reportReady = reportOpen || Boolean(wo.closeSummary.trim());
+  const reportReason = reportReady ? ""
+    : wo.state === "cancelled"
+      ? "This one was cancelled - there is no visit to report on."
+      : "Nothing is written about what was done yet.";
 
   // A job with no record could turn out to be about one - offered only while
   // it is still taking work, and only the systems that could honestly take it:
@@ -520,8 +527,9 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         workOrderId={wo.id}
         number={wo.number}
         reports={reportRows.map((r) => ({ id: r.id, number: r.number, issuedOn: r.issuedOn, issuedBy: r.issuedBy }))}
-        ready={reportReady && Boolean(wo.closeSummary.trim())}
+        ready={reportReady}
         reason={reportReason}
+        open={reportOpen}
       />
           ) }] : []),
           // The Comments card goes with the talk module (lib/flags). What was
