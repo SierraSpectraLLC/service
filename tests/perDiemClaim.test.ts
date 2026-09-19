@@ -160,9 +160,10 @@ describe("the verdict is the server's", () => {
 
   it("flags the same lunch when the claimant lives round the corner", async () => {
     /*
-     * Pat is 22 mi from the lab, inside the 80 mi radius - the car stipend
-     * already covers meals on a trip that short. The claim is still allowed to
-     * exist, at the shop's own rate, and it waits for a signature.
+     * Pat is 22 mi from the lab, which is inside the 80 mi radius. The claim is
+     * still allowed to exist, at the shop's own rate, and it waits for a
+     * signature - a short day can still earn a meal, and the reviewer is the
+     * one who knows whether this one did.
      */
     who = HR;
     const id = await openReport();

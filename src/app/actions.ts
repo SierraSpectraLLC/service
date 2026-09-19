@@ -16201,23 +16201,42 @@ export async function draftInvoice(workOrderId: number): Promise<{ error?: strin
  * makes two people pressing the button at once a failed insert rather than
  * two SR4s. This retries.
  */
-export async function issueServiceReport(workOrderId: number): Promise<{ error?: string; id?: number }> {
+export async function issueServiceReport(
+  workOrderId: number, visitNotes = "",
+): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
   const found = await loadWorkOrder(u, workOrderId);
   if ("error" in found) return found;
   const { wo } = found;
-  if (wo.state !== "resolved" && wo.state !== "closed") {
-    return { error: `${wo.number} is ${WO_LABEL[wo.state]?.toLowerCase() ?? wo.state} - a service report says what was done, so the work has to be done first.` };
+  if (wo.state === "cancelled") {
+    return { error: `${wo.number} was cancelled - there is no visit to report on.` };
   }
-  // A report whose notes are blank is the one thing this document must never
-  // be: a signature under an empty page. The close-out is written when the job
-  // is resolved, so there is always something to carry.
-  if (!wo.closeSummary.trim()) {
-    return { error: `Nothing is written on ${wo.number} about what was done - resolve it with a close-out first.` };
+  const notes = visitNotes.trim();
+  /*
+   * A report whose notes are blank is the one thing this document must never
+   * be: a signature under an empty page.
+   *
+   * A finished job always has something to carry - the close-out is written to
+   * resolve it. A job still being worked has not written one yet, and is the
+   * commoner case than it looks: an engineer who finds a pump inside spec,
+   * leaves it running and orders a replacement owes the client a page for the
+   * day they were there, and owes it now rather than in three weeks when the
+   * part lands. So the visit's own account stands in - and is required, since
+   * there is nothing behind it.
+   */
+  if (!notes && !wo.closeSummary.trim()) {
+    return { error: woOpen(wo.state)
+      ? `${wo.number} is still open - say what was done on this visit and the report can go out today.`
+      : `Nothing is written on ${wo.number} about what was done - resolve it with a close-out first.` };
   }
 
-  const draft = await serviceReportDraft(workOrderId);
+  const draft = await serviceReportDraft(workOrderId, { visitNotes: notes });
   if (!draft) return { error: "Not found" };
+  /* Every hour and every part on this job is already on a report the client
+     has. Another one would be the same page under a new number. */
+  if (draft.empty) {
+    return { error: `Nothing has been logged on ${wo.number} since the last report - log this visit's hours and parts first.` };
+  }
 
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -16230,7 +16249,19 @@ export async function issueServiceReport(workOrderId: number): Promise<{ error?:
         tenantOrgId: wo.tenantOrgId, workOrderId, orgId: wo.orgId,
         number, issuedOn: shopToday(), issuedBy: u.email,
         data: { ...draft.report, reportNumber: number },
+        covers: draft.covers, visitNotes: notes,
       }).returning();
+      /* A report going out while the job is still open is news to whoever
+         picks the job up next: the client has a signed page for that visit,
+         and the return trip is a separate one. The audit log has it either
+         way; the thread is where somebody reads it. */
+      if (woOpen(wo.state)) {
+        await db.insert(workOrderNotes).values({
+          workOrderId, author: u.name || u.email, authorEmail: u.email,
+          text: `Issued ${number} for the visit of ${draft.report.visitDate}. `
+            + `${wo.number} stays open.`,
+        });
+      }
       await audit({
         actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
         entityType: "service_report", entityId: row.id, tenantOrgId: wo.tenantOrgId,
@@ -16268,10 +16299,18 @@ export async function reissueServiceReport(id: number): Promise<{ error?: string
   const found = await loadWorkOrder(u, row.workOrderId);
   if ("error" in found) return found;
 
-  const draft = await serviceReportDraft(row.workOrderId);
+  /* Its own rows, and its own account of the visit. Redrawing SR1 from
+     everything the job has accumulated since would hand the client a
+     different document under a number they have already countersigned. */
+  const draft = await serviceReportDraft(row.workOrderId, {
+    forReportId: id, visitNotes: row.visitNotes,
+  });
   if (!draft) return { error: "Not found" };
   await db.update(serviceReports)
-    .set({ data: { ...draft.report, reportNumber: row.number }, issuedOn: shopToday(), issuedBy: u.email })
+    .set({
+      data: { ...draft.report, reportNumber: row.number },
+      covers: draft.covers, issuedOn: shopToday(), issuedBy: u.email,
+    })
     .where(eq(serviceReports.id, id));
   await audit({
     actor: u.email, instrumentId: found.wo.instrumentId, assetId: found.wo.assetId,
