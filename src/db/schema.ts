@@ -2383,6 +2383,18 @@ export const workOrders = pgTable("work_orders", {
    */
   bookedOn: text("booked_on").notNull().default(""),
   bookedUntil: text("booked_until").notNull().default(""),
+  /**
+   * The day this job is actually wanted by, YYYY-MM-DD, blank for "whatever
+   * its kind implies".
+   *
+   * Lateness was severity plus the day it was raised and nothing else: a Down
+   * job was red from its second day forever, which is right until the moment
+   * somebody agrees a date with the client. A pump being fitted on the 20th
+   * because that is when the client can take the downtime is not a late job,
+   * and a list that says it is teaches people to read past red. What was
+   * agreed beats what the rulebook assumed - see lib/workOrders.dueDay.
+   */
+  dueOn: text("due_on").notNull().default(""),
   // '' = raised by hand | 'issue' = the client said something is wrong |
   // 'pm_request' = the client asked for upkeep
   origin: text("origin").notNull().default(""),
