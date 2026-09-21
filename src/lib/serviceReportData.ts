@@ -109,8 +109,15 @@ export async function serviceReportDraft(
       id: timeEntries.id, date: timeEntries.date, minutes: timeEntries.minutes,
       category: timeEntries.category, person: timeEntries.person, billable: timeEntries.billable,
     }).from(timeEntries).where(eq(timeEntries.workOrderId, woId)),
-    db.select({ id: parts.id, name: parts.name, partNumber: parts.partNumber })
-      .from(parts).where(eq(parts.workOrderId, woId)),
+    /* The columns the drawdown reads as well as the ones the table prints:
+       whether THIS visit's parts have already been counted against the
+       allowance decides whether the balance block has to count them itself.
+       See partsRemaining below. */
+    db.select({
+      id: parts.id, name: parts.name, partNumber: parts.partNumber,
+      costCents: parts.costCents, status: parts.status, installedAt: parts.installedAt,
+      ownerOrgId: parts.ownerOrgId, makerOrgId: parts.makerOrgId, instrumentId: parts.instrumentId,
+    }).from(parts).where(eq(parts.workOrderId, woId)),
   ]);
   const hourRows = allHours.filter((h) => !takenTime.has(h.id));
   const mineParts = allParts.filter((p) => !takenParts.has(p.id));
@@ -160,10 +167,50 @@ export async function serviceReportDraft(
    * in the drawdown.
    */
   const mine = countsAsVisit(wo) || wo.severity.trim().toLowerCase() === "question" ? 0 : 1;
+
+  /*
+   * THIS VISIT'S PARTS, where the drawdown has not seen them yet.
+   *
+   * Same sentence as the visit count above, and the same reason: the block is
+   * headed "upon completion of this service visit", so what this page charges
+   * has to be off the balance this page prints. The visit count said so and
+   * the parts figure did not, which produced a document that argued with
+   * itself - "$3,450 of parts, all of it absorbed by your contract" over
+   * "Parts Allowance Remaining: $10,000.00", unchanged.
+   *
+   * The gap is a timing one. lib/agreementUsage counts a part when it is
+   * FITTED - status Installed with a date on it - which is right for an
+   * allowance, since a part in a box on a shelf has not been spent on anybody's
+   * behalf. But a part can reach a client's signature page before it reaches
+   * their instrument: a roughing pump ordered on the visit that diagnosed it,
+   * priced, covered, and going in three weeks later.
+   *
+   * So only the ones the drawdown has NOT counted are taken off here, and
+   * every part is counted once: a fitted one by the drawdown, an ordered one
+   * by this. At the price the page prints, because that is the number the
+   * client is reading it against.
+   */
+  const inTerm = (day: string) =>
+    (!agreement?.startsOn || day >= agreement.startsOn) && (!agreement?.endsOn || day <= agreement.endsOn);
+  const scoped = agreement?.instrumentIds ?? [];
+  const drawnAlready = (p: typeof allParts[number]) =>
+    agreement !== null && p.ownerOrgId === agreement.orgId && p.costCents !== null
+    && p.status === "Installed" && p.installedAt.trim() !== "" && inTerm(p.installedAt)
+    && (p.makerOrgId === null || p.makerOrgId !== agreement.orgId)
+    && (scoped.length === 0 || (p.instrumentId !== null && scoped.includes(p.instrumentId)));
+  const uncounted = new Set(mineParts.filter((p) => !drawnAlready(p)).map((p) => p.id));
+  const minePartsCents = src.lines
+    .filter((l) => l.kind === "part" && l.covered && l.sourceId !== null && uncounted.has(l.sourceId))
+    .reduce((n, l) => n + Math.round(l.qty * l.unitCents), 0);
+
   const contract = {
     visitNumber: used ? pad2(used.visits + mine) : "",
     visitsRemaining: !visits?.tracked ? "" : visits.unlimited ? "Unlimited" : pad2(visits.remaining - mine),
-    partsRemaining: !partsLeft?.tracked ? "" : partsLeft.unlimited ? "Unlimited" : usd(partsLeft.remaining),
+    // A client who has drawn more than they bought has none left rather than
+    // minus some: the overrun is the shop's to raise, and a balance line is
+    // not the place. Same reading as pad2 above.
+    partsRemaining: !partsLeft?.tracked ? "" : partsLeft.unlimited ? "Unlimited"
+      : usd(Math.max(0, partsLeft.remaining - minePartsCents)),
   };
 
   // Part numbers and names come off the parts themselves; the money comes off

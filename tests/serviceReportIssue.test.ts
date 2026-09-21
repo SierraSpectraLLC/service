@@ -10,6 +10,7 @@
 //
 // Real Postgres, in-process, from the same DDL every deploy applies.
 import { readFileSync } from "node:fs";
+import { usd } from "@/lib/serviceReportDoc";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { PGlite } = await import("@electric-sql/pglite");
@@ -513,6 +514,99 @@ describe("a visit on a job that is not finished", () => {
     const [note] = await testDb.select().from(schema.workOrderNotes);
     expect(note.text).toContain("Issued 030182_SR1 for the visit of Monday, September 14, 2026");
     expect(note.text).toContain("030182 stays open");
+  }, SLOW);
+});
+
+describe("the balance block and the table agree", () => {
+  /*
+   * "The $10,000 isn't subtracting the $3k the roughing pump is charging."
+   *
+   * The page said "$3,450 of parts, all of it absorbed by your contract" over
+   * "Parts Allowance Remaining: $10,000.00", unchanged - a document arguing
+   * with itself in front of a client. The block is headed "upon completion of
+   * this service visit", so what this page charges has to be off the balance
+   * this page prints.
+   *
+   * The gap was a timing one. The drawdown counts a part when it is FITTED,
+   * which is right for an allowance - a part in a box has not been spent on
+   * anybody's behalf. But a part reaches a signature page before it reaches
+   * the instrument: a roughing pump ordered on the visit that diagnosed it,
+   * going in three weeks later.
+   */
+  it("takes this visit's parts off the allowance before they are fitted", async () => {
+    const { issueServiceReport } = await import("@/app/actions");
+    const { reportTotals } = await import("@/lib/serviceReport");
+    // The pump is on order: priced, covered, and not in the machine yet.
+    await client.exec(`
+      DELETE FROM parts;
+      INSERT INTO parts (id, instrument_id, work_order_id, name, part_number, qty,
+                         cost_cents, status, owner_org_id) VALUES
+        (3, 1, 1, 'Roughing Pump', 'PFE-0141', '1', 300000, 'Received', ${EMERY});
+    `);
+    await issueServiceReport(1);
+
+    const [row] = await testDb.select().from(schema.serviceReports);
+    const r = row.data as import("@/lib/serviceReport").ServiceReport;
+    const charged = reportTotals(r).parts;
+
+    expect(r.parts).toHaveLength(1);
+    expect(charged).toBeGreaterThan(0);
+    expect(r.balances.partsTotal).toBe(usd(charged));
+    // $16,000 of allowance, less what this page just charged against it.
+    expect(r.balances.partsRemaining).toBe(usd(1_600_000 - charged));
+  }, SLOW);
+
+  it("counts a fitted part once, not twice", async () => {
+    // The drawdown has already seen this one, so the balance must not take it
+    // off again - the commonest way a fix like this goes wrong.
+    const { issueServiceReport } = await import("@/app/actions");
+    await issueServiceReport(1);
+    const [row] = await testDb.select().from(schema.serviceReports);
+    const r = row.data as import("@/lib/serviceReport").ServiceReport;
+    // The seed's two parts are Installed on 2026-09-14, at $2,733 of cost.
+    expect(r.balances.partsRemaining).toBe("$13,267.00");
+  }, SLOW);
+
+  it("counts each part once when one is fitted and one is on order", async () => {
+    const { issueServiceReport } = await import("@/app/actions");
+    await client.exec(`
+      INSERT INTO parts (id, instrument_id, work_order_id, name, part_number, qty,
+                         cost_cents, status, owner_org_id) VALUES
+        (3, 1, 1, 'Roughing Pump', 'PFE-0141', '1', 300000, 'Received', ${EMERY});
+    `);
+    await issueServiceReport(1);
+
+    const [row] = await testDb.select().from(schema.serviceReports);
+    const r = row.data as import("@/lib/serviceReport").ServiceReport;
+    const pump = r.parts.find((l) => l.partNumber === "PFE-0141")!;
+    // The two fitted ones drew their cost through the drawdown ($2,733); the
+    // pump draws what this page charges for it, and neither draws twice.
+    expect(r.balances.partsRemaining)
+      .toBe(usd(1_600_000 - 273_300 - Math.round(pump.quantity * (pump.unitCents ?? 0))));
+  }, SLOW);
+
+  it("says nothing at all where the contract tracks no parts allowance", async () => {
+    await client.exec(`UPDATE agreements SET parts_allowance_cents = 0 WHERE id = 1;`);
+    const { issueServiceReport } = await import("@/app/actions");
+    await issueServiceReport(1);
+    const [row] = await testDb.select().from(schema.serviceReports);
+    expect((row.data as import("@/lib/serviceReport").ServiceReport).balances.partsRemaining).toBe("");
+    await client.exec(`UPDATE agreements SET parts_allowance_cents = 1600000 WHERE id = 1;`);
+  }, SLOW);
+
+  it("shows nothing left rather than a negative, where the visit overran it", async () => {
+    await client.exec(`
+      UPDATE agreements SET parts_allowance_cents = 50000 WHERE id = 1;
+      DELETE FROM parts;
+      INSERT INTO parts (id, instrument_id, work_order_id, name, part_number, qty,
+                         cost_cents, status, owner_org_id) VALUES
+        (3, 1, 1, 'Roughing Pump', 'PFE-0141', '1', 300000, 'Received', ${EMERY});
+    `);
+    const { issueServiceReport } = await import("@/app/actions");
+    await issueServiceReport(1);
+    const [row] = await testDb.select().from(schema.serviceReports);
+    expect((row.data as import("@/lib/serviceReport").ServiceReport).balances.partsRemaining).toBe("$0.00");
+    await client.exec(`UPDATE agreements SET parts_allowance_cents = 1600000 WHERE id = 1;`);
   }, SLOW);
 });
 
