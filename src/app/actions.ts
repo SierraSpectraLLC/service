@@ -241,7 +241,7 @@ import { createUploadSession, graphSetupProblem, listFolder, listPlaces, searchF
 import { vaultConfigured, VAULT_UNCONFIGURED } from "@/lib/secretBox";
 import { PLACES_DRIVE, type CloudItem } from "@/lib/cloudItems";
 import { parseFrame, serializeFrame } from "@/lib/photoFrame";
-import { isPhotoFile, photoRemovalNote, sharedCover } from "@/lib/photos";
+import { albumMoveNote, isPhotoFile, normalizeAlbum, photoRemovalNote, sharedCover } from "@/lib/photos";
 import { coverOf, photoRecord, photoTwin, type PhotoRecord } from "@/lib/photoPair";
 import { askLabel, pmRequestDue, pmRequestTitle, pmWindow, scheduleLine, visitKind } from "@/lib/pmRequest";
 import { checkNote, isDay } from "@/lib/calendarNotes";
@@ -3594,12 +3594,11 @@ export async function recordAttachments(
  * of them the COVER is a pointer on the record, so choosing a different cover
  * moves a pointer rather than moving files around.
  *
- * The first photo a record ever gets becomes its cover: a record with pictures
- * and no cover would show nothing, which is never what somebody uploading a
- * photo meant.
+ * `album` files the whole batch straight into one - uploading the setup shots
+ * from inside the "System setup" album should not mean sorting them after.
  */
 export async function addPhotos(
-  target: WorkTarget, files: { fileName: string; url: string; size: number }[],
+  target: WorkTarget, files: { fileName: string; url: string; size: number }[], album = "",
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   if (!files.length) return {};
@@ -3618,6 +3617,7 @@ export async function addPhotos(
     workOrderId: t0.workOrderId,
     fileName: f.fileName.slice(0, 200), kind: "Photo", url: f.url, size: f.size,
     uploadedBy: u.name, description: onSystem ? "System photo" : "Module photo",
+    album: normalizeAlbum(album),
   }))).returning();
 
   // Uploading a photo does not choose the cover, even the first one. The
@@ -3632,7 +3632,8 @@ export async function addPhotos(
   await audit({
     actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
     entityType: "attachment", entityId: rows[0].id,
-    action: `added ${rows.length} ${onSystem ? "system" : "module"} photo${rows.length === 1 ? "" : "s"}`,
+    action: `added ${rows.length} ${onSystem ? "system" : "module"} photo${rows.length === 1 ? "" : "s"}`
+      + (normalizeAlbum(album) ? ` to album '${normalizeAlbum(album)}'` : ""),
   });
   revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
   return {};
@@ -3763,6 +3764,44 @@ export async function removePhotos(
   revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
   if (twin) revWork(twin);
   return { removed: rows.length };
+}
+
+/**
+ * File several photos into an album, or take them out of one (blank album).
+ *
+ * One act, one line of history, however many photos - the same reasoning as
+ * removePhotos. Only photos on this record, or on the unit/system it pools its
+ * photos with, are touched; anything else in the list is dropped rather than
+ * refused, so a stale tab takes what it can.
+ */
+export async function setPhotoAlbum(
+  target: WorkTarget, ids: number[], album: string,
+): Promise<{ moved?: number; error?: string }> {
+  const u = await requireEditor();
+  if (!ids.length) return { moved: 0 };
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+  await assertWorkEditable(u, { instrumentId: t0.instrumentId, assetId: t0.assetId });
+  const name = normalizeAlbum(album);
+
+  const me = photoRecord(t0);
+  const twin = await photoTwin(t0);
+  const onRecord = (a: { instrumentId: number | null; assetId: number | null }, r: PhotoRecord) =>
+    (r.instrumentId !== null ? a.instrumentId === r.instrumentId : a.assetId === r.assetId);
+  const rows = (await db.select().from(attachments).where(inArray(attachments.id, ids.slice(0, 200))))
+    .filter((a) => isPhotoFile(a) && (onRecord(a, me) || (twin !== null && onRecord(a, twin))));
+  if (!rows.length) return { error: "Nothing there to move." };
+
+  await db.update(attachments).set({ album: name }).where(inArray(attachments.id, rows.map((a) => a.id)));
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
+    entityType: "attachment", entityId: rows[0].id,
+    action: albumMoveNote(rows.map((a) => a.fileName), name),
+  });
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  if (twin) revWork(twin);
+  revalidatePath("/gallery");
+  return { moved: rows.length };
 }
 
 /**

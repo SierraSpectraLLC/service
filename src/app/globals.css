@@ -1445,6 +1445,13 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
   width: 84px; height: 84px; border-radius: var(--radius); object-fit: cover;
   border: 1px solid var(--line); flex-shrink: 0;
 }
+/* The hero picture as the button that changes it (CoverPicker). */
+.rhero-pick { padding: 0; border: none; background: none; cursor: pointer; line-height: 0; flex-shrink: 0; border-radius: var(--radius); }
+.rhero-pick:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+.rhero-img.empty {
+  display: flex; align-items: center; justify-content: center; text-align: center; line-height: 1.2;
+  border-style: dashed; background: var(--t-neutral-bg); color: var(--mut); font-size: var(--fs-meta);
+}
 .rhero-main { flex: 1 1 auto; min-width: 0; }
 .rhero-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .rhero-title h1 { margin: 0; font-size: var(--fs-hero); font-weight: 800; letter-spacing: -0.3px; color: var(--navy); line-height: 1.25; }

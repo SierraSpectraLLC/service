@@ -19,9 +19,12 @@ export type HeroStat = {
  * the kebab survive - globals.css hides the rest - so pass the primary one
  * first.
  */
-export default function RecordHero({ image, imageAlt = "", eyebrow, id, title, meta, stats, actions, kebab }: {
+export default function RecordHero({ image, imageAlt = "", imageSlot, eyebrow, id, title, meta, stats, actions, kebab }: {
   image?: string;
   imageAlt?: string;
+  /** Rendered in the image's place when set - a record whose picture can be
+      changed from here (see CoverPicker) supplies its own. */
+  imageSlot?: React.ReactNode;
   eyebrow?: React.ReactNode;
   /** The record's identifier, set in the mono face beside the title. */
   id?: React.ReactNode;
@@ -33,10 +36,10 @@ export default function RecordHero({ image, imageAlt = "", eyebrow, id, title, m
 }) {
   return (
     <div className="card rhero">
-      {image && (
+      {imageSlot ?? (image && (
         // eslint-disable-next-line @next/next/no-img-element
         <img className="rhero-img" src={image} alt={imageAlt} />
-      )}
+      ))}
       <div className="rhero-main">
         {eyebrow != null && <div className="eyebrow">{eyebrow}</div>}
         <div className="rhero-title">

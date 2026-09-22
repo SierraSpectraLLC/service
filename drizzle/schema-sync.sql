@@ -4774,3 +4774,6 @@ ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "client_signatory" text NOT N
 -- How a client reaches a service company: the address on the documents it
 -- signs. Blank falls back to the platform's own contact address.
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "contact_email" text NOT NULL DEFAULT '';
+
+-- Which album a photo sits in on its record's Photos section. Blank = none.
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "album" text NOT NULL DEFAULT '';
