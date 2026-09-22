@@ -654,6 +654,7 @@ export default async function InstrumentPage({ params, searchParams }: {
         imageAlt={systemLabel(inst, assetRows)}
         imageSlot={
           <CoverPicker target={{ instrumentId: inst.id, assetId: null }} src={coverSrc}
+            framing={coverId !== null ? coverFraming : systemStock?.photoFraming ?? ""}
             alt={systemLabel(inst, assetRows) || inst.externalId}
             photos={photoRows.map((a) => ({
               id: a.id, fileName: a.fileName, framing: a.framing, createdAt: a.createdAt.toISOString(),

@@ -1,49 +1,68 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { clearCoverPhoto, setCoverPhoto, type WorkTarget } from "@/app/actions";
+import { useRouter } from "next/navigation";
+import { clearCoverPhoto, setCoverPhoto, setPhotoFraming, type WorkTarget } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { fileSrc, orderPhotos } from "@/lib/photos";
 import PhotoThumb from "./PhotoThumb";
+import PhotoFramer from "./PhotoFramer";
 
 export type CoverChoice = { id: number; fileName: string; framing: string; createdAt: string };
 
 /**
- * The picture at the top of a record, and the one place its cover is chosen.
+ * The picture at the top of a record, and the one place its cover is chosen
+ * and framed.
  *
  * The cover is the answer to "which machine is this", so it is set where that
- * question is asked - by tapping the picture - rather than by a button under
- * every tile in Photos, where it competed with the photos themselves for room
- * on a phone.
+ * question is asked rather than by a button under every tile in Photos, where
+ * it competed with the photos themselves for room on a phone. Framing lives
+ * here too: the cover is the photo that gets cropped into tiles across the app.
+ *
+ * Hovering the picture offers Replace and Frame; without a hover (a phone) the
+ * first tap shows them. Frame only appears on a photo somebody took - the
+ * catalog's stand-in is framed in the catalog.
  *
  * Read-only viewers, and records with nothing photographed yet, get the plain
  * picture: there is nothing to choose between. Rendered in RecordHero's image
  * slot, so it wears the hero's own image class.
  */
 export default function CoverPicker({
-  target, src, alt, photos, coverId, canEdit,
+  target, src, framing, alt, photos, coverId, canEdit,
 }: {
   target: WorkTarget;
   /** What shows now: the cover, the catalog's stand-in, or blank for neither. */
   src: string;
+  /** How that picture sits in its box. See lib/photoFrame. */
+  framing: string;
   alt: string;
   photos: CoverChoice[];
   coverId: number | null;
   canEdit: boolean;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [acts, setActs] = useState(false);
+  const [framingOpen, setFramingOpen] = useState(false);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
   const picking = canEdit && photos.length > 0;
+  const cover = coverId !== null ? photos.find((p) => p.id === coverId) ?? null : null;
 
   if (!src && !picking) return null;
 
   const picture = src
-    // eslint-disable-next-line @next/next/no-img-element
-    ? <img className="rhero-img" src={src} alt={alt} />
+    ? (
+      <span className="rhero-img" style={{ display: "block", overflow: "hidden" }}>
+        <PhotoThumb src={src} framing={framing} alt={alt} width="100%" aspect={1} radius={0}
+          style={{ border: "none", height: "100%" }} />
+      </span>
+    )
     : <span className="rhero-img empty">Choose cover</span>;
   if (!picking) return picture;
+
+  const replace = () => { setActs(false); setError(""); setOpen(true); };
 
   const run = (fn: () => Promise<{ error?: string }>, message: string) =>
     startTransition(async () => {
@@ -54,11 +73,27 @@ export default function CoverPicker({
 
   return (
     <>
-      <button type="button" className="rhero-pick" title="Change the cover photo"
-        aria-label={`Change the cover photo of ${alt}`}
-        onClick={() => { setError(""); setOpen(true); }}>
-        {picture}
-      </button>
+      <span className={`rhero-cover${acts ? " open" : ""}`}
+        onMouseLeave={() => setActs(false)}>
+        {/* Nothing to frame yet: the picture goes straight to the chooser. */}
+        <button type="button" className="rhero-pick" aria-label={`Cover photo of ${alt}`}
+          aria-expanded={cover ? acts : undefined}
+          onClick={() => (cover ? setActs((v) => !v) : replace())}>
+          {picture}
+        </button>
+        {cover && (
+          <span className="rhero-cover-acts">
+            <button type="button" onClick={replace}>Replace</button>
+            <button type="button" onClick={() => { setActs(false); setFramingOpen(true); }}>Frame</button>
+          </span>
+        )}
+      </span>
+
+      {framingOpen && cover && (
+        <PhotoFramer src={fileSrc(cover.id)} framing={cover.framing} alt={cover.fileName}
+          save={(f) => setPhotoFraming(cover.id, f)}
+          onDone={() => { setFramingOpen(false); router.refresh(); }} />
+      )}
 
       {open && (
         <Dialog open onClose={() => setOpen(false)} title="Cover photo"

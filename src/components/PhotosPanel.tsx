@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
 import {
-  addPhotos, deleteAttachment, removePhotos, setPhotoAlbum, setPhotoFraming, type WorkTarget,
+  addPhotos, deleteAttachment, removePhotos, setPhotoAlbum, type WorkTarget,
 } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
@@ -12,7 +12,6 @@ import { confirmReason, inputDialog } from "@/components/ui/ConfirmDialog";
 import { fmtBytes } from "@/lib/storage";
 import { ALBUM_SUGGESTIONS, coverIsChosen, fileSrc, groupByAlbum, normalizeAlbum, photoCount } from "@/lib/photos";
 import PhotoThumb from "./PhotoThumb";
-import PhotoFramer from "./PhotoFramer";
 
 export type PhotoRow = {
   id: number;
@@ -41,7 +40,9 @@ export type PhotoRow = {
  *
  * The COVER is marked here but chosen by tapping the picture at the top of the
  * record (CoverPicker): that is where "which machine is this" is asked, and a
- * Cover button under every tile crowded out the photos on a phone.
+ * Cover button under every tile crowded out the photos on a phone. Framing
+ * lives there too - it only matters where a photo is cropped into a tile, and
+ * the cover is the photo that is.
  *
  * These are ordinary attachments and appear under Files too. That is the point -
  * one file, one row, one charge against the quota, one authorized way to read it.
@@ -72,7 +73,6 @@ export default function PhotosPanel({
   const uploadAlbum = useRef("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [framing, setFraming] = useState<PhotoRow | null>(null);
   // Empty set = not selecting. Clearing fifteen setup shots one confirmation at
   // a time is the thing this replaces, so the whole mode exists to end in one
   // reason and one line of history.
@@ -233,9 +233,7 @@ export default function PhotosPanel({
         <div key={p.id} style={{ width: 104 }}>
           <Tile p={p} />
           {canEdit && !selecting && (
-            <div style={{ display: "flex", gap: 4, marginTop: 3, alignItems: "center" }}>
-              <button className="btn link" disabled={pending}
-                onClick={() => setFraming(p)}>Frame</button>
+            <div style={{ display: "flex", marginTop: 3 }}>
               <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)" }} disabled={pending}
                 aria-label={`Remove ${p.fileName}`} onClick={() => remove(p)}>×</button>
             </div>
@@ -376,11 +374,6 @@ export default function PhotosPanel({
         </Dialog>
       )}
 
-      {framing && (
-        <PhotoFramer src={fileSrc(framing.id)} framing={framing.framing} alt={framing.fileName}
-          save={(f) => setPhotoFraming(framing.id, f)}
-          onDone={() => { setFraming(null); router.refresh(); }} />
-      )}
     </div>
   );
 }

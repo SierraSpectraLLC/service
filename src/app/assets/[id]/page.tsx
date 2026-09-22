@@ -298,6 +298,7 @@ export default async function AssetPage({ params, searchParams }: {
         imageAlt={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}`}
         imageSlot={
           <CoverPicker target={target} src={coverSrc}
+            framing={coverId !== null ? coverFraming : unitStock?.photoFraming ?? ""}
             alt={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}`}
             photos={photoRows.map((a) => ({
               id: a.id, fileName: a.fileName, framing: a.framing, createdAt: a.createdAt.toISOString(),
