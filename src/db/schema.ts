@@ -1792,6 +1792,13 @@ export const attachments = pgTable("attachments", {
    * lib/photoFrame, which is also the only place that knows the format.
    */
   framing: text("framing").notNull().default(""),
+  /**
+   * Which album a photo sits in on its record's Photos section - "System
+   * setup", "As received". Blank = not in one. A label on the file rather than
+   * a folder: a record's photos belong to the record, and folders are for the
+   * document library (see the folders table). See lib/photos groupByAlbum.
+   */
+  album: text("album").notNull().default(""),
   id: serial("id").primaryKey(),
   tenantOrgId: tenantStamp(),
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),

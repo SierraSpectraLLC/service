@@ -614,7 +614,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
       {(canAttach || fileRows.some(isPhotoFile)) && (
         <PhotosPanel target={target} coverId={null}
           photos={fileRows.filter(isPhotoFile).map((a) => ({
-            id: a.id, fileName: a.fileName, kind: a.kind, framing: a.framing,
+            id: a.id, fileName: a.fileName, kind: a.kind, framing: a.framing, album: a.album,
             uploadedBy: a.uploadedBy, when: shopTime(a.createdAt), createdAt: a.createdAt.toISOString(),
           }))}
           label={`${wo.number} - ${wo.title}`}

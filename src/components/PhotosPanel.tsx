@@ -4,16 +4,14 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
 import {
-  addCatalogRef, addPhotos, clearCoverPhoto, deleteAttachment, removePhotos, setCoverPhoto, setPhotoFraming,
-  type WorkTarget,
+  addPhotos, deleteAttachment, removePhotos, setPhotoAlbum, type WorkTarget,
 } from "@/app/actions";
-import Dialog, { DialogStatus } from "@/components/ui/Dialog";
+import Dialog from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
-import { confirmReason } from "@/components/ui/ConfirmDialog";
+import { confirmReason, inputDialog } from "@/components/ui/ConfirmDialog";
 import { fmtBytes } from "@/lib/storage";
-import { coverIsChosen, fileSrc, orderPhotos, photoCount } from "@/lib/photos";
+import { ALBUM_SUGGESTIONS, coverIsChosen, fileSrc, groupByAlbum, normalizeAlbum, photoCount } from "@/lib/photos";
 import PhotoThumb from "./PhotoThumb";
-import PhotoFramer from "./PhotoFramer";
 
 export type PhotoRow = {
   id: number;
@@ -23,6 +21,8 @@ export type PhotoRow = {
   uploadedBy: string;
   when: string;
   createdAt: string;
+  /** Blank = in no album. See lib/photos groupByAlbum. */
+  album?: string;
 };
 
 /**
@@ -34,11 +34,15 @@ export type PhotoRow = {
  * record full of model numbers cannot - is this the one in the corner with the
  * old autosampler, and is what arrived what was described.
  *
- * One of them leads. The COVER is a pointer on the record rather than a copy of
- * the file, so changing which photo represents a system moves a pointer and
- * touches no storage. Delete the cover and the newest photo takes over: the
- * pointer is a preference, and losing it should cost the preference, not leave
- * the record with no picture at all.
+ * They come in sets - the setup shots, the unit as it arrived - so a photo can
+ * sit in an ALBUM, a label on the file that sections this panel. Photos in no
+ * album come first, where a fresh upload lands.
+ *
+ * The COVER is marked here but chosen by tapping the picture at the top of the
+ * record (CoverPicker): that is where "which machine is this" is asked, and a
+ * Cover button under every tile crowded out the photos on a phone. Framing
+ * lives there too - it only matters where a photo is cropped into a tile, and
+ * the cover is the photo that is.
  *
  * These are ordinary attachments and appear under Files too. That is the point -
  * one file, one row, one charge against the quota, one authorized way to read it.
@@ -46,12 +50,11 @@ export type PhotoRow = {
  * The catalog's stock photo is deliberately NOT here. It still stands in for the
  * thumbnail at the top of the record, where the job is "which machine is this" -
  * but this section is the evidence somebody gathered about this exact unit, and
- * a picture of the model is not evidence of anything. Listing it here, however
- * carefully labelled, put a photo nobody took in the place people go looking for
- * photos somebody took.
+ * a picture of the model is not evidence of anything. Filing a photo TO the
+ * catalog is done from the Reference section, which is where the catalog lives.
  */
 export default function PhotosPanel({
-  target, photos, coverId, label, canEdit, storageFull, shared, catalogScopes = [],
+  target, photos, coverId, label, canEdit, storageFull, shared,
 }: {
   target: WorkTarget;
   photos: PhotoRow[];
@@ -60,34 +63,30 @@ export default function PhotosPanel({
   label: string;
   canEdit: boolean;
   storageFull: boolean;
-  /** Where a photo may be filed in the catalog - this record's equipment.
-      Empty hides the option (nothing to file it against). */
-  catalogScopes?: { assetType: string; model: string; label: string }[];
   /** Set when this record pools its photos with the unit/system it is. */
   shared?: string;
 }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
+  // Which album the next upload goes into - set by the button that opened the
+  // file picker, so "+ Add" inside an album files straight into it.
+  const uploadAlbum = useRef("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [framing, setFraming] = useState<PhotoRow | null>(null);
   // Empty set = not selecting. Clearing fifteen setup shots one confirmation at
   // a time is the thing this replaces, so the whole mode exists to end in one
   // reason and one line of history.
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [selecting, setSelecting] = useState(false);
+  // The "put these in an album" dialog: null = closed, else the name typed.
+  const [albumDraft, setAlbumDraft] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const ordered = orderPhotos(photos, coverId);
-  // Filing a photo to the catalog: the picture stays exactly where it is - the
-  // reference points at it - so what one engineer learned on this unit shows
-  // up on every unit like it without copying a byte or a second storage charge.
-  const [filing, setFiling] = useState<null | { id: number; fileName: string }>(null);
-  const [fileDraft, setFileDraft] = useState({ scope: 0, title: "", body: "" });
-  const [lead, ...rest] = ordered;
-  const chosen = coverIsChosen(photos, coverId);
+  const sections = groupByAlbum(photos, coverId);
+  const albums = sections.map((sec) => sec.album).filter(Boolean);
+  const hasCover = coverIsChosen(photos, coverId);
 
-  if (!canEdit && ordered.length === 0) return null;
+  if (!canEdit && photos.length === 0) return null;
 
   const send = async (list: FileList | null) => {
     const files = Array.from(list ?? []);
@@ -100,9 +99,9 @@ export default function PhotosPanel({
         const blob = await upload(f.name, f, { access: "public", handleUploadUrl: "/api/upload" });
         done.push({ fileName: f.name, url: blob.url, size: f.size });
       }
-      const res = await addPhotos(target, done);
+      const res = await addPhotos(target, done, uploadAlbum.current);
       if (res?.error) throw new Error(res.error);
-      toast({ message: `Added ${done.length} photo${done.length === 1 ? "" : "s"}` });
+      toast({ message: `Added ${done.length} photo${done.length === 1 ? "" : "s"}${uploadAlbum.current ? ` to ${uploadAlbum.current}` : ""}` });
       router.refresh();
     } catch (e) {
       // Name the file that failed. A silent stop here looks like it worked.
@@ -111,6 +110,8 @@ export default function PhotosPanel({
       setBusy("");
     }
   };
+
+  const pickFiles = (album: string) => { uploadAlbum.current = album; input.current?.click(); };
 
   const act = (fn: () => Promise<{ error?: string } | void>, message?: string) =>
     startTransition(async () => {
@@ -135,7 +136,7 @@ export default function PhotosPanel({
     return next;
   });
 
-  const stopSelecting = () => { setSelecting(false); setPicked(new Set()); };
+  const stopSelecting = () => { setSelecting(false); setPicked(new Set()); setAlbumDraft(null); };
 
   const removePicked = async () => {
     const n = picked.size;
@@ -154,21 +155,56 @@ export default function PhotosPanel({
     });
   };
 
+  /** File the picked photos into an album - blank takes them out of one. */
+  const movePicked = (album: string) => {
+    const ids = [...picked];
+    const name = normalizeAlbum(album);
+    startTransition(async () => {
+      const res = await setPhotoAlbum(target, ids, name);
+      setError(res?.error ?? "");
+      if (!res?.error) {
+        const n = res.moved ?? ids.length;
+        stopSelecting();
+        toast({ message: name ? `Moved ${photoCount(n)} to ${name}` : `Took ${photoCount(n)} out of their album` });
+        router.refresh();
+      }
+    });
+  };
+
+  /** Rename an album: every photo in it, moved to the new name in one act. */
+  const renameAlbum = async (from: string, ids: number[]) => {
+    const to = normalizeAlbum(await inputDialog({
+      title: `Rename "${from}"`, action: "Rename", tone: "primary",
+      label: "Album name", initial: from,
+    }) ?? "");
+    if (!to || to === from) return;
+    startTransition(async () => {
+      const res = await setPhotoAlbum(target, ids, to);
+      setError(res?.error ?? "");
+      if (!res?.error) { toast({ message: `Renamed ${from} to ${to}` }); router.refresh(); }
+    });
+  };
+
   /**
    * One photo. Opens the file normally; while selecting, it is a checkbox
    * instead - the same tile does both jobs, because a separate row of little
    * boxes beside the pictures is a second thing to aim at on a phone.
    */
-  const Tile = ({ p, width, height, radius, alt }: {
-    p: PhotoRow; width: number; height: number; radius: number; alt: string;
-  }) => {
+  const Tile = ({ p }: { p: PhotoRow }) => {
     const on = picked.has(p.id);
-    const thumb = <PhotoThumb src={fileSrc(p.id)} framing={p.framing} alt={alt}
-      width={width} height={height} radius={radius} />;
+    const isCover = hasCover && p.id === coverId;
+    const thumb = (
+      <span style={{ display: "block", position: "relative" }}>
+        <PhotoThumb src={fileSrc(p.id)} framing={p.framing} alt={isCover ? label : p.fileName}
+          width={104} height={78} radius={8} />
+        {isCover && <span className="pill info" style={{ position: "absolute", left: 4, bottom: 4, lineHeight: 1.4 }}>Cover</span>}
+      </span>
+    );
     if (!selecting) {
       return (
-        <a href={`/api/files/${p.id}`} target="_blank" rel="noreferrer" title={p.fileName}
-          style={{ display: "block" }}>{thumb}</a>
+        <a href={`/api/files/${p.id}`} target="_blank" rel="noreferrer"
+          title={`${p.fileName} · ${p.uploadedBy} · ${p.when}`}
+          style={{ display: "block", lineHeight: 0 }}>{thumb}</a>
       );
     }
     return (
@@ -176,7 +212,7 @@ export default function PhotosPanel({
         onClick={() => toggle(p.id)}
         style={{
           display: "block", padding: 0, border: "none", background: "none", cursor: "pointer",
-          position: "relative", lineHeight: 0, borderRadius: radius,
+          position: "relative", lineHeight: 0, borderRadius: 8,
           outline: on ? "3px solid #1D6396" : "3px solid transparent", outlineOffset: 2,
           opacity: on ? 1 : 0.65,
         }}>
@@ -191,24 +227,42 @@ export default function PhotosPanel({
     );
   };
 
+  const Grid = ({ list }: { list: PhotoRow[] }) => (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      {list.map((p) => (
+        <div key={p.id} style={{ width: 104 }}>
+          <Tile p={p} />
+          {canEdit && !selecting && (
+            <div style={{ display: "flex", marginTop: 3 }}>
+              <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)" }} disabled={pending}
+                aria-label={`Remove ${p.fileName}`} onClick={() => remove(p)}>×</button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+
+  const suggestions = [...new Set([...albums, ...ALBUM_SUGGESTIONS])];
+
   return (
     <div className="card">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
         <div className="card-title" style={{ marginBottom: 0 }}>Photos</div>
         <span className="mut t-small">
-          {ordered.length === 0 ? "none yet" : photoCount(ordered.length)}
+          {photos.length === 0 ? "none yet" : photoCount(photos.length)}
         </span>
         {canEdit && (
           <>
             <span style={{ marginLeft: "auto" }} />
-            {ordered.length > 1 && (
+            {photos.length > 0 && (
               <button className="btn sm" disabled={pending}
                 onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
                 {selecting ? "Cancel" : "Select"}
               </button>
             )}
             <button className="btn sm primary"
-              disabled={!!busy || storageFull} onClick={() => input.current?.click()}>
+              disabled={!!busy || storageFull} onClick={() => pickFiles("")}>
               {busy ? "Uploading..." : "+ Add photos"}
             </button>
             <input ref={input} type="file" accept="image/*" multiple style={{ display: "none" }}
@@ -222,11 +276,16 @@ export default function PhotosPanel({
           <span className="mut t-small">
             {picked.size === 0 ? "Tap photos to select" : `${picked.size} selected`}
           </span>
-          <button className="btn link" style={{ fontSize: 12 }} disabled={pending}
-            onClick={() => setPicked(new Set(ordered.map((p) => p.id)))}>all</button>
-          <button className="btn link" style={{ fontSize: 12 }} disabled={pending || picked.size === 0}
+          <button className="btn link" disabled={pending}
+            onClick={() => setPicked(new Set(photos.map((p) => p.id)))}>all</button>
+          <button className="btn link" disabled={pending || picked.size === 0}
             onClick={() => setPicked(new Set())}>none</button>
-          <button className="btn sm" style={{ marginLeft: "auto", borderColor: "#E4B4B4", color: "var(--t-bad-fg)" }}
+          <span style={{ marginLeft: "auto" }} />
+          <button className="btn sm" disabled={pending || picked.size === 0}
+            onClick={() => setAlbumDraft("")}>
+            Album…
+          </button>
+          <button className="btn sm" style={{ borderColor: "#E4B4B4", color: "var(--t-bad-fg)" }}
             disabled={pending || picked.size === 0} onClick={removePicked}>
             Remove {picked.size || ""}
           </button>
@@ -240,140 +299,81 @@ export default function PhotosPanel({
         </div>
       )}
 
-      {shared && ordered.length > 0 && (
+      {shared && photos.length > 0 && (
         <div className="mut t-meta" style={{ marginBottom: 6 }}>Shared with {shared} - one machine, one set of photos.</div>
       )}
 
-      {ordered.length === 0 ? (
+      {photos.length === 0 ? (
         <div className="mut t-body">No photos yet.</div>
       ) : (
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
-          <div>
-            <Tile p={lead} width={240} height={180} radius={10} alt={label} />
-            {/* Honest about which picture the rest of the app is showing. An
-                unchosen record still displays the catalog's stock photo of the
-                model everywhere else, so calling this one "the cover" because
-                it happens to be newest would be a lie about the system. */}
-            <div className="mut t-meta" style={{ marginTop: 4, maxWidth: 240, overflowWrap: "anywhere" }}>
-              {chosen ? "Cover" : "Newest · no cover chosen"} · {lead.uploadedBy} · {lead.when}
-            </div>
-            {canEdit && !selecting && (
-              <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
-                {/* Without this the first photo uploaded could never BE the
-                    cover: it is the lead, and only the thumbnails carried the
-                    button. */}
-                {chosen ? (
-                  <button className="btn sm" disabled={pending}
-                    title="Show the catalog's picture of this model again"
-                    onClick={() => act(() => clearCoverPhoto(target), "Cleared the cover photo")}>Use default</button>
-                ) : (
-                  <button className="btn sm" disabled={pending}
-                    onClick={() => act(() => setCoverPhoto(target, lead.id), "Set the cover photo")}>Make cover</button>
-                )}
-                <button className="btn sm" disabled={pending} onClick={() => setFraming(lead)}>Frame</button>
-                {catalogScopes.length > 0 && (
-                  <button className="btn sm" disabled={pending}
-                    title="File this to the catalog so every unit like this one sees it"
-                    onClick={() => { setError(""); setFileDraft({ scope: 0, title: "", body: "" }); setFiling({ id: lead.id, fileName: lead.fileName }); }}>
-                    To catalog
-                  </button>
-                )}
-                <button className="btn sm" disabled={pending} onClick={() => remove(lead)}>Remove</button>
-              </div>
-            )}
-          </div>
-
-          {rest.length > 0 && (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flex: "1 1 200px" }}>
-              {rest.map((p) => (
-                <div key={p.id} style={{ width: 104 }}>
-                  <Tile p={p} width={104} height={78} radius={8} alt={p.fileName} />
-                  {canEdit && !selecting && (
-                    <div style={{ display: "flex", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {sections.map((sec) => (
+            <section key={sec.album || "(none)"} aria-label={sec.album || "Photos in no album"}>
+              {/* A heading only where it separates something: a record with no
+                  albums at all reads exactly as it did before albums existed. */}
+              {(sec.album || albums.length > 0) && (
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                  <span className="t-small" style={{ fontWeight: 700 }}>{sec.album || "Not in an album"}</span>
+                  <span className="mut t-meta">{photoCount(sec.photos.length)}</span>
+                  {selecting && (
+                    <button className="btn link" disabled={pending}
+                      onClick={() => setPicked((s) => new Set([...s, ...sec.photos.map((p) => p.id)]))}>
+                      select these
+                    </button>
+                  )}
+                  {canEdit && !selecting && sec.album && (
+                    <>
+                      <span style={{ marginLeft: "auto" }} />
                       <button className="btn link" disabled={pending}
-                        onClick={() => act(() => setCoverPhoto(target, p.id), "Set the cover photo")}>Cover</button>
-                      <button className="btn link" disabled={pending}
-                        onClick={() => setFraming(p)}>Frame</button>
-                      {catalogScopes.length > 0 && (
-                        <button className="btn link" disabled={pending}
-                          title="File this to the catalog so every unit like this one sees it"
-                          onClick={() => { setError(""); setFileDraft({ scope: 0, title: "", body: "" }); setFiling({ id: p.id, fileName: p.fileName }); }}>
-                          Catalog
-                        </button>
-                      )}
-                      <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
-                        aria-label={`Remove ${p.fileName}`} onClick={() => remove(p)}>×</button>
-                    </div>
+                        onClick={() => renameAlbum(sec.album, sec.photos.map((p) => p.id))}>Rename</button>
+                      <button className="btn link" disabled={!!busy || storageFull}
+                        onClick={() => pickFiles(sec.album)}>+ Add</button>
+                    </>
                   )}
                 </div>
-              ))}
-            </div>
-          )}
+              )}
+              <Grid list={sec.photos} />
+            </section>
+          ))}
         </div>
       )}
 
       {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
 
-      {/* File a photo to the catalog's reference shelf. The note is the point:
-          a picture with nothing written on it is a picture nobody can act on. */}
-      {filing && (
-        <Dialog open onClose={() => setFiling(null)} title="File to the catalog"
-          context="The photo stays on this record; the catalog points at it. Everyone working on equipment like this sees it under Reference."
+      {/* Put the selected photos in an album. Typing a name that does not
+          exist yet makes it - an album is only its photos, so there is no
+          separate "create album" step to forget. */}
+      {albumDraft !== null && (
+        <Dialog open onClose={() => setAlbumDraft(null)} title={`Move ${photoCount(picked.size)} to an album`}
+          context="Pick an album or type a new name."
           footer={
             <>
-              <DialogStatus error={error}
-                problem={fileDraft.body.trim() ? null : "say what the next engineer needs to know"}
-                ok={`Files under ${catalogScopes[fileDraft.scope]?.label ?? "the catalog"}`} />
-              <button className="btn" onClick={() => setFiling(null)} disabled={pending}>Cancel</button>
-              <button className="btn accent" disabled={pending || !fileDraft.body.trim()}
-                onClick={() => {
-                  const sc = catalogScopes[fileDraft.scope];
-                  if (!sc) return;
-                  setError("");
-                  startTransition(async () => {
-                    const res = await addCatalogRef({
-                      assetType: sc.assetType, model: sc.model, kind: "note",
-                      title: fileDraft.title || filing.fileName,
-                      url: fileSrc(filing.id), body: fileDraft.body,
-                    });
-                    if (res?.error) { setError(res.error); return; }
-                    setFiling(null);
-                    toast({ message: "Filed the photo to the catalog" });
-                    router.refresh();
-                  });
-                }}>{pending ? "Filing..." : `File ${fileDraft.title || filing.fileName}`}</button>
+              <button className="btn" disabled={pending} onClick={() => setAlbumDraft(null)}>Cancel</button>
+              {albums.length > 0 && (
+                <button className="btn" disabled={pending} onClick={() => movePicked("")}>
+                  Take out of album
+                </button>
+              )}
+              <button className="btn primary" disabled={pending || !normalizeAlbum(albumDraft)}
+                onClick={() => movePicked(albumDraft)}>
+                {pending ? "Moving..." : `Move to ${normalizeAlbum(albumDraft) || "album"}`}
+              </button>
             </>
           }>
-            <div className="dialog-section">The photo</div>
-            <PhotoThumb src={fileSrc(filing.id)} framing="" alt={filing.fileName}
-              width={160} height={110} radius={8} />
-            <div style={{ marginTop: 10 }}>
-              <label>Filed under</label>
-              <select value={fileDraft.scope} aria-label="Filed under"
-                onChange={(e) => setFileDraft({ ...fileDraft, scope: parseInt(e.target.value) })}
-                style={{ marginBottom: 8 }}>
-                {catalogScopes.map((sc, i) => (
-                  <option key={`${sc.assetType}|${sc.model}`} value={i}>{sc.label}</option>
-                ))}
-              </select>
-              <label>Title</label>
-              <input value={fileDraft.title} placeholder="e.g. H-ESI probe removal"
-                onChange={(e) => setFileDraft({ ...fileDraft, title: e.target.value })}
-                style={{ marginBottom: 8 }} />
-              <div className="dialog-section">What it shows</div>
-              <label>What the next engineer needs to know</label>
-              <textarea value={fileDraft.body} rows={3} style={{ width: "100%", marginBottom: 8 }}
-                placeholder="The trick this photo shows"
-                onChange={(e) => setFileDraft({ ...fileDraft, body: e.target.value })} />
-            </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            {suggestions.map((name) => (
+              <button key={name} type="button" className="btn sm" disabled={pending}
+                aria-pressed={normalizeAlbum(albumDraft).toLowerCase() === name.toLowerCase()}
+                onClick={() => setAlbumDraft(name)}>{name}</button>
+            ))}
+          </div>
+          <label>Album name</label>
+          <input value={albumDraft} placeholder="e.g. System setup" maxLength={60}
+            onChange={(e) => setAlbumDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && normalizeAlbum(albumDraft)) movePicked(albumDraft); }} />
         </Dialog>
       )}
 
-      {framing && (
-        <PhotoFramer src={fileSrc(framing.id)} framing={framing.framing} alt={framing.fileName}
-          save={(f) => setPhotoFraming(framing.id, f)}
-          onDone={() => { setFraming(null); router.refresh(); }} />
-      )}
     </div>
   );
 }

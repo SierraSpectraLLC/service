@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  coverIsChosen, coverPhoto, isPhotoFile, livingCover, orderPhotos, photoCount, photoRemovalNote,
+  albumMoveNote, coverIsChosen, coverPhoto, groupByAlbum, isPhotoFile, livingCover, normalizeAlbum, orderPhotos,
+  photoCount, photoRemovalNote,
   sharedCover, sharesPhotos, stockPhotoForSystem, stockPhotoForUnit, type CatalogPhoto,
 } from "@/lib/photos";
 import {
@@ -273,5 +274,50 @@ describe("saying that photos were removed", () => {
   it("names them all when there are few enough to read", () => {
     expect(photoRemovalNote(["a.jpg", "b.jpg"], "why")).toContain("a.jpg, b.jpg");
     expect(photoRemovalNote(["a.jpg", "b.jpg"], "why")).not.toContain("more");
+  });
+});
+
+describe("albums", () => {
+  const a = (id: number, album: string, createdAt: string) => ({ ...p(id, `${id}.jpg`, createdAt), album });
+
+  it("puts photos in no album first, then each album by name", () => {
+    const got = groupByAlbum([
+      a(1, "System setup", "2026-01-01T00:00:00Z"),
+      a(2, "", "2026-02-01T00:00:00Z"),
+      a(3, "As received", "2026-03-01T00:00:00Z"),
+      a(4, "System setup", "2026-04-01T00:00:00Z"),
+    ], null);
+    expect(got.map((s) => [s.album, s.photos.map((x) => x.id)])).toEqual([
+      ["", [2]], ["As received", [3]], ["System setup", [4, 1]],
+    ]);
+  });
+
+  it("treats names that differ only in case or spacing as one album", () => {
+    const got = groupByAlbum([
+      a(1, "System setup", "2026-01-01T00:00:00Z"),
+      a(2, " system  setup ", "2026-02-01T00:00:00Z"),
+    ], null);
+    expect(got).toHaveLength(1);
+    expect(got[0].photos.map((x) => x.id)).toEqual([2, 1]);
+  });
+
+  it("keeps the cover first inside its album", () => {
+    const got = groupByAlbum([
+      a(1, "System setup", "2026-01-01T00:00:00Z"),
+      a(2, "System setup", "2026-02-01T00:00:00Z"),
+    ], 1);
+    expect(got[0].photos.map((x) => x.id)).toEqual([1, 2]);
+  });
+
+  it("stores a tidy name, and blank means no album", () => {
+    expect(normalizeAlbum("  System   setup ")).toBe("System setup");
+    expect(normalizeAlbum("   ")).toBe("");
+    expect(normalizeAlbum("x".repeat(100))).toHaveLength(60);
+  });
+
+  it("writes one line of history for a whole set", () => {
+    expect(albumMoveNote(["a.jpg", "b.jpg"], "System setup"))
+      .toBe("put 2 photos (a.jpg, b.jpg) in album 'System setup'");
+    expect(albumMoveNote(["a.jpg"], "")).toBe("took photo a.jpg out of their album");
   });
 });

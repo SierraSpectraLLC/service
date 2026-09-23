@@ -50,6 +50,7 @@ import ActivityFeed from "@/components/ActivityFeed";
 import PartsPanel from "@/components/PartsPanel";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import PhotosPanel from "@/components/PhotosPanel";
+import CoverPicker from "@/components/CoverPicker";
 import { storeQuota } from "@/lib/storeUsage";
 import TasksPanel from "@/components/TasksPanel";
 import { woOpen } from "@/lib/workOrders";
@@ -651,6 +652,15 @@ export default async function InstrumentPage({ params, searchParams }: {
       <RecordHero
         image={coverSrc || undefined}
         imageAlt={systemLabel(inst, assetRows)}
+        imageSlot={
+          <CoverPicker target={{ instrumentId: inst.id, assetId: null }} src={coverSrc}
+            framing={coverId !== null ? coverFraming : systemStock?.photoFraming ?? ""}
+            alt={systemLabel(inst, assetRows) || inst.externalId}
+            photos={photoRows.map((a) => ({
+              id: a.id, fileName: a.fileName, framing: a.framing, createdAt: a.createdAt.toISOString(),
+            }))}
+            coverId={coverId} canEdit={canEdit} />
+        }
         eyebrow={<>{inst.client}{inst.category ? <> · {inst.category}</> : null}{inst.archived ? " · archived" : ""}</>}
         id={inst.externalId}
         title={systemLabel(inst, assetRows) || "No assets listed yet"}
@@ -1050,9 +1060,8 @@ export default async function InstrumentPage({ params, searchParams }: {
           ) },
           { key: "photos", label: "Photos", node: (
             <PhotosPanel target={{ instrumentId: inst.id, assetId: null }} coverId={coverId}
-              catalogScopes={isStaff ? refScopes : []}
               photos={photoRows.map((a) => ({
-                id: a.id, fileName: a.fileName, kind: a.kind, framing: a.framing,
+                id: a.id, fileName: a.fileName, kind: a.kind, framing: a.framing, album: a.album,
                 uploadedBy: a.uploadedBy, when: shopTime(a.createdAt), createdAt: a.createdAt.toISOString(),
               }))}
               label={`${inst.externalId} - ${systemLabel(inst, assetRows) || "the system"}`}

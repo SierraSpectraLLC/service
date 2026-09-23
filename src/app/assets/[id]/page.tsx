@@ -40,6 +40,7 @@ import GasPanel from "@/components/GasPanel";
 import PartsPanel from "@/components/PartsPanel";
 import PhotoThumb from "@/components/PhotoThumb";
 import PhotosPanel from "@/components/PhotosPanel";
+import CoverPicker from "@/components/CoverPicker";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import { storeQuota } from "@/lib/storeUsage";
 import TasksPanel from "@/components/TasksPanel";
@@ -295,6 +296,15 @@ export default async function AssetPage({ params, searchParams }: {
       <RecordHero
         image={coverSrc || undefined}
         imageAlt={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}`}
+        imageSlot={
+          <CoverPicker target={target} src={coverSrc}
+            framing={coverId !== null ? coverFraming : unitStock?.photoFraming ?? ""}
+            alt={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}`}
+            photos={photoRows.map((a) => ({
+              id: a.id, fileName: a.fileName, framing: a.framing, createdAt: a.createdAt.toISOString(),
+            }))}
+            coverId={coverId} canEdit={canEdit} />
+        }
         eyebrow={<>{asset.manufacturer || asset.kind}{asset.owner ? <> · for {asset.owner}</> : null}</>}
         id={asset.serial ? `SN ${asset.serial}` : undefined}
         title={`${asset.kind}${asset.model ? ` - ${asset.model}` : ""}`}
@@ -478,12 +488,8 @@ export default async function AssetPage({ params, searchParams }: {
           ) },
           { key: "photos", label: "Photos", node: (
             <PhotosPanel target={target} coverId={coverId}
-              catalogScopes={isStaff ? [
-                ...(asset.model ? [{ assetType: asset.kind, model: asset.model, label: `${asset.model} (every unit)` }] : []),
-                { assetType: asset.kind, model: "", label: `any ${asset.kind.toLowerCase()}` },
-              ] : []}
               photos={photoRows.map((a) => ({
-                id: a.id, fileName: a.fileName, kind: a.kind, framing: a.framing,
+                id: a.id, fileName: a.fileName, kind: a.kind, framing: a.framing, album: a.album,
                 uploadedBy: a.uploadedBy, when: shopTime(a.createdAt), createdAt: a.createdAt.toISOString(),
               }))}
               label={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}${asset.serial ? ` SN ${asset.serial}` : ""}`}

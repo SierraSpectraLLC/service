@@ -89,6 +89,56 @@ export function photoRemovalNote(names: string[], reason: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Albums
+// ---------------------------------------------------------------------------
+
+/**
+ * The albums somebody is offered before they have made any: the sets of photos
+ * a shop actually takes of a machine, as a start rather than a list to obey.
+ */
+export const ALBUM_SUGGESTIONS = ["System setup", "As received", "Before / after"];
+
+/**
+ * An album name as stored: trimmed, single-spaced, capped. Blank means "not in
+ * an album", so clearing the field takes a photo out rather than filing it
+ * under an album with no name.
+ */
+export const normalizeAlbum = (name: string) =>
+  (name ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
+
+/**
+ * A record's photos, sectioned by album.
+ *
+ * Photos in no album come first - that is where a fresh upload lands, and the
+ * newest shot should not be buried under last year's setup set - then each
+ * album by name. Names compare without case, so "System setup" and "system
+ * setup" are one album rather than two that look the same. Within a section,
+ * the usual order: cover first, then newest.
+ */
+export function groupByAlbum<T extends PhotoLike & { album?: string }>(
+  photos: T[], coverId: number | null,
+): { album: string; photos: T[] }[] {
+  const sections = new Map<string, { album: string; photos: T[] }>();
+  for (const p of orderPhotos(photos, coverId)) {
+    const name = normalizeAlbum(p.album ?? "");
+    const key = name.toLowerCase();
+    if (!sections.has(key)) sections.set(key, { album: name, photos: [] });
+    sections.get(key)!.photos.push(p);
+  }
+  return [...sections.entries()]
+    .sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)))
+    .map(([, v]) => v);
+}
+
+/** One audit line for filing a set of photos into an album, or out of one. */
+export function albumMoveNote(names: string[], album: string): string {
+  const shown = names.slice(0, 8).join(", ");
+  const extra = names.length > 8 ? `, and ${names.length - 8} more` : "";
+  const what = names.length === 1 ? `photo ${shown}` : `${names.length} photos (${shown}${extra})`;
+  return album ? `put ${what} in album '${album}'` : `took ${what} out of their album`;
+}
+
+// ---------------------------------------------------------------------------
 // Where a photo comes from
 // ---------------------------------------------------------------------------
 
