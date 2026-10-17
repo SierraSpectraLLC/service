@@ -9,6 +9,7 @@ import { getModules } from "@/lib/flags";
 import { deviceWithOrg } from "@/lib/remote";
 import { deviceLabel, deviceSubLabel } from "@/lib/deviceName";
 import { connectRemoteDevice } from "@/app/actions";
+import RemoteFrame from "@/components/RemoteFrame";
 
 export const dynamic = "force-dynamic";
 
@@ -90,26 +91,7 @@ export default async function RemoteSessionPage({ params }: { params: Promise<{ 
         <div className="card t-body" style={{ color: "var(--t-bad-fg)" }}>{opened.error}</div>
       )}
 
-      {opened.url && (
-        <iframe
-          src={opened.url}
-          title={`Remote desktop for ${label}`}
-          // Full screen and clipboard are the two the desktop viewer actually
-          // asks the browser for; without them a copy-paste into an instrument
-          // dialog silently does nothing.
-          allow="fullscreen; clipboard-read; clipboard-write"
-          // The engine's viewer fits the desktop inside whatever box it is given
-          // and letterboxes the rest, so the box wants to be as close to the far
-          // machine's own shape as the window allows: the full width, and all the
-          // height left over once the header and footer have taken theirs. Taken
-          // from the layout rather than subtracted from 100vh, because the header
-          // wraps and any constant would be wrong at some window width.
-          style={{
-            display: "block", width: "100%", flex: "1 1 auto", minHeight: 420,
-            border: "1px solid var(--line)", borderRadius: 6, background: "#101418",
-          }}
-        />
-      )}
+      {opened.url && <RemoteFrame src={opened.url} title={`Remote desktop for ${label}`} />}
     </div>
   );
 }
