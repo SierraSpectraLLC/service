@@ -9,6 +9,7 @@ import { getModules } from "@/lib/flags";
 import { deviceWithOrg } from "@/lib/remote";
 import { deviceLabel, deviceSubLabel } from "@/lib/deviceName";
 import { connectRemoteDevice } from "@/app/actions";
+import RemoteDesktop from "@/components/RemoteDesktop";
 import RemoteFrame from "@/components/RemoteFrame";
 
 export const dynamic = "force-dynamic";
@@ -23,16 +24,22 @@ export const dynamic = "force-dynamic";
  * functions - but there is no reason the person has to look at the relay's
  * furniture to use it.
  *
- * So: our page, our header, their desktop canvas in a frame with their chrome
- * hidden. Everything that decides whether this is allowed still happens in
- * connectRemoteDevice, once, server-side, before the frame has a URL to load.
+ * So: our page, our header, and the desktop drawn on our own canvas by
+ * RemoteDesktop, which is what makes it usable from a phone - pinch, pan, tap
+ * and the phone's own keyboard. `?classic=1` still shows the engine's console in
+ * a frame, for the day the newer path misbehaves in front of a customer.
+ * Everything that decides whether this is allowed still happens in
+ * connectRemoteDevice, once, server-side, before either has anything to load.
  *
  * The one page in the app that does NOT use the standard column. Every other
  * page is text and benefits from a measure; this one is a 16:9 desktop, and a
  * 760px column rendered it postage-stamp sized with black bars above and below
  * on a monitor with room for all of it. Here the window is the layout.
  */
-export default async function RemoteSessionPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function RemoteSessionPage({ params, searchParams }: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ classic?: string }>;
+}) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   const { remote: moduleOn } = await getModules();
@@ -58,7 +65,8 @@ export default async function RemoteSessionPage({ params }: { params: Promise<{ 
   // Permission, consent, audit and token, in that order. A refusal arrives here
   // as plain English and is shown as plain English - this page never renders an
   // empty frame and leaves somebody guessing.
-  const opened = await connectRemoteDevice(deviceId, { embedded: true });
+  const classic = (await searchParams).classic === "1";
+  const opened = await connectRemoteDevice(deviceId, { embedded: true, viewer: !classic });
 
   const label = deviceLabel(device.nickname, device.name);
   const host = deviceSubLabel(device.nickname, device.name);
@@ -79,19 +87,30 @@ export default async function RemoteSessionPage({ params }: { params: Promise<{ 
             on {system.externalId}
           </Link>
         )}
-        {opened.url && (
-          <a href={opened.url} target="_blank" rel="noreferrer" className="mut t-meta"
-            style={{ marginLeft: "auto" }}>
-            open in a new window
-          </a>
-        )}
+        <span style={{ marginLeft: "auto", display: "flex", gap: 12, alignItems: "baseline" }}>
+          {!opened.error && (
+            <Link href={opened.viewer ? `/remote/${deviceId}?classic=1` : `/remote/${deviceId}`} className="mut t-meta">
+              {opened.viewer ? "classic view" : "new viewer"}
+            </Link>
+          )}
+          {/* The console link carries a login token for the engine itself,
+              good for its whole window and more than a session needs. The
+              viewer's page holds only its single-use relay cookie, so the link
+              lives with the classic view. */}
+          {!opened.viewer && opened.url && (
+            <a href={opened.url} target="_blank" rel="noreferrer" className="mut t-meta">
+              open in a new window
+            </a>
+          )}
+        </span>
       </div>
 
       {opened.error && (
         <div className="card t-body" style={{ color: "var(--t-bad-fg)" }}>{opened.error}</div>
       )}
 
-      {opened.url && <RemoteFrame src={opened.url} title={`Remote desktop for ${label}`} />}
+      {opened.viewer && <RemoteDesktop deviceId={deviceId} creds={opened.viewer} machineName={label} />}
+      {!opened.viewer && opened.url && <RemoteFrame src={opened.url} title={`Remote desktop for ${label}`} />}
     </div>
   );
 }
