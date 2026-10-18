@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bareEngineId, connectUrl, decodeEngineCookie, encodeEngineCookie, ENGINE_KEY_HEX_CHARS, engineUserId,
-  createdGroupId, isReplyTo, mintEngineToken, namedGroups, pickExistingGroup,
+  createdGroupId, isReplyTo, mintEngineToken, namedGroups, pickExistingGroup, viewerCredentials, isTunnelId,
 } from "@/lib/remote";
 
 // The remote-support host authenticates the portal by a token it encrypts with a
@@ -197,6 +197,60 @@ describe("the deep link's query", () => {
     const q = new URL(out).searchParams;
     expect(q.get("hide")).toBeNull();
     expect(q.get("mobile")).toBe("0");      // still never the phone layout
+  });
+});
+
+describe("the in-portal viewer's credentials", () => {
+  // Shaped by a quirk in 1.2.4's relay rather than by taste, and getting it
+  // wrong fails as a viewer stuck on "waiting for the machine" with nothing
+  // logged on our side. So the shape is pinned.
+  const creds = () => {
+    process.env.REMOTE_URL = "https://remote.example.com";
+    process.env.REMOTE_LOGIN_KEY = KEY;
+    process.env.REMOTE_ADMIN_USER = "Portal-Admin";
+    const out = viewerCredentials("node//abc$123");
+    if ("error" in out) throw new Error(out.error);
+    return out;
+  };
+
+  it("points the relay at the host, not at the page, and names the machine whole", () => {
+    const c = creds();
+    expect(c.relayBase).toBe("wss://remote.example.com");
+    expect(c.nodeId).toBe("node//abc$123");
+  });
+
+  it("gives our end of the relay a single-use cookie with NO expire field", () => {
+    // meshrelay.js compares `expire` with Date.now() as if it were a timestamp,
+    // so the minutes-from-now every other token carries would read as 1970 and
+    // the relay would hang up on arrival.
+    const c = decodeEngineCookie(creds().relayAuth, KEY)!;
+    expect(c).toMatchObject({ userid: "user//portal-admin", domainid: "" });
+    expect(c.expire).toBeUndefined();
+    expect(typeof c.once).toBe("string");
+    expect(decodeEngineCookie(creds().relayAuth, KEY)!.once).not.toBe(c.once);
+  });
+
+  it("hands the browser nothing that opens the admin channel", () => {
+    // The control channel stays server-side (requestDesktopTunnel). A login
+    // token in the page would be a key to the whole engine.
+    const c = creds() as Record<string, unknown>;
+    expect(Object.keys(c).sort()).toEqual(["nodeId", "relayAuth", "relayBase"]);
+    expect(decodeEngineCookie(c.relayAuth as string, KEY)!.a).toBeUndefined();
+  });
+
+  it("refuses a machine that has not checked in yet", () => {
+    process.env.REMOTE_URL = "https://remote.example.com";
+    process.env.REMOTE_LOGIN_KEY = KEY;
+    process.env.REMOTE_ADMIN_USER = "portal-admin";
+    expect(viewerCredentials("")).toHaveProperty("error");
+  });
+
+  it("only accepts tunnel ids shaped like the transport's own", () => {
+    // The id is pasted into the relay URL the agent is sent to; anything but
+    // base-36 could smuggle parameters into it.
+    expect(isTunnelId("k3j9x0abq1")).toBe(true);
+    expect(isTunnelId("abc&rauth=x")).toBe(false);
+    expect(isTunnelId("")).toBe(false);
   });
 });
 

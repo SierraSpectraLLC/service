@@ -584,6 +584,95 @@ export function connectUrl(nodeId: string, opts: { embedded?: boolean } = {}): s
   return `${cfg.url}/?${q.toString()}`;
 }
 
+/** What the in-portal viewer presents to the relay host. See viewerCredentials. */
+export type ViewerCredentials = {
+  /** wss://host - the relay socket is opened at this base, not at the page's own. */
+  relayBase: string;
+  /** Our end of the relay. Single-use. */
+  relayAuth: string;
+  /** Full `node/<domain>/<hash>`: the relay wants it whole. */
+  nodeId: string;
+};
+
+/**
+ * What the browser needs to put a desktop on our own canvas: where the relay
+ * is, and a credential for our end of it. Nothing else - in particular not the
+ * control channel, which is ours and stays on the server (see
+ * requestDesktopTunnel for why).
+ *
+ * relayAuth is `{userid, domainid}` and must carry NO `expire`. The relay
+ * (meshrelay.js, CreateMeshRelayEx in 1.2.4) compares a cookie's `expire`
+ * against Date.now() as if it were a timestamp, so the minutes-from-now every
+ * other token here carries would read as 1970 and the relay would hang up on
+ * arrival. Without one the engine's own 60-minute window applies, so it is
+ * made single-use instead (`once`): the engine refuses a second presentation,
+ * and a cookie lifted from a page is good for nothing.
+ *
+ * Minted only by connectRemoteDevice, after the permission check, the consent
+ * setting and the audit line - never on its own.
+ */
+export function viewerCredentials(nodeId: string): ViewerCredentials | { error: string } {
+  const cfg = remoteConfig();
+  if (!cfg) return { error: NOT_CONFIGURED };
+  if (!nodeId) return { error: "That machine has no node id yet." };
+  try {
+    return {
+      relayBase: cfg.url.replace(/^http/, "ws"),
+      relayAuth: encodeEngineCookie(
+        { userid: engineUserId(cfg.adminUser), domainid: "", once: randomBytes(12).toString("hex") }, cfg.loginKey,
+      ),
+      nodeId: fullNodeId(nodeId),
+    };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+const fullNodeId = (id: string) => (id.includes("/") ? id : `node//${id}`);
+
+/** The id the engine's relay transport gives a session: Math.random in base 36. */
+export const isTunnelId = (id: string) => /^[0-9a-z]{4,40}$/.test(id);
+
+/**
+ * Ask the agent to come to the relay and meet the browser that is waiting at
+ * `tunnelId` - the step that actually starts a desktop session.
+ *
+ * Done from here rather than from the browser, for two reasons:
+ *
+ *   * The engine refuses a control channel opened from any web page but its
+ *     own (webserver.js, CheckWebServerOriginName: `invalidorigin`). A server
+ *     sends no Origin and is let through, which is how every other call in
+ *     this file already works. The alternative was an `allowedOrigin` entry on
+ *     the host naming the portal - one more thing to keep in step on a domain
+ *     move, and an admin channel reachable from a browser either way.
+ *   * The agent's half of the relay needs its own credential, `{ruserid}`, the
+ *     one the engine's console hands over as `authRelayCookie` - without it the
+ *     relay refuses the agent as unauthenticated and the browser waits for a
+ *     machine that already tried. Minted here, it never reaches a browser.
+ */
+export async function requestDesktopTunnel(nodeId: string, tunnelId: string): Promise<{ error?: string }> {
+  const cfg = remoteConfig();
+  if (!cfg) return { error: NOT_CONFIGURED };
+  if (!nodeId) return { error: "That machine has no node id yet." };
+  if (!isTunnelId(tunnelId)) return { error: "That isn't a session this viewer started." };
+  const node = fullNodeId(nodeId);
+  try {
+    const agentAuth = encodeEngineCookie(
+      { ruserid: engineUserId(cfg.adminUser), expire: Math.ceil(CONNECT_TTL_SECONDS / 60) }, cfg.loginKey,
+    );
+    // p=2 is the desktop. The leading `*` tells the agent "the server you are
+    // already talking to", so the relay address never has to be spelled out.
+    const value = `*/meshrelay.ashx?p=2&nodeid=${node}&id=${tunnelId}&rauth=${agentAuth}`;
+    await engineCall(cfg, "msg", { type: "tunnel", nodeid: node, value, usage: 2 });
+    return {};
+  } catch (e) {
+    const why = (e as Error).message;
+    // What the engine says when the agent has no live connection to it.
+    if (/unable to route/i.test(why)) return { error: "The machine isn't online right now." };
+    return { error: why };
+  }
+}
+
 /**
  * The engine's own chrome, summed: 1 banner, 2 tab strip, 4 footer, 8 panel
  * headings, 16 the left icon rail.

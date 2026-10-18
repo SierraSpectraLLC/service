@@ -108,7 +108,7 @@ import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
 import { cleanNickname, deviceLabel } from "@/lib/deviceName";
 import {
   agentInstallerLink, applyDeviceConsent, connectUrl, deviceWithOrg, ensureOrgGroup, NOT_CONFIGURED,
-  remoteConfigured,
+  isTunnelId, remoteConfigured, requestDesktopTunnel, viewerCredentials, type ViewerCredentials,
 } from "@/lib/remote";
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
@@ -6596,17 +6596,12 @@ export async function enrollRemoteDevice(
 }
 
 /**
- * Open a session. The order here is the point: decide, then WRITE IT DOWN, then
- * mint. An unused token is a non-event; an unaudited connection to a customer's
- * instrument PC is the thing this module exists to make impossible.
- *
- * Called by the session page rather than from a browser, so the whole pipeline -
- * permission, consent, audit, token - runs once per session in one place, and the
- * page renders the result. `embedded` asks for a URL suited to our own frame.
+ * May this person reach through to this machine, right now? The one check both
+ * halves of a session pass: the page that opens it and the viewer's request to
+ * bring the machine to the relay. Org-scoped in the lookup itself, like every
+ * remote read - a device outside the viewer's tenancy is "Not found".
  */
-export async function connectRemoteDevice(
-  deviceId: number, opts: { embedded?: boolean } = {},
-): Promise<{ error?: string; url?: string }> {
+async function remoteConnectGate(deviceId: number) {
   const u = await requireUser();
   const { remote: moduleOn } = await getModules();
   const row = await deviceWithOrg(deviceId, readTenant(u));
@@ -6621,6 +6616,27 @@ export async function connectRemoteDevice(
   );
   if (!ability.see) return { error: "Not found" };
   if (!ability.connect) return { error: ability.refusal || "You can't connect to this machine." };
+  return { u, row, device };
+}
+
+/**
+ * Open a session. The order here is the point: decide, then WRITE IT DOWN, then
+ * mint. An unused token is a non-event; an unaudited connection to a customer's
+ * instrument PC is the thing this module exists to make impossible.
+ *
+ * Called by the session page rather than from a browser, so the whole pipeline -
+ * permission, consent, audit, token - runs once per session in one place, and the
+ * page renders the result. `embedded` asks for a URL suited to our own frame;
+ * `viewer` also mints what the in-portal viewer needs, in the same pass, so a
+ * session that is drawn on our own canvas is decided and audited exactly once
+ * like any other.
+ */
+export async function connectRemoteDevice(
+  deviceId: number, opts: { embedded?: boolean; viewer?: boolean } = {},
+): Promise<{ error?: string; url?: string; viewer?: ViewerCredentials }> {
+  const gate = await remoteConnectGate(deviceId);
+  if ("error" in gate) return gate;
+  const { u, row, device } = gate;
 
   const [system] = device.instrumentId === null ? [] : await db
     .select({ ownerOrgId: instruments.ownerOrgId, stages: instruments.stages, externalId: instruments.externalId })
@@ -6646,7 +6662,34 @@ export async function connectRemoteDevice(
 
   const url = connectUrl(device.nodeId, { embedded: opts.embedded === true });
   if (typeof url !== "string") return url;
-  return { url };
+  if (!opts.viewer) return { url };
+  const viewer = viewerCredentials(device.nodeId);
+  // The framed console still works without these, so a failure to mint them
+  // falls back to it rather than refusing the session outright.
+  return "error" in viewer ? { url } : { url, viewer };
+}
+
+/**
+ * The in-portal viewer's second step: it is waiting at the relay under
+ * `tunnelId`, and this asks the machine to come and meet it. Called by the
+ * viewer, so it is a public endpoint like any action - which is why it passes
+ * the same gate as the page did, rather than trusting that the page was
+ * loaded first.
+ *
+ * Audited separately from the page's "opened a remote session": that line
+ * records the decision and the consent mode; this one records that a desktop
+ * was actually asked for, and how many times - a reconnect is another line.
+ */
+export async function openRemoteTunnel(deviceId: number, tunnelId: string): Promise<{ error?: string }> {
+  const gate = await remoteConnectGate(deviceId);
+  if ("error" in gate) return gate;
+  const { u, device } = gate;
+  if (!isTunnelId(tunnelId)) return { error: "That isn't a session this viewer started." };
+  await audit({
+    actor: u.email, instrumentId: device.instrumentId, entityType: "remote", entityId: device.id,
+    action: `connected to the desktop of ${device.name || "a machine"}`,
+  });
+  return requestDesktopTunnel(device.nodeId, tunnelId);
 }
 
 // ---------------- Work orders ----------------

@@ -513,14 +513,20 @@ ARM laptop.
 
 ### Keeping the session inside the portal
 
-`/remote/<device>` renders the desktop in a frame on one of our own pages, with
-the engine's banner, tab strip, footer and panel headings switched off — so
-pressing Connect stays inside the product instead of landing on the support
-host's console. The session still runs browser-to-relay; only the surround
-changes.
+`/remote/<device>` draws the desktop on one of our own pages, on our own canvas
+(`RemoteDesktop.tsx`), with phone controls: pinch to zoom, two fingers to pan
+and scroll, tap or hold for left and right click, a trackpad mode, and the
+phone's own keyboard. The session still runs browser-to-relay; only the surround
+changes. **This needs no host settings** beyond the ones above - see "The
+in-portal viewer" below for why.
 
-Two host settings make it work, and the frame will show a sign-in box until both
-are set:
+`/remote/<device>?classic=1` (the **classic view** link on the page) shows the
+engine's own console in a frame instead, with its banner, tab strip, footer and
+panel headings switched off. That path is kept as the fallback, and it is the
+one that needs the next two settings.
+
+Two host settings make the classic view work, and its frame will show a sign-in
+box until both are set:
 
 ```bash
 sudo python3 - <<'ENDFRAME'
@@ -556,26 +562,52 @@ third-party-cookie change can break the frame, at which point the **open in a ne
 window** link on the session page is the fallback, and the durable fix is to stop
 depending on the engine's page at all (below).
 
-**The version without an iframe — built, then removed.** Commit `d8f2629` put the
-desktop on our own canvas by vendoring the engine's decoder and relay transport.
-It was taken back out one commit later: the framed path was working and a demo
-should not rest on the newer of two paths. Reviving it is `git show d8f2629`
-rather than research, and the findings that cost the time are worth keeping:
+**The in-portal viewer.** The desktop on our own canvas, built from the engine's
+decoder and relay transport (vendored under `public/vendor/meshcentral`, one
+stated patch). First tried in `d8f2629` and backed out; brought back with phone
+controls and verified end to end against a real 1.2.4 server and agent. What
+1.2.4 actually requires, all of it learned the hard way:
 
-- **The relay credential is ours to mint.** The engine builds it as
-  `encodeCookie({ userid, domainid, ip }, loginCookieEncryptionKey)` — the same
-  key the portal already holds. So a viewer needs no admin round trip and no
-  session cookie of the engine's, which also means `sessionSameSite` could go back
-  to `lax` if the frame ever stops being used.
-- **Omit `ip`.** The engine binds a cookie to an address only when that field is
-  present, and the only address the portal could stamp belongs to a serverless
-  function rather than to the engineer's browser.
-- **One patch is needed in their transport**: `obj.Start` derives the relay socket
-  address from `window.location`, which is wrong when the page is ours.
-- **The unverified joint** was whether the agent joins the relay without the
-  second `rauth` cookie that the console passes and the code treats as optional.
-  That is the first thing to check if a revived viewer sits at "waiting for the
-  machine to answer".
+- **The browser's relay credential is ours to mint**: `{ userid, domainid }`
+  under `loginCookieEncryptionKey`. Omit `ip` - the engine binds a cookie to an
+  address only when that field is present, and the only address the portal
+  could stamp belongs to a serverless function.
+- **And it must have NO `expire`.** `CreateMeshRelayEx` (meshrelay.js) compares a
+  cookie's `expire` with `Date.now()` as if it were a timestamp, so the
+  minutes-from-now that every other token carries reads as 1970 and the relay
+  hangs up the moment it opens. It is made single-use (`once`) instead.
+- **The agent needs its own relay credential**, `{ ruserid }` - the console
+  passes it as `rauth` inside the tunnel request. Without it the relay refuses
+  the agent's half as unauthenticated and the viewer waits forever at "waiting
+  for the machine to answer". This was the unverified joint last time; it is
+  required.
+- **The tunnel request cannot come from the browser.** `control.ashx` refuses a
+  WebSocket whose `Origin` is any site but its own (`invalidorigin`). So the
+  viewer asks the portal (`openRemoteTunnel`), which checks permission again,
+  writes an audit line and sends the request from the server, where there is no
+  Origin. Nothing that opens the admin channel ever reaches a browser - the
+  page carries only the single-use relay cookie.
+- **One patch in their transport**: `obj.Start` derives the relay address from
+  `window.location`, which is wrong when the page is ours.
+- **Their mouse encoder is bypassed.** It turns page coordinates into remote
+  ones without knowing about our zoom; `lib/remoteInput` writes the same bytes
+  from coordinates `lib/remoteView` has already mapped.
+
+None of this involves the engine's session cookie, so `sessionSameSite` could go
+back to `lax` if the classic view is ever retired.
+
+**Testing it without a customer's PC.** The engine and its Linux agent run
+happily in a container: `npm install meshcentral@1.2.4`, a config like the one
+above on a local port, an account made with `--createaccount` and
+`--adminaccount`, a device group, and `meshagent_x86-64` from the package's
+`agents/` folder pointed at it with the group's `.msh`. The agent finds the
+screen only on an X server started with `-auth <file>` (`Xvfb :99 -auth ...
+-noreset`); without it it falls back to `loginctl` and paints nothing. Point
+`npm run dev:local` at it with `REMOTE_URL`, `REMOTE_LOGIN_KEY` and
+`REMOTE_ADMIN_USER` (plus `NODE_TLS_REJECT_UNAUTHORIZED=0` for the self-signed
+certificate), set a fixture device's `node_id` to the agent's, and `xev` on the
+display shows every click, drag and wheel turn exactly as the far machine
+received it. A real Windows machine and a real phone are still the last word.
 
 ### The executable itself, and the SmartScreen warning
 
