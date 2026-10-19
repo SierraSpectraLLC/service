@@ -9,18 +9,20 @@
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { desc, eq } from "drizzle-orm";
+import { asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  agreements, assets, instruments, orgs, orgSites, parts, serviceReports, timeEntries, workOrders,
+  agreements, assets, checklistItems, instruments, orgs, orgSites, parts, serviceReports, tasks, timeEntries, workOrders,
 } from "@/db/schema";
 import { countsAsVisit, drawdown } from "@/lib/agreements";
 import { usageFor } from "@/lib/agreementUsage";
 import { brandForTenant, type Brand } from "@/lib/brand";
 import { draftSourceFor } from "@/lib/invoiceData";
 import { shopToday } from "@/lib/shopday";
+import { stepServiceType } from "@/lib/workOrders";
 import { docContactLine } from "@/lib/xlsxDocData";
-import { serviceReportDoc, unbilledTime, usd, type ReportItem } from "@/lib/serviceReportDoc";
+import { notesRecord, serviceReportDoc, unbilledTime, usd, type ReportItem } from "@/lib/serviceReportDoc";
+import { loadTaskTests } from "@/lib/taskTests";
 import type { ServiceReport } from "@/lib/serviceReport";
 
 export type ReportDraft = {
@@ -128,6 +130,12 @@ export async function serviceReportDraft(
 
   const src = await draftSourceFor(woId, { timeIds: covers.timeIds, partIds: covers.partIds });
   if (!src) return null;
+
+  /* A step of a bigger job - a move's validation, the move, its OQ - was not
+     asked for on its own: the client asked for the move. Its report carries
+     that ask, so each page in the folder says what the whole was for. */
+  const parent = wo.parentId === null ? null
+    : await db.select().from(workOrders).where(eq(workOrders.id, wo.parentId)).then((r) => r[0] ?? null);
 
   const [inst, asset, brand] = await Promise.all([
     wo.instrumentId === null ? Promise.resolve(null)
@@ -268,8 +276,10 @@ export async function serviceReportDraft(
     issuedOn: shopToday(),
     visitDay,
     job: {
-      number: wo.number, title: wo.title, body: wo.body,
-      requestedBy: wo.requestedBy, openedOn: wo.openedOn,
+      number: wo.number, title: wo.title,
+      body: wo.body.trim() || (parent ? [`${parent.number} - ${parent.title}`, parent.body.trim()].filter(Boolean).join("\n") : ""),
+      requestedBy: wo.requestedBy || parent?.requestedBy || "",
+      openedOn: parent && !wo.body.trim() ? parent.openedOn : wo.openedOn,
       /*
        * What was done, in the engineer's own words.
        *
@@ -285,6 +295,7 @@ export async function serviceReportDraft(
       engineer: wo.assignee || wo.closedBy,
       origin: wo.origin, severity: wo.severity,
       install: wo.restorationProjectId !== null,
+      serviceType: stepServiceType(wo.stepKind),
     },
     provider: {
       name: brand.operatorName || brand.name,
@@ -324,6 +335,29 @@ export async function serviceReportDraft(
     partsTaxed: src.taxRateBps > 0,
     poNumber: src.org?.poNumber || src.coverage.agreementNumber,
   });
+
+  /*
+   * What the visit checked off - the job's own tasks, their checklist boxes,
+   * readings and results tables - drawn into the notes box the way the PM
+   * pages were always laid out. Read from the tasks rather than retyped, so
+   * what was ticked at the bench is what the client signs.
+   */
+  const taskRows = await db.select().from(tasks).where(eq(tasks.workOrderId, woId))
+    .orderBy(asc(tasks.sortOrder), asc(tasks.id));
+  if (taskRows.length) {
+    const [items, tests] = await Promise.all([
+      db.select().from(checklistItems).where(inArray(checklistItems.taskId, taskRows.map((t) => t.id)))
+        .orderBy(asc(checklistItems.sortOrder), asc(checklistItems.id)),
+      loadTaskTests(taskRows),
+    ]);
+    const record = notesRecord(taskRows.map((t) => ({
+      title: t.title, state: t.state,
+      checklist: items.filter((c) => c.taskId === t.id).map((c) => ({ text: c.text, done: c.done, heading: c.heading })),
+      resultType: tests.tests.get(t.id)?.resultType ?? null,
+      result: tests.results.get(t.id) ?? null,
+    })), report.serviceType);
+    if (record) report.record = record;
+  }
 
   return {
     report, tenantOrgId: wo.tenantOrgId, orgId: wo.orgId, workOrderId: woId, covers,

@@ -55,7 +55,7 @@ import {
   serializeKits, shapeOf, type IncludedKit,
 } from "@/lib/agreements";
 import { isOrgStage, stageOf, STAGE_WORD } from "@/lib/orgStage";
-import { bookingSpan, checkBooking, closeLine, moverOf, severityOf, type Mover, WO_LABEL, woAcceptsWork, woLive, woMove, woOpen } from "@/lib/workOrders";
+import { bookingSpan, checkBooking, closeLine, moverOf, nextStepNumber, severityOf, stepKindOf, stepsDone, type Mover, WO_LABEL, woAcceptsWork, woLive, woMove, woOpen } from "@/lib/workOrders";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import {
   applyProcedures, applySystemProcedures, backfillProcedure, createPmTask, generateDuePmTasks,
@@ -1876,7 +1876,7 @@ export async function createTask(
   // (lib/testResult). Unknown strings are refused rather than stored - a typo
   // here would gate the task on a result nobody can enter.
   const resultType = (data.resultType ?? "").trim();
-  if (!["", "pass_fail", "measured", "note"].includes(resultType)) return { error: "Not a result type" };
+  if (!["", "pass_fail", "measured", "note", "table"].includes(resultType)) return { error: "Not a result type" };
   const t0 = await resolveTarget(target);
   if ("error" in t0) return t0;
   // Only a procedure this workspace can see - a stale id from another tenant's
@@ -2119,6 +2119,7 @@ export async function recordTaskResult(
       error: spec.resultType === "pass_fail" ? "Say whether it passed or failed"
         : spec.resultType === "inspect_replace" ? "Say which happened - inspected, or replaced"
         : spec.resultType === "measured" || spec.resultType === "reading" ? "Enter the number you read"
+        : spec.resultType === "table" ? "Fill in a reading and Pass / Fail on every row you checked"
         : "Write down what you found",
     };
   }
@@ -6798,6 +6799,114 @@ async function fileWorkOrder(opts: {
 }
 
 /**
+ * The job number a work order's paper files under.
+ *
+ * Its own, read off its number - except a STEP, whose number (030190-2) is the
+ * parent's with a dash on, and whose reports belong in the parent's thread: a
+ * move's validation, move and OQ reports are 030190_SR1 to _SR3, one folder.
+ */
+async function threadJob(wo: { number: string; tenantOrgId: number | null; parentId: number | null }): Promise<number | null> {
+  const own = await jobFrom("work_order", wo.number, wo.tenantOrgId);
+  if (own !== null || wo.parentId === null) return own;
+  const [p] = await db.select({ number: workOrders.number }).from(workOrders).where(eq(workOrders.id, wo.parentId));
+  return p ? jobFrom("work_order", p.number, wo.tenantOrgId) : null;
+}
+
+/**
+ * Break a job into steps: the pre-move validation, the move and the post-move
+ * OQ of a relocation, or any other run of visits that each owe the client a
+ * page of their own.
+ *
+ * Every step is an ordinary work order - its own tasks, hours, parts, files
+ * and service report - that inherits from its parent everything that says
+ * whose job this is: the system, the client, who asked and who signs. What it
+ * does NOT inherit is the parent's tasks or hours, which stay where they were
+ * filed. The service team's to do, like dispatch: a step is a commitment to a
+ * visit.
+ *
+ * One level deep. A step of a step is refused rather than flattened, because
+ * guessing which parent somebody meant is how paper ends up in the wrong folder.
+ */
+export async function openWorkSteps(
+  parentId: number,
+  steps: { title: string; kind?: string; assignee?: string }[],
+): Promise<{ error?: string; ids?: number[] }> {
+  const u = await requireEditor();
+  const found = await loadWorkOrder(u, parentId);
+  if ("error" in found) return found;
+  const { wo: parent, mover } = found;
+  if (mover !== "house") return { error: "The service team plans the steps of a job." };
+  if (parent.parentId !== null) {
+    return { error: `${parent.number} is already a step - add this beside it on the job above.` };
+  }
+  if (!woAcceptsWork(parent.state)) {
+    return { error: `${parent.number} is ${WO_LABEL[parent.state].toLowerCase()} - re-open it to add steps.` };
+  }
+  const clean = steps
+    .map((s) => ({
+      title: s.title.trim().slice(0, 160),
+      kind: stepKindOf(s.kind ?? "")?.key ?? "other",
+      assignee: (s.assignee ?? "").trim(),
+    }))
+    .filter((s) => s.title);
+  if (!clean.length) return { error: "Say briefly what the step is" };
+  if (clean.length > 12) return { error: "Twelve steps at a time is plenty - add the rest after." };
+  if (clean.some((s) => s.assignee)) {
+    const refusal = await creditRefusal(parent.orgId, "dispatch");
+    if (refusal) return { error: refusal };
+  }
+
+  const ids: number[] = [];
+  for (const step of clean) {
+    let made: typeof workOrders.$inferSelect | null = null;
+    let last: unknown;
+    // Same race as fileWorkOrder, and the same unique index settling it.
+    for (let attempt = 0; attempt < 4 && !made; attempt++) {
+      const used = await db.select({ number: workOrders.number }).from(workOrders)
+        .where(forTenant(workOrders.tenantOrgId, parent.tenantOrgId));
+      const number = nextStepNumber(parent.number, used.map((r) => r.number));
+      try {
+        [made] = await db.insert(workOrders).values({
+          tenantOrgId: parent.tenantOrgId, number, parentId: parent.id, stepKind: step.kind,
+          instrumentId: parent.instrumentId, assetId: parent.assetId, orgId: parent.orgId,
+          requestedBy: parent.requestedBy, requestedByEmail: parent.requestedByEmail,
+          clientSignatory: parent.clientSignatory,
+          title: step.title, body: "", severity: "Planned", origin: parent.origin,
+          assignee: step.assignee, openedOn: shopToday(),
+          restorationProjectId: parent.restorationProjectId,
+        }).returning();
+      } catch (e) {
+        last = e;
+      }
+    }
+    if (!made) throw last;
+    ids.push(made.id);
+    await audit({
+      actor: u.email, instrumentId: made.instrumentId, assetId: made.assetId,
+      entityType: "work_order", entityId: made.id,
+      action: `opened ${made.number}, a step of ${parent.number}: ${made.title}`,
+    });
+    if (step.assignee) {
+      await notifyTaskAssigned({
+        actorEmail: u.email, actorName: u.name || u.email, assignee: step.assignee,
+        taskTitle: `${made.number} ${made.title}`,
+        instrumentId: made.instrumentId ?? undefined, assetId: made.assetId ?? undefined,
+        externalId: found.inst?.externalId ?? "", workOrderId: made.id,
+      });
+    }
+  }
+  await audit({
+    actor: u.email, instrumentId: parent.instrumentId, assetId: parent.assetId,
+    entityType: "work_order", entityId: parent.id,
+    action: `added ${ids.length} step${ids.length === 1 ? "" : "s"} to ${parent.number}: `
+      + clean.map((s) => s.title).join(", "),
+  });
+  revWo(parent);
+  revalidatePath(`/work/${parent.id}`);
+  return { ids };
+}
+
+/**
  * Refuse the two moves that commit somebody to a drive, while the client is on
  * credit hold and nobody has overridden it.
  *
@@ -7213,9 +7322,23 @@ export async function attachWorkOrderSystem(
     await db.update(table).set({ instrumentId })
       .where(and(eq(table.workOrderId, woId), isNull(table.instrumentId)));
   }
+  // Its steps are about the same machine. The ones still on nothing go with
+  // it, work and all; one somebody already put on a record keeps its own.
+  const loose = await db.select({ id: workOrders.id }).from(workOrders)
+    .where(and(eq(workOrders.parentId, woId), isNull(workOrders.instrumentId), isNull(workOrders.assetId)));
+  if (loose.length) {
+    const stepIds = loose.map((r) => r.id);
+    await db.update(workOrders).set({ instrumentId, orgId: wo.orgId ?? inst.ownerOrgId })
+      .where(inArray(workOrders.id, stepIds));
+    for (const table of [tasks, timeEntries, parts, attachments]) {
+      await db.update(table).set({ instrumentId })
+        .where(and(inArray(table.workOrderId, stepIds), isNull(table.instrumentId)));
+    }
+  }
   await audit({
     actor: u.email, instrumentId, entityType: "work_order", entityId: wo.id,
-    action: `put ${wo.number} on ${inst.externalId}, with the work already filed on it`,
+    action: `put ${wo.number} on ${inst.externalId}, with the work already filed on it`
+      + (loose.length ? ` and ${loose.length} step${loose.length === 1 ? "" : "s"}` : ""),
     field: "instrument", oldValue: "(no system)", newValue: inst.externalId,
   });
   revWo({ ...wo, instrumentId });
@@ -7304,6 +7427,12 @@ export async function resolveWorkOrder(woId: number, summary: string): Promise<{
   // the work - so a job cannot claim done over open tasks, the same way a test
   // cannot close without its result. Finish them or delete them; either is one
   // click on tasks that turned out not to apply.
+  // Same rule one level up: a move is not done while its OQ is still to run.
+  const steps = stepsDone(await db.select({ state: workOrders.state }).from(workOrders)
+    .where(eq(workOrders.parentId, woId)));
+  if (steps.open) {
+    return { error: `${steps.open} step${steps.open === 1 ? " of this job is" : "s of this job are"} still open - resolve or cancel ${steps.open === 1 ? "it" : "them"} first.` };
+  }
   const stillOpen = doneRows.filter((t) => t.state !== "Done").length;
   if (stillOpen) {
     return { error: `${stillOpen} task${stillOpen === 1 ? " on this job is" : "s on this job are"} still open - finish or remove ${stillOpen === 1 ? "it" : "them"} first.` };
@@ -7417,6 +7546,14 @@ export async function deleteWorkOrder(woId: number, reason: string): Promise<{ e
   if (typeof why !== "string") return why;
   if (wo.state === "resolved" || wo.state === "closed") {
     return { error: `${wo.number} is ${WO_LABEL[wo.state].toLowerCase()} - its close-out is on the client's record. Re-open it first if it really has to go.` };
+  }
+
+  // Its steps are jobs with paper of their own, numbered off this one. Letting
+  // them go loose would leave WO-1002-1 standing with no WO-1002 above it.
+  const stepRows = await db.select({ number: workOrders.number }).from(workOrders)
+    .where(eq(workOrders.parentId, woId));
+  if (stepRows.length) {
+    return { error: `${wo.number} has ${stepRows.length} step${stepRows.length === 1 ? "" : "s"} (${stepRows.map((r) => r.number).join(", ")}) - delete or cancel those first.` };
   }
 
   // Count what is about to be set loose, so the audit line says where it went
@@ -16234,7 +16371,7 @@ export async function draftInvoice(workOrderId: number): Promise<{ error?: strin
     // The job's own thread, read off the work order's number: job 030212's
     // invoices are 030212_INV1, 030212_INV2.
     const number = await nextDocNumber("invoice", wo.tenantOrgId, {
-      job: await jobFrom("work_order", wo.number, wo.tenantOrgId),
+      job: await threadJob(wo),
     });
     try {
       const [inv] = await db.insert(invoices).values({
@@ -16325,14 +16462,16 @@ export async function issueServiceReport(
    * part lands. So the visit's own account stands in - and is required, since
    * there is nothing behind it.
    */
-  if (!notes && !wo.closeSummary.trim()) {
-    return { error: woOpen(wo.state)
-      ? `${wo.number} is still open - say what was done on this visit and the report can go out today.`
-      : `Nothing is written on ${wo.number} about what was done - resolve it with a close-out first.` };
-  }
-
   const draft = await serviceReportDraft(workOrderId, { visitNotes: notes });
   if (!draft) return { error: "Not found" };
+  // The checklist and readings ticked at the bench are an account of the
+  // visit in their own right - a PM page that is all boxes and tune tables is
+  // the commonest report there is - so they stand in for written notes.
+  if (!notes && !wo.closeSummary.trim() && !draft.report.record) {
+    return { error: woOpen(wo.state)
+      ? `${wo.number} is still open - say what was done on this visit, or tick off its tasks, and the report can go out today.`
+      : `Nothing is written on ${wo.number} about what was done - resolve it with a close-out first.` };
+  }
   /* Every hour and every part on this job is already on a report the client
      has. Another one would be the same page under a new number. */
   if (draft.empty) {
@@ -16343,7 +16482,7 @@ export async function issueServiceReport(
   for (let attempt = 0; attempt < 4; attempt++) {
     // The job's own thread: job 030182's reports are 030182_SR1, _SR2.
     const number = await nextDocNumber("service_report", wo.tenantOrgId, {
-      job: await jobFrom("work_order", wo.number, wo.tenantOrgId),
+      job: await threadJob(wo),
     });
     try {
       const [row] = await db.insert(serviceReports).values({
@@ -16758,7 +16897,7 @@ export async function draftQuote(
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
     const number = await nextDocNumber("quote", wo.tenantOrgId, {
-      job: await jobFrom("work_order", wo.number, wo.tenantOrgId),
+      job: await threadJob(wo),
     });
     try {
       const [q] = await db.insert(quotes).values({

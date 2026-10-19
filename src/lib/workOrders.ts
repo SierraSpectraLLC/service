@@ -399,3 +399,109 @@ export function bookingSpan(b: Booking): string {
   const until = (b.bookedUntil ?? "").trim();
   return until && until !== b.bookedOn ? `${day(b.bookedOn)} - ${day(until)}` : day(b.bookedOn);
 }
+
+// ── Steps ───────────────────────────────────────────────────────────────────
+// A job made of smaller jobs.
+//
+// A system move is three pieces of work with three pieces of paper: the
+// validation that proves the instrument was healthy before anybody touched it,
+// the move itself, and the OQ that proves it is healthy where it landed. Each
+// one is a visit with its own engineer, its own hours, its own checklist and
+// its own signed report - and they are still one move, asked for once, by one
+// client, and finished when the last of them is. One work order could hold the
+// tasks but not three reports that each said only their own part; three
+// unrelated orders could hold the reports but lost the thread.
+//
+// So a step is an ordinary work order with a parent. It inherits who asked and
+// what it is on, numbers itself off the parent (WO-1002-1, WO-1002-2), and its
+// reports join the parent's job thread, so a job-numbered shop's paper still
+// files under one number. One level only: a step with steps is a project, and
+// projects already have a home.
+
+export const STEP_KINDS = [
+  // `service` is what the report's Service Type line prints. Blank means the
+  // job's own reading of itself (lib/serviceReportDoc.serviceTypeOf).
+  { key: "validation", label: "Pre-move validation", service: "Validation" },
+  { key: "move", label: "Move", service: "Relocation" },
+  { key: "oq", label: "OQ / post-move validation", service: "OQ" },
+  { key: "pm", label: "PM", service: "PM" },
+  { key: "repair", label: "Repair", service: "Repair" },
+  { key: "other", label: "Other", service: "" },
+] as const;
+export type StepKind = (typeof STEP_KINDS)[number]["key"];
+
+export const stepKindOf = (s: string) =>
+  STEP_KINDS.find((k) => k.key === s.trim().toLowerCase()) ?? null;
+
+/** What the report says the visit was, when the step says so. Blank = ask the job. */
+export const stepServiceType = (kind: string): string => stepKindOf(kind)?.service ?? "";
+
+/**
+ * The steps a move is made of, in the order they happen. Offered as one click
+ * on a job with none yet - the titles say what each one is, and every one of
+ * them can be renamed or removed afterwards like any other job.
+ */
+export const MOVE_STEPS: { kind: StepKind; title: string }[] = [
+  { kind: "validation", title: "Pre-move validation" },
+  { kind: "move", title: "Move" },
+  { kind: "oq", title: "Post-move OQ / validation" },
+];
+
+/**
+ * The next step's number: the parent's, a dash, and a counter that only the
+ * parent's own steps advance.
+ *
+ * Read off the numbers already used rather than counted, for the reason every
+ * other number here is: a deleted step leaves a gap, and handing its number to
+ * the next one would put two different pieces of paper under one name.
+ * `WO-1002-1` does not parse as a work order under either stock template
+ * (`WO-{seq}` or `{job:6}`), so steps never move the workspace's own counter.
+ */
+export function nextStepNumber(parent: string, existing: string[]): string {
+  const base = parent.trim();
+  const pre = `${base}-`.toLowerCase();
+  let top = 0;
+  for (const n of existing) {
+    const t = n.trim().toLowerCase();
+    if (!t.startsWith(pre)) continue;
+    const rest = t.slice(pre.length);
+    if (/^\d+$/.test(rest)) top = Math.max(top, parseInt(rest, 10));
+  }
+  return `${base}-${top + 1}`;
+}
+
+/** "2 of 3 steps done" - a step counts as done once it is resolved or closed. */
+export function stepsDone(steps: { state: string }[]): { done: number; total: number; open: number } {
+  const live = steps.filter((s) => s.state !== "cancelled");
+  return {
+    done: live.filter((s) => s.state === "resolved" || s.state === "closed").length,
+    total: live.length,
+    open: live.filter((s) => woOpen(s.state)).length,
+  };
+}
+
+/**
+ * A list with each parent's steps tucked in under it, in step order.
+ *
+ * Steps whose parent is not in the list - filtered out, or on the other side
+ * of the Finished fold - stand on their own rather than vanish: a step is a
+ * real job, and somebody searching for it must still find it.
+ */
+export function nestSteps<T extends { id: number; parentId: number | null; number: string }>(list: T[]): T[] {
+  const ids = new Set(list.map((w) => w.id));
+  const kids = new Map<number, T[]>();
+  for (const w of list) {
+    if (w.parentId === null || !ids.has(w.parentId)) continue;
+    const arr = kids.get(w.parentId) ?? [];
+    arr.push(w);
+    kids.set(w.parentId, arr);
+  }
+  const out: T[] = [];
+  for (const w of list) {
+    if (w.parentId !== null && ids.has(w.parentId)) continue;
+    out.push(w);
+    const mine = kids.get(w.id);
+    if (mine) out.push(...[...mine].sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })));
+  }
+  return out;
+}

@@ -4777,3 +4777,10 @@ ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "contact_email" text NOT NULL DEFAUL
 
 -- Which album a photo sits in on its record's Photos section. Blank = none.
 ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "album" text NOT NULL DEFAULT '';
+
+-- A job made of steps: a move's pre-move validation, the move, and the
+-- post-move OQ, each its own work order with its own report, under one parent.
+-- See work_orders.parent_id in schema.ts and the Steps block in lib/workOrders.
+ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "parent_id" integer REFERENCES "work_orders"("id") ON DELETE SET NULL;
+ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "step_kind" text NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS "work_orders_parent_idx" ON "work_orders" ("parent_id");

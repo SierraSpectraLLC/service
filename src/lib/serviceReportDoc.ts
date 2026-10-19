@@ -14,7 +14,8 @@
 //
 // Pure. The loader hands in the rows.
 
-import type { ReportLine, ServiceReport } from "@/lib/serviceReport";
+import { parseTable } from "@/lib/resultTable";
+import type { NotesRecord, ReportLine, ServiceReport } from "@/lib/serviceReport";
 
 /** The job, as the report needs it. Every field is a column on work_orders. */
 export type JobFacts = {
@@ -36,6 +37,11 @@ export type JobFacts = {
   severity: string;
   /** A commission or restoration job installs something. */
   install: boolean;
+  /**
+   * What a STEP of a bigger job says it is - "Validation", "Relocation", "OQ"
+   * (lib/workOrders.stepServiceType). Blank or absent reads the job itself.
+   */
+  serviceType?: string;
 };
 
 /** One priced row, as lib/billing composed it for this job. */
@@ -131,7 +137,9 @@ export const usd = (cents: number): string =>
  * install is a commission, and a question answered from the desk was not a
  * repair. Anything else is a repair, which is what most jobs are.
  */
-export function serviceTypeOf(job: Pick<JobFacts, "origin" | "severity" | "install">): string {
+export function serviceTypeOf(job: Pick<JobFacts, "origin" | "severity" | "install" | "serviceType">): string {
+  // A step was planned as one of these; that beats a reading of its severity.
+  if (job.serviceType?.trim()) return job.serviceType.trim();
   if (job.install) return "Install";
   if (job.origin === "pm_request") return "PM";
   if (job.severity.trim().toLowerCase() === "question") return "Support";
@@ -253,4 +261,69 @@ export function serviceReportDoc(input: ReportInput): ServiceReport {
     },
     contact: input.provider.contact,
   };
+}
+
+/** One of the job's tasks, as much of it as the notes box prints. */
+export type RecordTask = {
+  title: string;
+  state: string;
+  checklist: { text: string; done: boolean; heading: boolean }[];
+  /** The result type when the task is a test (or demands an outcome), else null. */
+  resultType: string | null;
+  result: { value: string; passed: boolean | null } | null;
+};
+
+/**
+ * What the visit checked off, laid out the way the PM pages always were:
+ *
+ *   <Service type> Validation Checks       Positive Scan Mode - MS1
+ *   Collision Cell w/Collision Gas: 4.80e-3 OK    Mass | Intensity | Pass/Fail
+ *   ...                                    ...
+ *   ☒ Checked for front-end contamination
+ *   ☒ Replaced Air Filter
+ *
+ * Readings are the tests with one value; tables are the results-table tests;
+ * boxes are every checklist item, plus each plain task that has no checklist
+ * (crossed when it is Done). Nothing is invented: an empty job draws nothing,
+ * and the report prints as it always did.
+ */
+export function notesRecord(tasks: RecordTask[], serviceType: string): NotesRecord | undefined {
+  const checks: NotesRecord["checks"] = [];
+  const tables: NotesRecord["tables"] = [];
+
+  const readings: string[] = [];
+  for (const t of tasks) {
+    if (!t.resultType || !t.result?.value.trim()) continue;
+    if (t.resultType === "table") {
+      const g = parseTable(t.result.value);
+      if (g?.rows.length) tables.push({ title: t.title, cols: g.cols, rows: g.rows });
+      continue;
+    }
+    const v = t.result.value.trim();
+    const verdict = t.result.passed === true ? " OK" : t.result.passed === false ? " FAIL" : "";
+    // "Pass" on a pass/fail IS the verdict; saying "Pass OK" would say it twice.
+    readings.push(/^(pass|fail)$/i.test(v) ? `${t.title}: ${/^pass$/i.test(v) ? "OK" : "FAIL"}` : `${t.title}: ${v}${verdict}`);
+  }
+  if (readings.length) {
+    checks.push({ kind: "heading", text: `${serviceType} Validation Checks`.trim() });
+    for (const r of readings) checks.push({ kind: "reading", text: r });
+  }
+
+  // A task title only heads its boxes when there is more than one list to tell apart.
+  const listed = tasks.filter((t) => t.checklist.length > 0);
+  const plain = tasks.filter((t) => !t.checklist.length && !t.resultType);
+  const boxes: NotesRecord["checks"] = [];
+  for (const t of listed) {
+    if (listed.length > 1) boxes.push({ kind: "heading", text: t.title });
+    for (const c of t.checklist) {
+      boxes.push(c.heading ? { kind: "heading", text: c.text } : { kind: "box", text: c.text, done: c.done });
+    }
+  }
+  for (const t of plain) boxes.push({ kind: "box", text: t.title, done: t.state === "Done" });
+  if (boxes.length) {
+    if (checks.length) checks.push({ kind: "gap", text: "" });
+    checks.push(...boxes);
+  }
+
+  return checks.length || tables.length ? { checks, tables } : undefined;
 }

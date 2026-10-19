@@ -9,7 +9,7 @@ import { getSystemLabels } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import { creditForMany } from "@/lib/invoiceData";
 import type { CreditStanding } from "@/lib/credit";
-import { ageDays, sortWorkOrders, woLate, woOpen, WO_LABEL, WO_TONE } from "@/lib/workOrders";
+import { ageDays, nestSteps, sortWorkOrders, stepsDone, woLate, woOpen, WO_LABEL, WO_TONE } from "@/lib/workOrders";
 import { DataTable, Dot, FacetStrip, Id, Legend, PageHead, Pill, Toolbar } from "@/components/ui";
 import type { DataRow } from "@/components/ui/DataTable";
 import NewWorkOrderButton from "@/components/NewWorkOrderButton";
@@ -116,8 +116,12 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
     || placeOf(w).toLowerCase().includes(needle)
     || w.assignee.toLowerCase().includes(needle)
     || orgOf(w).toLowerCase().includes(needle);
-  const live = sorted.filter((w) => (woOpen(w.state) || w.state === "resolved") && wanted(w) && hit(w));
-  const filed = sorted.filter((w) => !(woOpen(w.state) || w.state === "resolved") && wanted(w) && hit(w));
+  // Each job's steps sit under it, in step order - see lib/workOrders.nestSteps.
+  const live = nestSteps(sorted.filter((w) => (woOpen(w.state) || w.state === "resolved") && wanted(w) && hit(w)));
+  const filed = nestSteps(sorted.filter((w) => !(woOpen(w.state) || w.state === "resolved") && wanted(w) && hit(w)));
+  const stepsOf = (id: number) => stepsDone(rows.filter((r) => r.parentId === id));
+  const underParent = (w: typeof rows[number], list: typeof rows) =>
+    w.parentId !== null && list.some((r) => r.id === w.parentId);
   const showDone = done === "1";
 
   // The queue facets: everyone with open work, plus the viewer even when their
@@ -168,17 +172,21 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
     return s ? `/work?${s}` : "/work";
   };
 
-  const toRow = (w: typeof rows[number]): DataRow => {
+  const toRow = (w: typeof rows[number], list: typeof rows): DataRow => {
     const tone = WO_TONE[w.state] ?? WO_TONE.open;
     const days = ageDays(w.openedOn, today);
     const c = counts(w.id);
+    const st = stepsOf(w.id);
+    const nested = underParent(w, list);
     return {
       key: w.id,
       href: `/work/${w.id}`,
       cells: {
         dot: <Dot tone={tone} />,
         wo: <Id>{w.number}</Id>,
-        title: <b style={{ fontWeight: 600 }}>{w.title}</b>,
+        title: nested
+          ? <span style={{ paddingLeft: 16 }}><span className="mut">↳ </span>{w.title}</span>
+          : <b style={{ fontWeight: 600 }}>{w.title}</b>,
         place: <span className="mut">{placeOf(w)} · {orgOf(w)}</span>,
         who: <span className="mut">{woOpen(w.state) ? (w.assignee.trim() || "unassigned") : ""}</span>,
         state: (
@@ -192,7 +200,10 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
             ? <Pill tone="warn">Overridden</Pill>
             : null,
         age: woOpen(w.state)
-          ? <span className="mut">{days === 0 ? "today" : `${days} d`}{c.tasks > 0 ? ` · ${c.done}/${c.tasks}` : ""}</span>
+          ? <span className="mut">
+              {days === 0 ? "today" : `${days} d`}{c.tasks > 0 ? ` · ${c.done}/${c.tasks}` : ""}
+              {st.total > 0 ? ` · ${st.done}/${st.total} steps` : ""}
+            </span>
           : null,
       },
     };
@@ -253,11 +264,11 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
           { key: "who", label: "Assignee", width: "100px", hideMobile: true },
           { key: "state", label: "State", width: "120px" },
           ...(staff ? [{ key: "hold", label: "Credit", width: "96px", hideMobile: true }] : []),
-          { key: "age", label: "Age", width: "84px", hideMobile: true },
+          { key: "age", label: "Age", width: "128px", hideMobile: true },
         ]}
         rows={[
-          ...live.map(toRow),
-          ...(showDone ? filed.map((w) => ({ ...toRow(w), group: "Finished" })) : []),
+          ...live.map((w) => toRow(w, live)),
+          ...(showDone ? filed.map((w) => ({ ...toRow(w, filed), group: "Finished" })) : []),
         ]}
         empty={who ? (who === "-" ? "Nothing waiting for an owner" : `Nothing on ${who}'s plate`) : "Nothing outstanding"}
       />
