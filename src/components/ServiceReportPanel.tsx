@@ -132,7 +132,8 @@ export default function ServiceReportPanel({ workOrderId, number, reports, ready
           />
           <div className="field-hint">
             {number} stays open. Each visit gets its own report, and this one carries only the
-            hours and parts no earlier report has.
+            hours and parts no earlier report has. The job&apos;s ticked checklists, readings and
+            results tables print in the notes box on their own - write here only what they don&apos;t say.
           </div>
         </div>
       )}
@@ -140,7 +141,7 @@ export default function ServiceReportPanel({ workOrderId, number, reports, ready
       <div className="row-2" style={{ alignItems: "center", marginTop: 12 }}>
         <button
           className="btn sm accent"
-          disabled={pending || !ready || (open && !notes.trim())}
+          disabled={pending || !ready}
           onClick={() => startTransition(async () => {
             const res = await issueServiceReport(workOrderId, notes);
             if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
@@ -153,6 +154,13 @@ export default function ServiceReportPanel({ workOrderId, number, reports, ready
             : open ? "Issue report for this visit"
               : reports.length ? "Issue another" : "Issue service report"}
         </button>
+        {/* What it would say, before a number goes on it. Nothing is written. */}
+        {ready && (
+          <a className="btn sm" style={{ textDecoration: "none" }} target="_blank" rel="noreferrer"
+            href={`/api/doc/service-report/preview/${workOrderId}${notes.trim() ? `?notes=${encodeURIComponent(notes.trim())}` : ""}`}>
+            Preview PDF
+          </a>
+        )}
         {!ready && reason && <span className="mut t-small">{reason}</span>}
         {ready && reports.length > 0 && (
           <span className="mut t-small">A report already issued stays as it was signed.</span>
