@@ -305,7 +305,9 @@ export function notesRecord(tasks: RecordTask[], serviceType: string): NotesReco
     readings.push(/^(pass|fail)$/i.test(v) ? `${t.title}: ${/^pass$/i.test(v) ? "OK" : "FAIL"}` : `${t.title}: ${v}${verdict}`);
   }
   if (readings.length) {
-    checks.push({ kind: "heading", text: `${serviceType} Validation Checks`.trim() });
+    // "PM Validation Checks" on a PM, as the sheet says it; a repair's checks are just checks.
+    const named = ["PM", "Validation", "OQ"].includes(serviceType) ? `${serviceType} ` : "";
+    checks.push({ kind: "heading", text: `${named}Validation Checks` });
     for (const r of readings) checks.push({ kind: "reading", text: r });
   }
 

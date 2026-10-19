@@ -557,7 +557,11 @@ export default function TasksPanel({
               {/* For a pass/fail the value IS the verdict, so printing both
                   read "fail Fail". The verdict word alone for those; for a
                   measurement the number, with its verdict when there is one. */}
-              {t.result ? (t.result.passed === true ? (/^pass$/i.test(t.result.value) ? "Pass" : `pass ${t.result.value}`)
+              {/* A table's value is the grid itself; the row says how it went. */}
+              {t.result && t.test.resultType === "table"
+                ? (() => { const g = parseTable(t.result.value); const n = g?.rows.length ?? 0;
+                    return t.result.passed === true ? `all ${n} pass` : t.result.passed === false ? `fail · ${n} rows` : `${n} rows`; })()
+                : t.result ? (t.result.passed === true ? (/^pass$/i.test(t.result.value) ? "Pass" : `pass ${t.result.value}`)
                   : t.result.passed === false ? (/^fail$/i.test(t.result.value) ? "Fail" : `fail ${t.result.value}`)
                   : t.result.value)
                 : t.test.resultType === "inspect_replace" ? "outcome needed" : "no result"}
