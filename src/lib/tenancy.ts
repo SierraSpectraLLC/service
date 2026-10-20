@@ -175,6 +175,18 @@ export const forTenant = (col: AnyColumn, tenantOrgId: number | null): SQL | und
   tenantOrgId === null ? undefined : eq(col, tenantOrgId);
 
 /**
+ * "The same tenant as the row I just read", for scoping a write to that row.
+ *
+ * Not forTenant: that one widens to everything for a null viewer, and a write
+ * must never widen. And not `eq(col, row.tenantOrgId)`: the platform
+ * operator's own rows carry a null stamp, `tenant_org_id = NULL` is never
+ * true, and the write silently touched nothing while the code around it went
+ * on to post the ledger and write the audit line. Null matches null here.
+ */
+export const sameTenant = (col: AnyColumn, tenantOrgId: number | null): SQL =>
+  tenantOrgId === null ? isNull(col) : eq(col, tenantOrgId);
+
+/**
  * Organizations this viewer may see by name.
  *
  * The leak this closes: every page that offered a share picker used to ship the
