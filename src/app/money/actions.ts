@@ -22,7 +22,7 @@ import {
   payments, paymentSuggestions, payroll, payrollRuns, poLines, promises, purchaseOrders, quotes, shareLinks, workOrders,
 } from "@/db/schema";
 import { houseOf, myTenantOrgId, requireOwner, requireStaff, requireUser } from "@/lib/authz";
-import { maySeeOrgMoney } from "@/lib/tenancy";
+import { maySeeOrgMoney, sameTenant } from "@/lib/tenancy";
 import { audit } from "@/lib/audit";
 import { requireReason } from "@/lib/reason";
 import { formatCents, parseMoney } from "@/lib/money";
@@ -155,7 +155,7 @@ export async function recordPayment(
   try {
     await postInvoicePayment({ inv, payment: row, by: u.email });
   } catch (e) {
-    await db.delete(payments).where(and(eq(payments.id, row.id), eq(payments.tenantOrgId, inv.tenantOrgId as number)));
+    await db.delete(payments).where(and(eq(payments.id, row.id), sameTenant(payments.tenantOrgId, inv.tenantOrgId)));
     return ledgerRefusal(e);
   }
 
@@ -188,7 +188,7 @@ export async function setAbsorbCardFee(id: number, absorb: boolean): Promise<{ e
   if (inv.status === "void") return { error: `${inv.number} is void.` };
   if (inv.absorbCardFee === absorb) return {};
   await db.update(invoices).set({ absorbCardFee: absorb, updatedAt: new Date() })
-    .where(and(eq(invoices.id, id), eq(invoices.tenantOrgId, inv.tenantOrgId as number)));
+    .where(and(eq(invoices.id, id), sameTenant(invoices.tenantOrgId, inv.tenantOrgId)));
   await audit({
     actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: inv.tenantOrgId,
     action: absorb
@@ -234,13 +234,13 @@ export async function recordSuggestedPayment(id: number): Promise<{ error?: stri
     try {
       await postInvoicePayment({ inv, payment: inserted, by: u.email });
     } catch (e) {
-      await db.delete(payments).where(and(eq(payments.id, inserted.id), eq(payments.tenantOrgId, inv.tenantOrgId as number)));
+      await db.delete(payments).where(and(eq(payments.id, inserted.id), sameTenant(payments.tenantOrgId, inv.tenantOrgId)));
       return ledgerRefusal(e);
     }
     row = inserted;
   }
   await db.update(paymentSuggestions).set({ status: "recorded", paymentId: row.id })
-    .where(and(eq(paymentSuggestions.id, id), eq(paymentSuggestions.tenantOrgId, sug.tenantOrgId as number)));
+    .where(and(eq(paymentSuggestions.id, id), sameTenant(paymentSuggestions.tenantOrgId, sug.tenantOrgId)));
   await settleStatus(inv);
   const view = await currentView(inv.id);
   await audit({
@@ -265,7 +265,7 @@ async function settleStatus(inv: typeof invoices.$inferSelect) {
   const next = view.balanceCents <= 0 ? "paid" : view.paidCents > 0 ? "partial" : "sent";
   if (next !== inv.status) {
     await db.update(invoices).set({ status: next, updatedAt: new Date() })
-      .where(and(eq(invoices.id, inv.id), eq(invoices.tenantOrgId, inv.tenantOrgId as number)));
+      .where(and(eq(invoices.id, inv.id), sameTenant(invoices.tenantOrgId, inv.tenantOrgId)));
   }
 }
 
@@ -293,7 +293,7 @@ export async function deletePayment(id: number, reason: string): Promise<{ error
   try {
     if (mine) await reverse({ entryId: mine.id, reason: why, postedBy: u.email, today });
   } catch (e) { return ledgerRefusal(e); }
-  await db.delete(payments).where(and(eq(payments.id, id), eq(payments.tenantOrgId, row.tenantOrgId as number)));
+  await db.delete(payments).where(and(eq(payments.id, id), sameTenant(payments.tenantOrgId, row.tenantOrgId)));
   await settleStatus(inv);
   await audit({
     actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: inv.tenantOrgId,
@@ -324,7 +324,7 @@ export async function voidInvoice(id: number, reason: string): Promise<{ error?:
     await reverseInvoicePostings({ inv, today: shopToday(), by: u.email, reason: `voided - ${why}` });
   } catch (e) { return ledgerRefusal(e); }
   await db.update(invoices).set({ status: "void", updatedAt: new Date() })
-    .where(and(eq(invoices.id, id), eq(invoices.tenantOrgId, inv.tenantOrgId as number)));
+    .where(and(eq(invoices.id, id), sameTenant(invoices.tenantOrgId, inv.tenantOrgId)));
   await db.update(shareLinks).set({ revokedAt: new Date() }).where(eq(shareLinks.invoiceId, id));
   await audit({
     actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: inv.tenantOrgId,
@@ -353,7 +353,7 @@ export async function deleteInvoice(id: number, reason: string): Promise<{ error
   try {
     await reverseInvoicePostings({ inv, today: shopToday(), by: u.email, reason: `deleted - ${why}` });
   } catch (e) { return ledgerRefusal(e); }
-  await db.delete(invoices).where(and(eq(invoices.id, id), eq(invoices.tenantOrgId, inv.tenantOrgId as number)));   // children cascade
+  await db.delete(invoices).where(and(eq(invoices.id, id), sameTenant(invoices.tenantOrgId, inv.tenantOrgId)));   // children cascade
   await audit({
     actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: inv.tenantOrgId,
     action: `deleted ${inv.number}${total > 0 ? ` (had ${formatCents(total)} in payments)` : ""} - reason: ${why}`,
@@ -431,7 +431,7 @@ export async function waiveFee(feeId: number, reason: string): Promise<{ error?:
   const [inv] = await db.select().from(invoices).where(eq(invoices.id, fee.invoiceId));
   const today = shopToday();
   await db.update(invoiceFees).set({ waived: true, waivedBy: u.email, waivedReason: why, waivedOn: today })
-    .where(and(eq(invoiceFees.id, feeId), eq(invoiceFees.tenantOrgId, fee.tenantOrgId as number)));
+    .where(and(eq(invoiceFees.id, feeId), sameTenant(invoiceFees.tenantOrgId, fee.tenantOrgId)));
   if (inv) await postFeeWaived({ inv, fee, on: today, by: u.email });
   await audit({
     actor: u.email, entityType: "invoice", entityId: fee.invoiceId, tenantOrgId: fee.tenantOrgId,
@@ -479,7 +479,7 @@ export async function keepPromise(promiseId: number): Promise<{ error?: string }
   const [inv] = await db.select().from(invoices).where(eq(invoices.id, row.invoiceId));
   const today = shopToday();
   await db.update(promises).set({ keptOn: today })
-    .where(and(eq(promises.id, promiseId), eq(promises.tenantOrgId, row.tenantOrgId as number)));
+    .where(and(eq(promises.id, promiseId), sameTenant(promises.tenantOrgId, row.tenantOrgId)));
   await audit({
     actor: u.email, entityType: "invoice", entityId: row.invoiceId, tenantOrgId: row.tenantOrgId,
     action: `${row.byName || "The client"} kept the promise on ${inv?.number ?? "the invoice"} (${row.promisedOn})`,
@@ -615,7 +615,7 @@ export async function resolveDispute(
   await db.update(disputes).set({
     resolvedOn: today, resolution, resolvedBy: u.email,
     reason: note.trim() ? `${d.reason} | resolved: ${note.trim()}` : d.reason,
-  }).where(and(eq(disputes.id, disputeId), eq(disputes.tenantOrgId, d.tenantOrgId as number)));
+  }).where(and(eq(disputes.id, disputeId), sameTenant(disputes.tenantOrgId, d.tenantOrgId)));
 
   await audit({
     actor: u.email, entityType: "invoice", entityId: d.invoiceId, tenantOrgId: inv.tenantOrgId,
@@ -777,7 +777,7 @@ async function recordReportPaid(
      said waiting. */
   const mine = and(
     eq(expenseReports.id, report.id),
-    report.tenantOrgId === null ? isNull(expenseReports.tenantOrgId) : eq(expenseReports.tenantOrgId, report.tenantOrgId),
+    sameTenant(expenseReports.tenantOrgId, report.tenantOrgId),
   );
   const flipped = await db.update(expenseReports).set({ status: "paid", paidOn: day, paidBy: u.email, paidRef })
     .where(and(mine, eq(expenseReports.status, "submitted"))).returning({ id: expenseReports.id });
@@ -935,7 +935,7 @@ export async function logOverheadExpense(
   try {
     await postExpenseLogged({ expense: row, by: u.email });
   } catch (e) {
-    await db.delete(expenses).where(and(eq(expenses.id, row.id), eq(expenses.tenantOrgId, row.tenantOrgId as number)));
+    await db.delete(expenses).where(and(eq(expenses.id, row.id), sameTenant(expenses.tenantOrgId, row.tenantOrgId)));
     return ledgerRefusal(e);
   }
   await audit({
@@ -975,7 +975,7 @@ export async function payPurchaseOrder(
   } catch (e) { return ledgerRefusal(e); }
   const paidRef = data.reference.trim().slice(0, 120);
   await db.update(purchaseOrders).set({ paidOn: day, paidBy: u.email, paidRef })
-    .where(and(eq(purchaseOrders.id, poId), eq(purchaseOrders.tenantOrgId, po.tenantOrgId as number)));
+    .where(and(eq(purchaseOrders.id, poId), sameTenant(purchaseOrders.tenantOrgId, po.tenantOrgId)));
   await audit({
     actor: u.email, entityType: "po", entityId: poId, tenantOrgId: po.tenantOrgId,
     action: `paid ${po.vendor} ${formatCents(cents)} for ${po.number}${paidRef ? ` (${paidRef})` : ""}, ${day}`
@@ -1281,7 +1281,7 @@ export async function matchBankLine(txnId: number, entryId: number): Promise<{ e
   if (cash.debitCents - cash.creditCents !== line.amountCents) return { error: "The amounts differ. Match a line to an entry of the same amount." };
   const { bankTransactions } = await import("@/db/schema");
   await db.update(bankTransactions).set({ matchedEntryId: entryId })
-    .where(and(eq(bankTransactions.id, txnId), eq(bankTransactions.tenantOrgId, line.tenantOrgId as number)));
+    .where(and(eq(bankTransactions.id, txnId), sameTenant(bankTransactions.tenantOrgId, line.tenantOrgId)));
   await audit({ actor: u.email, entityType: "bank", entityId: txnId, tenantOrgId: line.tenantOrgId, action: `matched bank line "${line.description}" (${formatCents(line.amountCents)}) to ledger entry #${entryId}` });
   revMoney();
   return {};
@@ -1305,13 +1305,13 @@ export async function recordBankPayment(txnId: number, invoiceId: number): Promi
   try {
     posted = await postInvoicePayment({ inv, payment: row, by: u.email });
   } catch (e) {
-    await db.delete(payments).where(and(eq(payments.id, row.id), eq(payments.tenantOrgId, inv.tenantOrgId as number)));
+    await db.delete(payments).where(and(eq(payments.id, row.id), sameTenant(payments.tenantOrgId, inv.tenantOrgId)));
     return ledgerRefusal(e);
   }
   const { bankTransactions } = await import("@/db/schema");
   if (posted) {
     await db.update(bankTransactions).set({ matchedEntryId: posted.id })
-      .where(and(eq(bankTransactions.id, txnId), eq(bankTransactions.tenantOrgId, line.tenantOrgId as number)));
+      .where(and(eq(bankTransactions.id, txnId), sameTenant(bankTransactions.tenantOrgId, line.tenantOrgId)));
   }
   await settleStatus(inv);
   await audit({ actor: u.email, entityType: "invoice", entityId: invoiceId, tenantOrgId: inv.tenantOrgId, action: `recorded ${formatCents(line.amountCents)} on ${inv.number} from the bank feed ("${line.description}", ${line.on}) - matched` });
@@ -1348,7 +1348,7 @@ export async function postBankLine(txnId: number, data: { account: string; memo:
   } catch (e) { return ledgerRefusal(e); }
   const { bankTransactions } = await import("@/db/schema");
   await db.update(bankTransactions).set({ matchedEntryId: posted.id })
-    .where(and(eq(bankTransactions.id, txnId), eq(bankTransactions.tenantOrgId, line.tenantOrgId as number)));
+    .where(and(eq(bankTransactions.id, txnId), sameTenant(bankTransactions.tenantOrgId, line.tenantOrgId)));
   await audit({ actor: u.email, entityType: "bank", entityId: txnId, tenantOrgId: line.tenantOrgId, action: `posted bank line "${line.description}" (${formatCents(line.amountCents)}) to ${ACCOUNTS[account].name} - matched` });
   revMoney();
   return {};
@@ -1361,7 +1361,7 @@ export async function unmatchBankLine(txnId: number): Promise<{ error?: string }
   if (!line) return { error: "Not found" };
   const { bankTransactions } = await import("@/db/schema");
   await db.update(bankTransactions).set({ matchedEntryId: null })
-    .where(and(eq(bankTransactions.id, txnId), eq(bankTransactions.tenantOrgId, line.tenantOrgId as number)));
+    .where(and(eq(bankTransactions.id, txnId), sameTenant(bankTransactions.tenantOrgId, line.tenantOrgId)));
   await audit({ actor: u.email, entityType: "bank", entityId: txnId, tenantOrgId: line.tenantOrgId, action: `unmatched bank line "${line.description}" from entry #${line.matchedEntryId}` });
   revMoney();
   return {};
