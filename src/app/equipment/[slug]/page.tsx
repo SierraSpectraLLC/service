@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, type AnyColumn } from "drizzle-orm";
 import { db } from "@/db";
 import { catalogRefs, partCatalog, partKitLines, procedures, vocabTerms } from "@/db/schema";
 import { getBrand } from "@/lib/brand";
@@ -75,15 +75,21 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
   if (!term) notFound();
 
   const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  // The model's own company's procedures, references and parts - matched with
+  // null as null, not eq: the platform operator's models carry a null stamp,
+  // `= NULL` is never true, and their pages came up with no upkeep, references
+  // or parts. Spelled out here rather than taken from lib/tenancy's
+  // sameTenant, because this page stays clear of the tenancy helpers (above).
+  const ofTerm = (col: AnyColumn) => (term.tenantOrgId === null ? isNull(col) : eq(col, term.tenantOrgId));
   const [brand, procRows, refRows, partRows] = await Promise.all([
     getBrand(),
     db.select().from(procedures)
-      .where(and(eq(procedures.assetType, term.assetType), eq(procedures.tenantOrgId, term.tenantOrgId!)))
+      .where(and(eq(procedures.assetType, term.assetType), ofTerm(procedures.tenantOrgId)))
       .orderBy(asc(procedures.position)),
     db.select().from(catalogRefs)
-      .where(and(eq(catalogRefs.assetType, term.assetType), eq(catalogRefs.tenantOrgId, term.tenantOrgId!))),
+      .where(and(eq(catalogRefs.assetType, term.assetType), ofTerm(catalogRefs.tenantOrgId))),
     db.select().from(partCatalog)
-      .where(and(eq(partCatalog.archived, false), eq(partCatalog.tenantOrgId, term.tenantOrgId!)))
+      .where(and(eq(partCatalog.archived, false), ofTerm(partCatalog.tenantOrgId)))
       .orderBy(asc(partCatalog.partNumber)),
   ]);
 
