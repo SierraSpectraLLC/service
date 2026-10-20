@@ -15,7 +15,7 @@
 
 import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   disputes, expenseReports, expenses, invoiceFees, invoiceLines, invoices, ledgerEntries, orgs,
@@ -742,6 +742,72 @@ export async function setCashOpening(
 
 // ---------------- Money out ----------------
 
+/** Why a claim cannot be paid yet because the travel rules queried rows on it, or null. */
+function unapprovedRefusal(rows: (typeof expenses.$inferSelect)[], whose = "this report"): string | null {
+  /* The gate the flag exists for. A row the travel rules queried cannot be
+     paid until a person has said so on the record. */
+  const n = rows.filter(needsApproval).length;
+  if (!n) return null;
+  return `${n} row${n === 1 ? "" : "s"} on ${whose} `
+    + `${n === 1 ? "is" : "are"} outside the travel rules and `
+    + `${n === 1 ? "has" : "have"} not been approved. Open the report and approve `
+    + `${n === 1 ? "it" : "them"}, or send it back.`;
+}
+
+/**
+ * Record one claim as paid: the ledger first, then the row, then the audit
+ * line. Everything that decides WHETHER it may be paid has happened before
+ * this is called - here it only happens.
+ */
+async function recordReportPaid(
+  u: { email: string },
+  report: typeof expenseReports.$inferSelect,
+  rows: (typeof expenses.$inferSelect)[],
+  day: string, paidRef: string, batch = "",
+): Promise<{ error?: string; cents?: number }> {
+  const total = reportTotalCents(rows);
+  const paid = { ...report, status: "paid", paidOn: day, paidBy: u.email, paidRef };
+  const [wo] = report.workOrderId === null ? [null]
+    : await db.select({ orgId: workOrders.orgId }).from(workOrders).where(eq(workOrders.id, report.workOrderId));
+  /* Claim the row before the books hear about it. Only a claim still
+     awaiting payout flips, so two clicks (or two people) cannot both pay it,
+     and a claim that did not flip never reaches the ledger. The tenant match
+     takes null as null: the platform's own operator stamps its claims with no
+     tenant, and `= NULL` matched nothing - the ledger said paid, the claim
+     said waiting. */
+  const mine = and(
+    eq(expenseReports.id, report.id),
+    report.tenantOrgId === null ? isNull(expenseReports.tenantOrgId) : eq(expenseReports.tenantOrgId, report.tenantOrgId),
+  );
+  const flipped = await db.update(expenseReports).set({ status: "paid", paidOn: day, paidBy: u.email, paidRef })
+    .where(and(mine, eq(expenseReports.status, "submitted"))).returning({ id: expenseReports.id });
+  if (flipped.length === 0) return { error: `"${report.title || "That claim"}" is no longer awaiting payout - reload and try again` };
+  try {
+    await postReportPaid({ report: paid, cents: total, orgId: wo?.orgId ?? report.orgId, by: u.email });
+  } catch (e) {
+    // The books refused (a closed month, say): put the claim back as it was.
+    await db.update(expenseReports)
+      .set({ status: "submitted", paidOn: report.paidOn, paidBy: report.paidBy, paidRef: report.paidRef })
+      .where(mine);
+    return ledgerRefusal(e);
+  }
+  await audit({
+    actor: u.email, entityType: "expense_report", entityId: report.id, tenantOrgId: report.tenantOrgId,
+    action: `paid ${report.person} ${formatCents(total)} for ${rows.length} expense${rows.length === 1 ? "" : "s"}`
+      + (paidRef ? ` (${paidRef})` : "") + `, ${day}` + batch,
+  });
+  revalidatePath(`/money/reimbursements/${report.id}`);
+  return { cents: total };
+}
+
+/** The payout date as the form sent it, or why it can't be used. */
+function payoutDay(raw: string): { day: string } | { error: string } {
+  const day = raw.trim();
+  if (!isIsoDay(day)) return { error: "Pick the date it was paid" };
+  if (day > shopToday()) return { error: "That date is in the future" };
+  return { day };
+}
+
 /**
  * Pay a reimbursement claim.
  *
@@ -758,40 +824,81 @@ export async function payExpenseReport(
   if (!report) return { error: "Not found" };
   if (!houseOf(u, report.tenantOrgId)) return { error: "Not found" };
   if (report.status !== "submitted") return { error: `This report is ${report.status}, not awaiting payout` };
-  const day = data.paidOn.trim();
-  if (!isIsoDay(day)) return { error: "Pick the date it was paid" };
-  if (day > shopToday()) return { error: "That date is in the future" };
+  const when = payoutDay(data.paidOn);
+  if ("error" in when) return when;
   const rows = await db.select().from(expenses).where(eq(expenses.reportId, id));
-  /* The gate the flag exists for. A row the travel rules queried cannot be
-     paid until a person has said so on the record. */
-  const unapproved = rows.filter(needsApproval);
-  if (unapproved.length) {
-    return {
-      error: `${unapproved.length} row${unapproved.length === 1 ? "" : "s"} on this report `
-        + `${unapproved.length === 1 ? "is" : "are"} outside the travel rules and `
-        + `${unapproved.length === 1 ? "has" : "have"} not been approved. Open the report and approve `
-        + `${unapproved.length === 1 ? "it" : "them"}, or send it back.`,
-    };
-  }
-  const total = reportTotalCents(rows);
-  const paidRef = data.reference.trim().slice(0, 120);
-  const paid = { ...report, status: "paid", paidOn: day, paidBy: u.email, paidRef };
-  const [wo] = report.workOrderId === null ? [null]
-    : await db.select({ orgId: workOrders.orgId }).from(workOrders).where(eq(workOrders.id, report.workOrderId));
-  try {
-    await postReportPaid({ report: paid, cents: total, orgId: wo?.orgId ?? report.orgId, by: u.email });
-  } catch (e) { return ledgerRefusal(e); }
-  await db.update(expenseReports).set({ status: "paid", paidOn: day, paidBy: u.email, paidRef })
-    .where(and(eq(expenseReports.id, id), eq(expenseReports.tenantOrgId, report.tenantOrgId as number)));
-  await audit({
-    actor: u.email, entityType: "expense_report", entityId: id, tenantOrgId: report.tenantOrgId,
-    action: `paid ${report.person} ${formatCents(total)} for ${rows.length} expense${rows.length === 1 ? "" : "s"}`
-      + (paidRef ? ` (${paidRef})` : "") + `, ${day}`,
-  });
+  const refusal = unapprovedRefusal(rows);
+  if (refusal) return { error: refusal };
+  const done = await recordReportPaid(u, report, rows, when.day, data.reference.trim().slice(0, 120));
+  if (done.error) return { error: done.error };
   revalidatePath("/money/reimbursements");
-  revalidatePath(`/money/reimbursements/${id}`);
   revMoney();
   return {};
+}
+
+/**
+ * Pay one person everything on the desk for them, in one payout - one
+ * transfer, one confirmation number, every claim marked paid with it.
+ *
+ * Every claim is checked before any is paid: same person (a payout is to
+ * somebody, so two people's claims in one call is refused rather than
+ * pooled), in this house, still awaiting payout, nothing unapproved. Only
+ * then are they recorded, each as its own ledger entry and audit line exactly
+ * as if paid alone, so a claim's own history reads the same either way.
+ *
+ * The confirmation number is required here, unlike a single payout's
+ * reference: it is the one thing that ties several claims to the single
+ * transfer that settled them.
+ */
+export async function payExpenseReports(
+  ids: number[], data: { person: string; paidOn: string; reference: string },
+): Promise<{ error?: string; paid?: number; cents?: number }> {
+  const u = await requireOwner();
+  const unique = [...new Set(ids)].filter((id) => Number.isInteger(id) && id > 0);
+  if (unique.length === 0) return { error: "Nothing to pay" };
+  if (unique.length > 100) return { error: "That is more claims than one payout should cover" };
+  const person = data.person.trim();
+  const when = payoutDay(data.paidOn);
+  if ("error" in when) return when;
+  const paidRef = data.reference.trim().slice(0, 120);
+  if (!paidRef) return { error: "Enter the confirmation number for the payout" };
+
+  const reports = await db.select().from(expenseReports).where(inArray(expenseReports.id, unique));
+  if (reports.length !== unique.length || reports.some((r) => !houseOf(u, r.tenantOrgId))) return { error: "Not found" };
+  if (reports.some((r) => r.person !== person)) {
+    return { error: "Those claims are not all one person's - pay each person separately" };
+  }
+  const stale = reports.find((r) => r.status !== "submitted");
+  if (stale) return { error: `"${stale.title || "A claim"}" is ${stale.status}, not awaiting payout - reload and try again` };
+  const rows = await db.select().from(expenses).where(inArray(expenses.reportId, unique));
+  const rowsOf = (id: number) => rows.filter((r) => r.reportId === id);
+  for (const r of reports) {
+    const refusal = unapprovedRefusal(rowsOf(r.id), `"${r.title || "a claim"}"`);
+    if (refusal) return { error: refusal };
+  }
+
+  const total = reports.reduce((sum, r) => sum + reportTotalCents(rowsOf(r.id)), 0);
+  const batch = reports.length > 1 ? ` - one payout of ${formatCents(total)} covering ${reports.length} claims` : "";
+  let paid = 0, cents = 0;
+  for (const r of reports) {
+    const done = await recordReportPaid(u, r, rowsOf(r.id), when.day, paidRef, batch);
+    if (done.error) {
+      revalidatePath("/money/reimbursements");
+      revMoney();
+      // Say exactly where it stopped: the ones before this are recorded, and
+      // paying again picks up the rest - the paid ones are no longer offered.
+      return {
+        error: paid === 0 ? done.error
+          : `Recorded ${paid} of ${reports.length} (${formatCents(cents)}), then stopped: ${done.error}`,
+        paid, cents,
+      };
+    }
+    paid++;
+    cents += done.cents ?? 0;
+  }
+  revalidatePath("/money/reimbursements");
+  revMoney();
+  return { paid, cents };
 }
 
 /**

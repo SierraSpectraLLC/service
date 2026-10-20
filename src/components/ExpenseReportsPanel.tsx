@@ -7,9 +7,9 @@ import {
   createExpenseReport, logMyExpense, returnExpenseReport,
   withdrawExpenseReport,
 } from "@/app/actions";
-import { payExpenseReport } from "@/app/money/actions";
+import { payExpenseReport, payExpenseReports } from "@/app/money/actions";
 import {
-  checkReportTitle, deskReports, filedUnder, NO_JOB, parseReportTarget, REPORT_LABEL, REPORT_TONE, reportPeople, reportSpan, reportTitle, reportTotalCents,
+  checkReportTitle, deskReports, filedUnder, NO_JOB, parseReportTarget, payoutGroups, REPORT_LABEL, REPORT_TONE, reportPeople, reportSpan, reportTitle, reportTotalCents,
 } from "@/lib/expenseReports";
 import { formatCents } from "@/lib/money";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
@@ -116,6 +116,11 @@ export default function ExpenseReportsPanel({
   const [addErr, setAddErr] = useState("");
   const [payDraft, setPayDraft] = useState({ paidOn: "", reference: "" });
   const [payErr, setPayErr] = useState("");
+  /* Paying one person everything they are owed at once: one transfer, one
+     confirmation number, every claim of theirs on the desk marked with it. */
+  const [payingAll, setPayingAll] = useState<{ person: string; claims: ReportRow[]; cents: number } | null>(null);
+  const [allDraft, setAllDraft] = useState({ paidOn: "", reference: "" });
+  const [allErr, setAllErr] = useState("");
   const [who, setWho] = useState("");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -134,6 +139,7 @@ export default function ExpenseReportsPanel({
   /* The shop's claims, split the way they get asked about. One authority, so
      this panel and the tests behind it cannot drift. */
   const desk = useMemo(() => deskReports(queue), [queue]);
+  const payouts = useMemo(() => payoutGroups(desk.awaiting), [desk.awaiting]);
   const everyone = useMemo(() => reportPeople(queue), [queue]);
   const byWho = (rows: ReportRow[]) => (who ? rows.filter((r) => r.person === who) : rows);
 
@@ -248,7 +254,35 @@ export default function ExpenseReportsPanel({
             hint={isOwner
               ? "Claims that have been handed to you. Marking one paid records the payout - the check or payroll run happens where it happens."
               : "Claims that have been handed to the owner. Open one to check it; the owner marks it paid."}>
-            {byWho(desk.awaiting).map((r) => reportCard(r, "queue"))}
+            {/* One group per person, never pooled: a payout is to somebody, and
+                Bill's total and Adam's are two transfers, not one. */}
+            {payouts.filter((g) => !who || g.person === who).map((g) => (
+              <div key={g.person}>
+                {g.claims.length > 1 && (
+                  <div style={{
+                    display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+                    padding: "10px 0 6px", borderTop: "1px solid var(--line)",
+                  }}>
+                    <span className="t-lead" style={{ fontWeight: 800 }}>{g.person}</span>
+                    <span className="mut t-body">
+                      {g.claims.length} claims
+                      {g.waiting > 0 && ` · ${g.waiting} waiting on approval`}
+                    </span>
+                    {isOwner && g.payable.length > 0 && (
+                      <button className="btn sm accent" style={{ marginLeft: "auto" }} disabled={pending}
+                        onClick={() => {
+                          setAllDraft({ paidOn: today, reference: "" }); setAllErr("");
+                          setPayingAll({ person: g.person, claims: g.payable, cents: g.payableCents });
+                        }}>
+                        Pay all {formatCents(g.payableCents)}
+                        {g.waiting > 0 ? ` (${g.payable.length} of ${g.claims.length})` : ""}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {g.claims.map((r) => reportCard(r, "queue"))}
+              </div>
+            ))}
             {byWho(desk.awaiting).length === 0 && (
               <div className="mut t-small">Nothing waiting on a check.</div>
             )}
@@ -508,6 +542,64 @@ export default function ExpenseReportsPanel({
                 {workOrders.map((w) => <option key={w.id} value={String(w.id)}>{w.label}</option>)}
               </select>
             </div>
+          </div>
+        </Dialog>
+      )}
+
+      {payingAll && (
+        <Dialog open onClose={() => setPayingAll(null)} size="sm"
+          title={`Pay ${payingAll.person} ${formatCents(payingAll.cents)}`}
+          context={`${payingAll.claims.length} claim${payingAll.claims.length === 1 ? "" : "s"} in one payout`}
+          footer={
+            <>
+              <DialogStatus error={allErr}
+                problem={!allDraft.paidOn ? "pick the date" : !allDraft.reference.trim() ? "enter the confirmation number" : null} />
+              <button className="btn" onClick={() => setPayingAll(null)} disabled={pending}>Cancel</button>
+              <button className="btn accent" disabled={pending || !allDraft.paidOn || !allDraft.reference.trim()}
+                onClick={() => startTransition(async () => {
+                  const res = await payExpenseReports(payingAll.claims.map((r) => r.id), {
+                    person: payingAll.person, ...allDraft,
+                  });
+                  if (res?.error) { setAllErr(res.error); return; }
+                  toast({ message: `Recorded ${formatCents(res.cents ?? payingAll.cents)} to ${payingAll.person} for ${res.paid} claim${res.paid === 1 ? "" : "s"}` });
+                  setPayingAll(null);
+                })}>
+                {pending ? "Recording..." : `Record ${formatCents(payingAll.cents)}`}
+              </button>
+            </>
+          }>
+          {/* What the number covers, so the total is checked against the
+              claims before anybody types a confirmation number into it. */}
+          <div style={{ marginBottom: 10 }}>
+            {payingAll.claims.map((r) => (
+              <div key={r.id} className="t-small"
+                style={{ display: "flex", gap: 8, padding: "3px 0", borderBottom: "1px solid var(--line)" }}>
+                <span style={{ flex: "1 1 auto", minWidth: 0 }}>{reportTitle(r, r.expenses)}</span>
+                <span className="mut">{reportSpan(r.expenses)}</span>
+                <span style={{ fontWeight: 700 }}>{formatCents(reportTotalCents(r.expenses))}</span>
+              </div>
+            ))}
+            <div className="t-small" style={{ display: "flex", padding: "4px 0", fontWeight: 800 }}>
+              <span style={{ flex: "1 1 auto" }}>Total</span>
+              <span>{formatCents(payingAll.cents)}</span>
+            </div>
+          </div>
+          <div className="pf2">
+            <div>
+              <label>Confirmation number</label>
+              <input value={allDraft.reference} aria-label="Confirmation number" className="mono" autoFocus
+                placeholder="the transfer's confirmation"
+                onChange={(e) => setAllDraft({ ...allDraft, reference: e.target.value })} />
+            </div>
+            <div>
+              <label>Paid on</label>
+              <input type="date" value={allDraft.paidOn} max={today} aria-label="Paid on"
+                onChange={(e) => setAllDraft({ ...allDraft, paidOn: e.target.value })} />
+            </div>
+          </div>
+          <div className="field-hint" style={{ marginTop: 8 }}>
+            Every claim above is marked paid with this number. This records that the money went
+            out - it does not move it.
           </div>
         </Dialog>
       )}
