@@ -5,6 +5,7 @@ import { addProcedure, forkProcedureForModel, updateProcedure } from "@/app/acti
 import Dialog, { DialogStatus, type DialogStep } from "@/components/ui/Dialog";
 import PartNumberField from "./PartNumberField";
 import { RESULT_LABEL, RESULT_TYPES } from "@/lib/checkout";
+import { DEFAULT_COLS } from "@/lib/resultTable";
 import { parseChecklist } from "@/lib/checklist";
 import { QUALIFICATIONS } from "@/lib/gxp";
 import { describeProcedure, type ProcPart } from "@/lib/procedures";
@@ -50,6 +51,8 @@ type Draft = {
   passHint: string; attachReading: boolean; unit: string;
   typicalLow: string; typicalHigh: string;
   prompt: string;
+  /** Table: the point and reading column headings, and the points, one a line. */
+  tableCol1: string; tableCol2: string; tableRows: string;
   /** Legacy prose limits, kept so a not-yet-migrated test round-trips. */
   target: string; tolerancePct: string;
   required: boolean; needsReport: boolean;
@@ -274,6 +277,12 @@ export default function ProcedureDialog({
         unit: draft.unit,
         typicalLow: parseFloat(draft.typicalLow) || undefined,
         typicalHigh: parseFloat(draft.typicalHigh) || undefined,
+      };
+    }
+    if (draft.resultType === "table") {
+      return {
+        columns: [draft.tableCol1, draft.tableCol2],
+        rows: draft.tableRows.split("\n").map((l) => l.trim()).filter(Boolean),
       };
     }
     return { prompt: draft.prompt };
@@ -550,6 +559,30 @@ export default function ProcedureDialog({
                 </>
               )}
 
+              {draft.resultType === "table" && (
+                <>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 140px" }}>
+                      <label>First column</label>
+                      <input value={draft.tableCol1} onChange={(e) => up({ tableCol1: e.target.value })}
+                        placeholder={DEFAULT_COLS[0]} className="t-body" />
+                    </div>
+                    <div style={{ flex: "1 1 180px" }}>
+                      <label>Reading column</label>
+                      <input value={draft.tableCol2} onChange={(e) => up({ tableCol2: e.target.value })}
+                        placeholder={DEFAULT_COLS[1]} className="t-body" />
+                    </div>
+                  </div>
+                  <label style={{ marginTop: 8 }}>Points checked, one a line</label>
+                  <textarea value={draft.tableRows} rows={4} onChange={(e) => up({ tableRows: e.target.value })}
+                    placeholder={"132.9\n172.9\n622.6\n1971.6"} className="mono t-body"
+                    style={{ width: "100%", resize: "vertical" }} />
+                  <div className="mut t-meta" style={{ marginTop: 4 }}>
+                    The tech fills in a reading and Pass / Fail for each, and can add rows. Prints on the service report as a table.
+                  </div>
+                </>
+              )}
+
               {draft.resultType === "note" && (
                 <>
                   <label>Prompt for the tech</label>
@@ -598,6 +631,12 @@ export default function ProcedureDialog({
                       <span className="pill neutral">typically {draft.typicalLow || "?"} to {draft.typicalHigh || "?"}</span>
                     )}
                   </>
+                )}
+                {draft.resultType === "table" && (
+                  <span className="mut t-meta">
+                    {draft.tableCol1 || DEFAULT_COLS[0]} · {draft.tableCol2 || DEFAULT_COLS[1]} · Pass/Fail
+                    {` - ${draft.tableRows.split("\n").filter((l) => l.trim()).length || "no"} points`}
+                  </span>
                 )}
                 {draft.resultType === "note" && (
                   <span className="proc-prevbox" style={{ minWidth: 180 }}>
@@ -937,6 +976,9 @@ function initDraft(
     typicalLow: acc.typicalLow !== undefined ? String(acc.typicalLow) : "",
     typicalHigh: acc.typicalHigh !== undefined ? String(acc.typicalHigh) : "",
     prompt: acc.prompt ?? (isTest && row?.resultType === "note" ? row?.target ?? "" : ""),
+    tableCol1: acc.columns?.[0] ?? DEFAULT_COLS[0],
+    tableCol2: acc.columns?.[1] ?? DEFAULT_COLS[1],
+    tableRows: (acc.rows ?? []).join("\n"),
     target: row?.target ?? "",
     tolerancePct: row?.tolerancePct ?? "",
     required: row?.required ?? false,

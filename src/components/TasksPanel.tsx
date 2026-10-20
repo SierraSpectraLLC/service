@@ -18,6 +18,7 @@ import {
   resultIsRecorded, toleranceBand,
 } from "@/lib/testResult";
 import { checklistProgress } from "@/lib/checklist";
+import { blankTable, parseTable, serializeTable, type ResultTable } from "@/lib/resultTable";
 import MentionBox from "./MentionBox";
 import type { Candidate } from "@/lib/mentions";
 import Dialog from "@/components/ui/Dialog";
@@ -93,6 +94,88 @@ function TaskStateSelect({ task }: { task: Task }) {
 }
 
 /**
+ * A results table as the bench fills it in: a row per point, the reading, and
+ * the verdict. Rows can be added for a point the procedure did not list.
+ */
+function TableEntry({ table, onChange }: { table: ResultTable; onChange: (t: ResultTable) => void }) {
+  const setCell = (i: number, j: number, v: string) =>
+    onChange({ ...table, rows: table.rows.map((r, k) => (k === i ? (r.map((c, m) => (m === j ? v : c)) as ResultTable["rows"][number]) : r)) });
+  const cell = { padding: "3px 4px", borderTop: "1px solid var(--line)" } as const;
+  return (
+    <div style={{ flex: "1 1 100%", overflowX: "auto" }}>
+      <table style={{ borderCollapse: "collapse", width: "100%", maxWidth: 560 }}>
+        <thead>
+          <tr className="t-meta">
+            <th style={{ textAlign: "left", padding: "2px 4px" }}>
+              <input value={table.cols[0]} aria-label="First column heading" className="t-small"
+                onChange={(e) => onChange({ ...table, cols: [e.target.value, table.cols[1]] })} />
+            </th>
+            <th style={{ textAlign: "left", padding: "2px 4px" }}>
+              <input value={table.cols[1]} aria-label="Reading column heading" className="t-small"
+                onChange={(e) => onChange({ ...table, cols: [table.cols[0], e.target.value] })} />
+            </th>
+            <th className="mut" style={{ textAlign: "left", padding: "2px 4px", width: 132 }}>Pass/Fail</th>
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((r, i) => (
+            <tr key={i}>
+              <td style={cell}>
+                <input value={r[0]} onChange={(e) => setCell(i, 0, e.target.value)} aria-label={`Row ${i + 1} point`}
+                  className="mono t-body" />
+              </td>
+              <td style={cell}>
+                <input value={r[1]} onChange={(e) => setCell(i, 1, e.target.value)} aria-label={`Row ${i + 1} reading`}
+                  placeholder="e.g. 6.50E+07" className="mono t-body" />
+              </td>
+              <td style={cell}>
+                <div className="seg" role="group" aria-label={`Row ${i + 1} result`}>
+                  {["Pass", "Fail"].map((v) => (
+                    <button key={v} type="button" aria-pressed={r[2] === v}
+                      onClick={() => setCell(i, 2, r[2] === v ? "" : v)}>{v}</button>
+                  ))}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button type="button" className="btn link" style={{ marginTop: 4 }}
+        onClick={() => onChange({ ...table, rows: [...table.rows, ["", "", ""]] })}>＋ row</button>
+    </div>
+  );
+}
+
+/** A recorded table, read-only. */
+function TableView({ value }: { value: string }) {
+  const t = parseTable(value);
+  if (!t) return <span className="t-body">{value}</span>;
+  const cell = { padding: "2px 8px", borderTop: "1px solid var(--line)" } as const;
+  return (
+    <table className="t-small" style={{ borderCollapse: "collapse", flex: "1 1 100%", maxWidth: 520 }}>
+      <thead>
+        <tr className="mut t-meta">
+          <th style={{ textAlign: "left", padding: "2px 8px" }}>{t.cols[0]}</th>
+          <th style={{ textAlign: "left", padding: "2px 8px" }}>{t.cols[1]}</th>
+          <th style={{ textAlign: "left", padding: "2px 8px" }}>Pass/Fail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {t.rows.map((r, i) => (
+          <tr key={i}>
+            <td className="mono" style={cell}>{r[0]}</td>
+            <td className="mono" style={cell}>{r[1]}</td>
+            <td style={cell}>
+              {r[2] ? <span className={`pill ${r[2] === "Pass" ? "good" : "bad"}`}>{r[2]}</span> : <span className="mut">-</span>}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/**
  * Where the number goes.
  *
  * A test used to be finished with the same checkbox as "tighten the fitting",
@@ -112,6 +195,9 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState(!task.result);
   const [value, setValue] = useState(task.result?.value ?? "");
+  // Table: the grid being filled in, from what was recorded or the procedure's points.
+  const [table, setTable] = useState<ResultTable>(() =>
+    parseTable(task.result?.value) ?? blankTable(parseAcceptance(spec.acceptance)));
   // Measured with structured criteria: one input per distinct unit, joined
   // back into the one stored value string ("0.12 %RSD; 8 nL").
   const [readings, setReadings] = useState<Record<string, string>>(() => {
@@ -129,7 +215,8 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
   const [error, setError] = useState("");
 
   const multiUnit = spec.resultType === "measured" && units.length > 0;
-  const joined = multiUnit
+  const joined = spec.resultType === "table" ? serializeTable(table)
+    : multiUnit
     ? units.map((u) => (readings[u]?.trim() ? `${readings[u].trim()} ${u}` : "")).filter(Boolean).join("; ")
     : value;
   // The limits as a sentence: structured criteria first, the legacy band else.
@@ -188,7 +275,9 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
             {r.passed === true ? "Pass" : r.passed === false ? "Fail"
               : /^(inspected|replaced)$/i.test(r.value) ? r.value : "Recorded"}
           </span>
-          {!/^(inspected|replaced)$/i.test(r.value) && <span className="t-body" style={{ fontWeight: 600 }}>{r.value}</span>}
+          {spec.resultType === "table"
+            ? <TableView value={r.value} />
+            : !/^(inspected|replaced)$/i.test(r.value) && <span className="t-body" style={{ fontWeight: 600 }}>{r.value}</span>}
           {band && <span className="mut t-meta">of {band}</span>}
           {r.note && <span className="mut t-small">- {r.note}</span>}
           <span className="mut t-meta" style={{ marginLeft: "auto" }}>
@@ -227,6 +316,8 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
                 <span className="mut t-small">{u}</span>
               </span>
             ))
+          ) : spec.resultType === "table" ? (
+            <TableEntry table={table} onChange={setTable} />
           ) : spec.resultType === "note" ? (
             <textarea value={value} onChange={(e) => setValue(e.target.value)} rows={2}
               aria-label="What you found"
@@ -249,7 +340,10 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
           <button className="btn sm accent" disabled={pending || !resultIsRecorded(spec.resultType, joined)} onClick={save}>
             {pending ? "Recording..." : "Record"}
           </button>
-          {r && <button className="btn sm" onClick={() => { setEditing(false); setValue(r.value); setNote(r.note); setError(""); }}>Cancel</button>}
+          {r && <button className="btn sm" onClick={() => {
+            setEditing(false); setValue(r.value); setNote(r.note); setError("");
+            setTable(parseTable(r.value) ?? blankTable(acc));
+          }}>Cancel</button>}
           {/* The verdict before it is committed, so a bad reading is obvious
               while the instrument is still in front of you. */}
           {live.why && live.passed !== null && (
@@ -463,7 +557,11 @@ export default function TasksPanel({
               {/* For a pass/fail the value IS the verdict, so printing both
                   read "fail Fail". The verdict word alone for those; for a
                   measurement the number, with its verdict when there is one. */}
-              {t.result ? (t.result.passed === true ? (/^pass$/i.test(t.result.value) ? "Pass" : `pass ${t.result.value}`)
+              {/* A table's value is the grid itself; the row says how it went. */}
+              {t.result && t.test.resultType === "table"
+                ? (() => { const g = parseTable(t.result.value); const n = g?.rows.length ?? 0;
+                    return t.result.passed === true ? `all ${n} pass` : t.result.passed === false ? `fail · ${n} rows` : `${n} rows`; })()
+                : t.result ? (t.result.passed === true ? (/^pass$/i.test(t.result.value) ? "Pass" : `pass ${t.result.value}`)
                   : t.result.passed === false ? (/^fail$/i.test(t.result.value) ? "Fail" : `fail ${t.result.value}`)
                   : t.result.value)
                 : t.test.resultType === "inspect_replace" ? "outcome needed" : "no result"}
@@ -807,6 +905,7 @@ export default function TasksPanel({
                 <option value="pass_fail">recording pass / fail</option>
                 <option value="measured">recording a measurement</option>
                 <option value="note">writing down what was found</option>
+                <option value="table">filling in a results table</option>
               </select>
             </span>
             )}

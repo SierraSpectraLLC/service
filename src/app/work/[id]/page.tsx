@@ -5,7 +5,7 @@ import { db } from "@/db";
 import {
   appSettings, assets, attachments, auditLog, checklistItems, expenseCategories, instruments, itemNotes, orgs, orgSites, parts, poLines,
   purchaseOrders, taskNotes, tasks, timeEntries, vocabTerms, workOrders, workOrderNotes, expenses, agreements,
-  rateCards, quotes,
+  rateCards, quotes, serviceReports,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
@@ -21,7 +21,8 @@ import { PO_LABEL, PO_TONE, poTotals } from "@/lib/po";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { storeQuota } from "@/lib/storeUsage";
 import { getSystemLabels, systemLabel } from "@/lib/systemLabel";
-import { bookingSpan, dueDay, moverOf, severityOf, WO_LABEL, WO_TONE, woAcceptsWork, woLate, woLive, woOpen } from "@/lib/workOrders";
+import { bookingSpan, dueDay, moverOf, severityOf, stepKindOf, stepsDone, WO_LABEL, WO_TONE, woAcceptsWork, woLate, woLive, woOpen } from "@/lib/workOrders";
+import WorkStepsPanel from "@/components/WorkStepsPanel";
 import ActivityFeed from "@/components/ActivityFeed";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import HoursPanel from "@/components/HoursPanel";
@@ -397,6 +398,26 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     orgId: wo.orgId, tenantOrgId: wo.tenantOrgId,
   });
 
+  /*
+   * The job above this one, when this is a step of it, and the steps below it
+   * when it has some. Steps inherit the parent's record, so whoever can see
+   * this job can see them - but the parent is checked against its own record
+   * all the same, in case somebody moved one and not the other.
+   */
+  const [parentRow] = wo.parentId === null ? [null]
+    : await db.select({ id: workOrders.id, number: workOrders.number, title: workOrders.title })
+        .from(workOrders).where(eq(workOrders.id, wo.parentId));
+  const stepRows = wo.parentId === null
+    ? await db.select().from(workOrders).where(eq(workOrders.parentId, woId)).orderBy(asc(workOrders.id))
+    : [];
+  const stepReports = staff && stepRows.length
+    ? await db.select({ id: serviceReports.id, number: serviceReports.number, issuedOn: serviceReports.issuedOn, workOrderId: serviceReports.workOrderId })
+        .from(serviceReports).where(inArray(serviceReports.workOrderId, stepRows.map((r) => r.id)))
+        .orderBy(desc(serviceReports.id))
+    : [];
+  const stepCount = stepsDone(stepRows);
+  const showSteps = wo.parentId === null && (stepRows.length > 0 || (staff && canAdd));
+
   const panelLayout = await getUiLayout("workorder");
   const openTasksH = taskRows.filter((t) => t.state !== "Done").length;
   const heroStats: HeroStat[] = [
@@ -411,6 +432,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     // The days committed, beside the state: "when are you coming" is the
     // question the job's page gets asked, by the client and by the shop.
     ...(wo.bookedOn && woLive(wo.state) ? [{ value: bookingSpan(wo), label: "on site", tone: "info" as const }] : []),
+    ...(stepCount.total ? [{ value: `${stepCount.done}/${stepCount.total}`, label: "steps done" }] : []),
     ...(openTasksH ? [{ value: openTasksH, label: `open task${openTasksH === 1 ? "" : "s"}` }] : []),
     ...(minutes ? [{ value: formatHours(minutes), label: "logged" }] : []),
   ];
@@ -418,11 +440,17 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
   return (
     <div className="container page">
       <div className="crumb">
-        <Link href="/work" style={{ textDecoration: "none", color: "inherit" }}>Work orders</Link> › <b>{wo.number}</b>
+        <Link href="/work" style={{ textDecoration: "none", color: "inherit" }}>Work orders</Link> ›{" "}
+        {parentRow && (
+          <><Link href={`/work/${parentRow.id}`} style={{ textDecoration: "none", color: "inherit" }}>{parentRow.number}</Link> ›{" "}</>
+        )}
+        <b>{wo.number}</b>
       </div>
 
       <RecordHero
-        eyebrow={<>Asked by {askedBy}{wo.requestedBy ? ` · ${wo.requestedBy}` : ""}</>}
+        eyebrow={parentRow
+          ? <>{stepKindOf(wo.stepKind)?.label ?? "Step"} · step of {parentRow.number} - {parentRow.title}</>
+          : <>Asked by {askedBy}{wo.requestedBy ? ` · ${wo.requestedBy}` : ""}</>}
         id={wo.number}
         title={wo.title}
         meta={`opened ${wo.openedOn}${wo.assignee ? ` · with ${wo.assignee}` : " · nobody assigned"}`}
@@ -482,7 +510,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         viewKey="workorder"
         saved={panelLayout}
         defaultRight={[]}
-        pinned={["job"]}
+        pinned={showSteps ? ["job", "steps"] : ["job"]}
         groups={[
           { key: "work", label: "Work", keys: [...(modules.discussions ? ["notes"] : []), "tasks", "parts", "hours"],
             badge: openTasksH || undefined,
@@ -492,6 +520,20 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           { key: "history", label: "History", keys: ["activity"] },
         ]}
         panels={[
+          ...(showSteps ? [{ key: "steps", label: `Steps${stepCount.total ? ` · ${stepCount.done}/${stepCount.total} done` : ""}`, node: (
+      <WorkStepsPanel
+        parentId={wo.id} parentNumber={wo.number}
+        canAdd={staff && canAdd} people={directoryNames(people)}
+        steps={stepRows.map((st) => ({
+          id: st.id, number: st.number, title: st.title,
+          kindLabel: stepKindOf(st.stepKind)?.label ?? "Step",
+          stateLabel: WO_LABEL[st.state] ?? st.state,
+          tone: WO_TONE[st.state] ?? WO_TONE.open,
+          assignee: st.assignee,
+          reports: stepReports.filter((r) => r.workOrderId === st.id),
+        }))}
+      />
+          ) }] : []),
           { key: "job", label: "The job", node: (
       <div className="card">
         {entFlag && (

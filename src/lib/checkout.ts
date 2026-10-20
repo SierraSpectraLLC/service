@@ -9,13 +9,15 @@
 // before any asset is attached.
 
 export const CHECKOUT_KINDS = ["task", "test"] as const;
-export const RESULT_TYPES = ["pass_fail", "measured", "reading", "note"] as const;
+export const RESULT_TYPES = ["pass_fail", "measured", "reading", "note", "table"] as const;
 
 export const RESULT_LABEL: Record<string, string> = {
   pass_fail: "Pass / Fail",
   measured: "Measured value",
   reading: "Reading",
   note: "Note",
+  // Several points, each read and judged - a tune check's masses. lib/resultTable.
+  table: "Results table",
   // Task outcome, not a test type: "inspect and/or replace X" closes as one
   // or the other, recorded. See lib/testResult.
   inspect_replace: "Inspected / Replaced",

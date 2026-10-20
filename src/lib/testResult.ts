@@ -11,8 +11,10 @@
 // the browser did - a reading is a claim about an instrument and the record of
 // it must not depend on which side of the wire evaluated it.
 
+import { tableIsRecorded, tableVerdict } from "@/lib/resultTable";
+
 export type ResultSpec = {
-  resultType: string;            // pass_fail | measured | reading | note
+  resultType: string;            // pass_fail | measured | reading | note | table
   target: string | null;         // the value it should read, e.g. "5 mL/min"
   tolerancePct: string | null;   // allowed deviation, percent of target
   /** The structured spec (JSON, see Acceptance). "" or absent = legacy prose. */
@@ -52,6 +54,10 @@ export type Acceptance = {
   typicalHigh?: number;
   /** Note: the prompt the tech answers. */
   prompt?: string;
+  /** Table: the headings of the point and reading columns ("Mass (Da)", "m/z Intensity Measured"). */
+  columns?: string[];
+  /** Table: the points every run checks, in order ("132.9", "172.9"...). See lib/resultTable. */
+  rows?: string[];
 };
 
 const num = (v: unknown): number | undefined => {
@@ -90,6 +96,12 @@ export function parseAcceptance(raw: string | null | undefined): Acceptance {
     if (lo !== undefined) a.typicalLow = lo;
     if (hi !== undefined) a.typicalHigh = hi;
     if (typeof v.prompt === "string" && v.prompt.trim()) a.prompt = v.prompt.trim();
+    const strs = (x: unknown, n: number) => Array.isArray(x)
+      ? x.map((y) => String(y ?? "").trim().slice(0, 60)).filter(Boolean).slice(0, n) : [];
+    const columns = strs(v.columns, 2);
+    if (columns.length) a.columns = columns;
+    const rows = strs(v.rows, 40);
+    if (rows.length) a.rows = rows;
     return a;
   } catch {
     return {};
@@ -187,6 +199,7 @@ export function resultIsRecorded(resultType: string, value: string): boolean {
   if (resultType === "pass_fail") return /^(pass|fail)$/i.test(v);
   if (resultType === "inspect_replace") return /^(inspected|replaced)$/i.test(v);
   if (resultType === "measured" || resultType === "reading") return firstNumber(v) !== null;
+  if (resultType === "table") return tableIsRecorded(v);
   return true; // note: any text is the record
 }
 
@@ -247,6 +260,9 @@ export function evaluateResult(spec: ResultSpec, value: string): Verdict {
     const ok = got >= lo && got <= hi;
     return { passed: ok, why: `${v} - ${ok ? "within" : "outside"} ${lo} to ${hi}` };
   }
+
+  // A grid of points, each judged by the engineer at the bench.
+  if (spec.resultType === "table") return tableVerdict(v);
 
   // A reading or a note is a record, not a test against anything.
   return { passed: null, why: v };

@@ -2413,6 +2413,18 @@ export const workOrders = pgTable("work_orders", {
   // The restoration project this job serves - the Commission install is a
   // Ridgeline job like any other, and this is how the project finds it.
   restorationProjectId: integer("restoration_project_id").references((): AnyPgColumn => restorationProjects.id, { onDelete: "set null" }),
+  /**
+   * The job this one is a STEP of, null for a job in its own right.
+   *
+   * A move is a pre-move validation, the move, and a post-move OQ: three
+   * visits, three signed reports, one job. Each step is an ordinary work order
+   * - its own tasks, hours and paper - numbered off the parent (WO-1002-1) and
+   * filed in the parent's job thread. One level deep; see lib/workOrders.
+   * SET NULL, though deleteWorkOrder refuses a parent that still has steps.
+   */
+  parentId: integer("parent_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
+  /** What kind of step: validation | move | oq | pm | repair | other, '' on a job. */
+  stepKind: text("step_kind").notNull().default(""),
   resolvedAt: timestamp("resolved_at"),
   closedAt: timestamp("closed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -2420,6 +2432,7 @@ export const workOrders = pgTable("work_orders", {
   index("work_orders_instrument_idx").on(t.instrumentId),
   index("work_orders_asset_idx").on(t.assetId),
   index("work_orders_state_idx").on(t.state),
+  index("work_orders_parent_idx").on(t.parentId),
 ]);
 
 /**

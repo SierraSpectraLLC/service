@@ -91,6 +91,14 @@ export type ServiceReport = {
   request: { date: string; from: string; text: string };
   /** Free text with its own small grammar - see drawNotes. */
   notes: { date: string; body: string };
+  /**
+   * What the visit checked off, read off the job's own tasks: the checklist
+   * boxes and readings on the left of the notes box, the results tables on
+   * the right - the layout the sheet's PM pages always had, typed by hand.
+   * Absent on reports issued before the record was drawn; they print as they
+   * always did.
+   */
+  record?: NotesRecord;
   calibration: ReportLine[];
   parts: ReportLine[];
   labor: ReportLine[];
@@ -120,6 +128,15 @@ export type ServiceReport = {
    */
   logo?: Uint8Array;
 };
+
+export type NotesRecord = {
+  /** Left column, in order. A box is a checklist item; a reading is "Title: value OK". */
+  checks: { kind: "heading" | "reading" | "box" | "gap"; text: string; done?: boolean }[];
+  /** Right column: one titled grid per results-table test. */
+  tables: { title: string; cols: [string, string]; rows: [string, string, string][] }[];
+};
+
+const recordEmpty = (rec?: NotesRecord) => !rec || (!rec.checks.some((c) => c.kind !== "gap") && !rec.tables.length);
 
 const money = (cents: number) =>
   `${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -151,11 +168,12 @@ export async function buildServiceReport(r: ServiceReport): Promise<Uint8Array> 
   let y = header(page1, F, r);
   y = await overview(doc, page1, F, r, y);
   y = requestBlock(page1, F, r, y);
-  let left = notesBlock(page1, F, r, y, r.notes.body.split("\n"), false).left;
+  const body = r.notes.body.trim() ? r.notes.body.split("\n") : [];
+  let left = notesBlock(page1, F, r, y, body, false, r.record);
   // A long visit gets more paper rather than a shorter record.
-  while (left.length) {
+  while (left.left.length || !recordEmpty(left.record)) {
     const extra = doc.addPage([PAGE.w, PAGE.h]);
-    left = notesBlock(extra, F, r, header(extra, F, r), left, true).left;
+    left = notesBlock(extra, F, r, header(extra, F, r), left.left, true, left.record);
   }
 
   const page2 = doc.addPage([PAGE.w, PAGE.h]);
@@ -339,7 +357,8 @@ function requestBlock(page: PDFPage, F: Fonts, r: ServiceReport, y: number): num
  */
 function notesBlock(
   page: PDFPage, F: Fonts, r: ServiceReport, y: number, lines: string[], continued: boolean,
-): { left: string[] } {
+  record?: NotesRecord,
+): { left: string[]; record?: NotesRecord } {
   const boxTop = band(page, F, continued ? "Service Engineer Notes (continued)" : "Service Engineer Notes", y);
   let cursor = boxTop - 9.5;
   if (!continued) {
@@ -366,12 +385,93 @@ function notesBlock(
       cursor -= ROW;
     }
   }
+  // The checked-off record goes under the written notes, once they are all down.
+  let rest = record;
+  if (i === lines.length && !recordEmpty(record)) {
+    rest = recordColumns(page, F, record!, lines.length ? cursor - ROW / 2 : cursor, FLOOR);
+  }
   // Down to the floor, not down to the last line.
   page.drawRectangle({
     x: M, y: NOTES_FLOOR, width: RIGHT - M, height: boxTop - NOTES_FLOOR,
     borderColor: RULE, borderWidth: 0.5,
   });
-  return { left: lines.slice(i) };
+  return { left: lines.slice(i), record: recordEmpty(rest) ? undefined : rest };
+}
+
+/** Where the notes box splits: the checks on the left, the tables on the right. */
+const MID = 300;
+
+/** A checkbox the way the sheet prints one: a small square, crossed when done. */
+function box(page: PDFPage, x: number, y: number, done: boolean) {
+  const sz = 6.5;
+  page.drawRectangle({ x, y: y - 0.5, width: sz, height: sz, borderColor: INK, borderWidth: 0.6 });
+  if (done) {
+    page.drawLine({ start: { x: x + 1, y: y + 0.5 }, end: { x: x + sz - 1, y: y + sz - 1.5 }, thickness: 0.7, color: INK });
+    page.drawLine({ start: { x: x + 1, y: y + sz - 1.5 }, end: { x: x + sz - 1, y: y + 0.5 }, thickness: 0.7, color: INK });
+  }
+}
+
+/**
+ * The visit's record in two columns, from `top` down to `floor`.
+ *
+ * Each column runs on until it meets the floor, and whatever did not fit is
+ * handed back for the next sheet - a table split mid-way carries its title and
+ * headings over, so a continued grid still says what it is.
+ */
+function recordColumns(page: PDFPage, F: Fonts, rec: NotesRecord, top: number, floor: number): NotesRecord {
+  const hasTables = rec.tables.length > 0;
+  const leftW = (hasTables ? MID - 8 : RIGHT - 4) - (M + 2);
+
+  // Left: headings, readings, boxes.
+  let cl = top;
+  let ci = 0;
+  for (; ci < rec.checks.length; ci++) {
+    const c = rec.checks[ci];
+    if (c.kind === "gap") { cl -= ROW / 2; continue; }
+    const f = c.kind === "heading" ? F.bold : F.font;
+    const indent = c.kind === "box" ? 10 : 0;
+    const segs = wrap(c.text, f, S.body, leftW - indent);
+    if (cl - (segs.length - 1) * ROW < floor) break;
+    if (c.kind === "box") box(page, M + 2, cl, !!c.done);
+    for (const [n, seg] of segs.entries()) {
+      page.drawText(seg, { x: M + 2 + indent, y: cl, size: S.body, font: f, color: INK });
+      cl -= ROW;
+    }
+  }
+
+  // Right: one grid per table.
+  const x0 = MID + 4, x1 = RIGHT - 4;
+  const w = [0.27, 0.46, 0.27].map((p) => p * (x1 - x0));
+  const xs = [x0, x0 + w[0], x0 + w[0] + w[1], x1];
+  let cr = top + 3;
+  const tablesLeft: NotesRecord["tables"] = [];
+  for (const [ti, t] of rec.tables.entries()) {
+    // A title, its headings and one row, or the table goes over whole.
+    if (tablesLeft.length || cr - 3 * ROW - 2 < floor) { tablesLeft.push(t); continue; }
+    centered(page, t.title, x0, x1, cr - ROW + 3.5, F.bold, S.band);
+    cr -= ROW + 1;
+    page.drawRectangle({ x: x0, y: cr - ROW, width: x1 - x0, height: ROW, color: HEAD });
+    for (const [j, h] of [t.cols[0], t.cols[1], "Pass/Fail"].entries()) {
+      centered(page, h, xs[j], xs[j + 1], cr - ROW + 3.5, F.bold, S.cell);
+    }
+    cr -= ROW;
+    let ri = 0;
+    for (; ri < t.rows.length; ri++) {
+      if (cr - ROW < floor) break;
+      const row = t.rows[ri];
+      for (let j = 0; j < 3; j++) centered(page, row[j] || DASH, xs[j], xs[j + 1], cr - ROW + 3.5, F.font, S.cell);
+      page.drawLine({ start: { x: x0, y: cr - ROW }, end: { x: x1, y: cr - ROW }, thickness: 0.4, color: RULE });
+      cr -= ROW;
+    }
+    if (ri < t.rows.length) tablesLeft.push({ ...t, title: `${t.title} (continued)`, rows: t.rows.slice(ri) });
+    if (ti < rec.tables.length - 1) cr -= ROW / 2;
+  }
+
+  if (hasTables) {
+    // Down to the box's floor, as the sheet rules it, however short the columns run.
+    page.drawLine({ start: { x: MID, y: top + 9 }, end: { x: MID, y: NOTES_FLOOR }, thickness: 0.6, color: INK });
+  }
+  return { checks: rec.checks.slice(ci), tables: tablesLeft };
 }
 
 /** Column geometry shared by the three tables, so their grids line up. */
