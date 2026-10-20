@@ -146,6 +146,41 @@ export function deskReports<T extends DeskReport>(rows: T[]): {
   };
 }
 
+/**
+ * The awaiting claims, one group per person, for paying somebody everything
+ * they are owed in one go.
+ *
+ * Grouped by the exact name on the claim, never pooled: two engineers'
+ * money in one total is a payout nobody can write a single check for. People
+ * keep the order their first claim has on the desk, and each group's claims
+ * keep theirs.
+ *
+ * `payable` is what one payout can cover. A claim the travel rules flagged
+ * waits for its rows to be approved, exactly as it does when paid alone, so
+ * it is counted out here and shown as `waiting` - the total on the button is
+ * the total that will actually be recorded.
+ */
+export type PayoutClaim = DeskReport & { flaggedCount: number; expenses: { amountCents: number }[] };
+export function payoutGroups<T extends PayoutClaim>(awaiting: T[]): {
+  person: string; claims: T[]; payable: T[]; payableCents: number; waiting: number;
+}[] {
+  const by = new Map<string, T[]>();
+  for (const r of awaiting) {
+    if (r.status !== "submitted") continue;
+    const list = by.get(r.person) ?? [];
+    list.push(r);
+    by.set(r.person, list);
+  }
+  return [...by].map(([person, claims]) => {
+    const payable = claims.filter((r) => r.flaggedCount === 0);
+    return {
+      person, claims, payable,
+      payableCents: payable.reduce((sum, r) => sum + reportTotalCents(r.expenses), 0),
+      waiting: claims.length - payable.length,
+    };
+  });
+}
+
 /** Everybody who has a report on this desk, once each, in reading order. */
 export const reportPeople = (rows: DeskReport[]): string[] =>
   [...new Set(rows.map((r) => r.person.trim()).filter(Boolean))]
