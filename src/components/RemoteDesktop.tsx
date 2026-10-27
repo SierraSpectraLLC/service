@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import Dropdown from "@/components/Dropdown";
 import { openRemoteTunnel } from "@/app/actions";
 import type { ViewerCredentials } from "@/lib/remote";
+import { loadEngine, RELAY_SAYS, type MeshRedirect } from "@/components/meshEngine";
+import RemoteFiles from "@/components/RemoteFiles";
 import { GestureRecognizer, HOLD_MS, type GestureAction } from "@/lib/remoteGestures";
 import {
   domButton, keyEventOps, mouseButton, mouseMove, mouseWheel, tapKey, textChange, textOps, VK, vkForChar,
@@ -47,62 +49,7 @@ import {
  * Typing elsewhere on this page must never arrive on somebody's instrument PC.
  */
 
-type MeshDesktop = {
-  State: number;
-  ScreenWidth: number;
-  ScreenHeight: number;
-  onScreenSizeChange: (() => void) | null;
-  send: (bytes: string) => void;
-  SendKeyMsgKC: (action: number, kc: number, extended?: boolean) => void;
-  SendKeyUnicode: (action: number, code: number) => void;
-  SendCtrlAltDelMsg: () => void;
-  SendRefresh: () => void;
-};
-type MeshRedirect = {
-  m: MeshDesktop;
-  State: number;
-  relayBase?: string;
-  attemptWebRTC?: boolean;
-  consoleMessage?: string | null;
-  onStateChanged: ((sender: unknown, state: number) => void) | null;
-  onConsoleMessageChange: (() => void) | null;
-  Start: (nodeId: string) => void;
-  Stop: () => void;
-};
-type MeshWindow = Window & {
-  urlargs?: Record<string, string>;
-  ShortToStr?: (x: number) => string;
-  CreateAgentRemoteDesktop?: (canvas: HTMLCanvasElement, scroll: HTMLElement | null) => MeshDesktop;
-  CreateAgentRedirect?: (
-    server: { send: (o: unknown) => void }, module: MeshDesktop, publicNamePort: string | null,
-    authCookie: string, rauthCookie: string | null, domainUrl: string,
-  ) => MeshRedirect;
-};
-
-const SCRIPTS = [
-  "/vendor/meshcentral/agent-desktop-0.0.2.js",
-  "/vendor/meshcentral/agent-redir-ws-0.1.1.js",
-];
-
-/** Loads a script once per page, resolving on the load event. */
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const found = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
-    if (found?.dataset.loaded === "yes") { resolve(); return; }
-    const el = found ?? document.createElement("script");
-    el.addEventListener("load", () => { el.dataset.loaded = "yes"; resolve(); });
-    el.addEventListener("error", () => reject(new Error("The desktop viewer didn't load.")));
-    if (!found) { el.src = src; document.head.appendChild(el); }
-  });
-}
-
-/** What the transport's states mean to somebody waiting for a desktop. */
-const SAYS: Record<number, string> = {
-  0: "Not connected",
-  1: "Reaching the support host…",
-  2: "Waiting for the machine to answer…",
-  3: "Connected",
-};
+const SAYS = RELAY_SAYS;
 
 type Mode = "touch" | "trackpad";
 const MODE_KEY = "rdesk-mode";
@@ -166,6 +113,7 @@ export default function RemoteDesktop({ deviceId, creds, machineName }: {
   const [mods, setMods] = useState<Modifier[]>([]);
   const [expanded, setExpanded] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
 
   // The view, the remote cursor and the sizes change at touch rate - 60 times a
   // second during a pinch - so they live in refs and are written to the DOM
@@ -193,23 +141,16 @@ export default function RemoteDesktop({ deviceId, creds, machineName }: {
     setError(""); setNote(""); setEverLive(false); setStarted(false);
 
     (async () => {
+      let w;
       try {
-        for (const src of SCRIPTS) await loadScript(src);
+        w = await loadEngine();
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
         return;
       }
       if (cancelled) return;
-
-      const w = window as MeshWindow;
-      // Globals their own pages define and their scripts reach for.
-      if (!w.urlargs) w.urlargs = {};
-      if (!w.ShortToStr) w.ShortToStr = (x: number) => String.fromCharCode((x >> 8) & 0xff, x & 0xff);
       const canvas = canvasRef.current;
-      if (!canvas || !w.CreateAgentRemoteDesktop || !w.CreateAgentRedirect) {
-        setError("The desktop viewer didn't load.");
-        return;
-      }
+      if (!canvas) return;
 
       const module = w.CreateAgentRemoteDesktop(canvas, null);
       // The transport asks "a server" to bring the machine to the relay, by
@@ -773,15 +714,31 @@ export default function RemoteDesktop({ deviceId, creds, machineName }: {
             onClick={toggleKeyboard}>
             <span aria-hidden>⌨</span>
           </button>
-          <span className="seg" role="group" aria-label="Pointer mode">
+          {/* On a phone's width the bar has room for one row, and Files is the
+              control people look for; the mode is chosen once and lives in
+              More there (below). */}
+          <span className="seg rdesk-wide-only" role="group" aria-label="Pointer mode">
             <button type="button" aria-pressed={mode === "touch"} onClick={() => chooseMode("touch")}>Touch</button>
             <button type="button" aria-pressed={mode === "trackpad"} onClick={() => chooseMode("trackpad")}>Trackpad</button>
           </span>
+          {/* On the bar, not in More: somebody who can't find file transfer
+              opens another remote tool to do it, and keeps using that one. */}
+          <button type="button" className="btn sm" aria-pressed={filesOpen}
+            aria-label={filesOpen ? "Hide files" : "Files"} title="Copy files to and from this machine"
+            onClick={() => setFilesOpen((o) => !o)}>
+            <span aria-hidden>📁</span> Files
+          </button>
           <button type="button" className="btn sm" onClick={toggleExpanded}
             aria-label={expanded ? "Exit full screen" : "Full screen"} title={expanded ? "Exit full screen" : "Full screen"}>
             <span aria-hidden>{expanded ? "⤡" : "⤢"}</span>
           </button>
           <Dropdown label="More">
+            <button type="button" className="rdesk-narrow-only" aria-pressed={mode === "touch"} onClick={() => chooseMode("touch")}>
+              {mode === "touch" ? "✓ " : ""}Touch mode - tap where you see it
+            </button>
+            <button type="button" className="rdesk-narrow-only" aria-pressed={mode === "trackpad"} onClick={() => chooseMode("trackpad")}>
+              {mode === "trackpad" ? "✓ " : ""}Trackpad mode - move a cursor
+            </button>
             <button type="button" disabled={!live} onClick={() => sessionRef.current?.redirect.m.SendCtrlAltDelMsg()}>
               Send Ctrl+Alt+Del
             </button>
@@ -796,6 +753,7 @@ export default function RemoteDesktop({ deviceId, creds, machineName }: {
         </span>
       </div>
 
+      <div className="rdesk-body">
       <div
         ref={stageRef}
         className="rdesk-stage"
@@ -880,6 +838,9 @@ export default function RemoteDesktop({ deviceId, creds, machineName }: {
           onCompositionStart={() => { composing.current = true; }}
           onCompositionEnd={() => { composing.current = false; typeChange(); }}
         />
+      </div>
+
+      {filesOpen && <RemoteFiles deviceId={deviceId} machineName={machineName} onClose={() => setFilesOpen(false)} />}
       </div>
 
       {kbOpen && (

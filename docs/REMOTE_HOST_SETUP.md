@@ -592,6 +592,14 @@ controls and verified end to end against a real 1.2.4 server and agent. What
 - **Their mouse encoder is bypassed.** It turns page coordinates into remote
   ones without knowing about our zoom; `lib/remoteInput` writes the same bytes
   from coordinates `lib/remoteView` has already mapped.
+- **Files ride a second relay session** beside the desktop (the engine's
+  protocol 5). The **Files** button on the viewer's toolbar opens it: browse the
+  machine, tap a file to copy it here, upload into the open folder. It gets its
+  own single-use relay cookie (`remoteRelayCredential`) and its own tunnel
+  request (`openRemoteTunnel(..., "files")`), and every file is written to the
+  audit trail before it moves (`recordRemoteFileTransfer`). The consent flags
+  already cover it: unattended machines show a files notice, consent-required
+  ones prompt for it, exactly as for the desktop.
 
 None of this involves the engine's session cookie, so `sessionSameSite` could go
 back to `lax` if the classic view is ever retired.

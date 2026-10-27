@@ -2831,3 +2831,47 @@ table.fc .why { font-size: var(--fs-meta); color: var(--mut); display: block; fo
 .rdesk.expanded .rdesk-status { color: var(--card); }
 .rdesk.expanded .rdesk-stage { border-radius: 0; }
 .rdesk-note { position: absolute; top: 8px; left: 8px; max-width: calc(100% - 90px); white-space: normal; pointer-events: none; }
+
+/* The viewer's body: the desktop, and the machine's files beside it when open.
+   Beside on a desk, so the screen stays in view while files move; over it on a
+   phone, where there is no room for both. */
+.rdesk-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; gap: 6px; }
+.rdesk-body > .rdesk-stage { flex: 1 1 auto; min-width: 0; }
+.rdesk-files {
+  flex: 0 0 360px; display: flex; flex-direction: column; gap: 8px; min-height: 0;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px;
+}
+@media (max-width: 760px) {
+  .rdesk-files { position: absolute; inset: 0; z-index: 3; flex: none; }
+}
+.rdesk-files-head { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
+.rdesk-files-path { font-size: var(--fs-small); overflow-x: auto; white-space: nowrap; line-height: 1.6; padding: 2px 0; flex: none; }
+.rdesk-files-path .btn.link { font-size: var(--fs-small); }
+.rdesk-files-tools { display: flex; gap: 6px; align-items: center; }
+.rdesk-files-list { position: relative; flex: 1 1 auto; min-height: 120px; overflow-y: auto; border-top: 1px solid var(--line); }
+.rdesk-files-list.dropping { outline: 2px dashed var(--sky); outline-offset: -2px; }
+.rdesk-file {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 8px 4px; border: 0; border-bottom: 1px solid var(--line); background: none;
+  font-family: inherit; font-size: var(--fs-body); color: var(--ink); cursor: pointer;
+}
+.rdesk-file:hover { background: var(--bg); }
+.rdesk-file:focus-visible { outline: 2px solid var(--sky); outline-offset: -2px; }
+.rdesk-file-icon { flex: none; }
+.rdesk-file-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rdesk-file-meta { flex: none; }
+.rdesk-file-go { flex: none; color: var(--link); font-weight: 700; }
+.rdesk-files-drop {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: var(--t-info-bg); color: var(--t-info-fg); font-weight: 700; font-size: var(--fs-body); pointer-events: none;
+}
+.rdesk-files-clash { padding: 8px 10px; }
+.rdesk-files-transfers { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+.rdesk-transfer progress { width: 100%; height: 6px; }
+/* The pointer-mode switch: on the bar where there is room, in More where there
+   is not (RemoteDesktop). */
+.rdesk-narrow-only { display: none; }
+@media (max-width: 480px) {
+  .rdesk-wide-only { display: none !important; }
+  .menu-panel .rdesk-narrow-only { display: block; }
+}

@@ -36,9 +36,14 @@ upgrade:
 - **Keys go through `SendKeyMsgKC` and `SendKeyUnicode`** directly, never through
   `handleKeyDown`, which reads a global `desktop` their page defines and ours
   does not.
-- **Two globals are provided by the viewer**, because their scripts reach for
-  them: `urlargs` (an empty object) and `ShortToStr` (two bytes, big-endian),
-  which lives in a file of theirs we don't vendor.
+- **Globals are provided by the viewer** (`src/components/meshEngine.ts`),
+  because their scripts reach for them: `urlargs` (an empty object),
+  `ShortToStr` (two bytes, big-endian), and `encode_utf8`/`decode_utf8`, which
+  the transport's `sendText` calls - all from files of theirs we don't vendor.
+- **The files panel uses the transport without the decoder.** Its session
+  module is a plain object with `protocol: 5` and `ProcessData`, as the
+  engine's own console builds one (`CreateRemoteFiles` in default.handlebars);
+  the commands and block framing are `src/lib/remoteFiles.ts`.
 - **The "server" handed to `CreateAgentRedirect`** is a stub whose `send` passes
   the tunnel request to the portal, which makes it from the server side. See
   `docs/REMOTE_HOST_SETUP.md`, "The in-portal viewer".

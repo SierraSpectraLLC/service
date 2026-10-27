@@ -598,7 +598,7 @@ export type ViewerCredentials = {
  * What the browser needs to put a desktop on our own canvas: where the relay
  * is, and a credential for our end of it. Nothing else - in particular not the
  * control channel, which is ours and stays on the server (see
- * requestDesktopTunnel for why).
+ * requestRemoteTunnel for why).
  *
  * relayAuth is `{userid, domainid}` and must carry NO `expire`. The relay
  * (meshrelay.js, CreateMeshRelayEx in 1.2.4) compares a cookie's `expire`
@@ -633,9 +633,14 @@ const fullNodeId = (id: string) => (id.includes("/") ? id : `node//${id}`);
 /** The id the engine's relay transport gives a session: Math.random in base 36. */
 export const isTunnelId = (id: string) => /^[0-9a-z]{4,40}$/.test(id);
 
+/** What a relay session carries: the engine's protocol numbers for the two we use. */
+export const TUNNEL_PROTOCOL = { desktop: 2, files: 5 } as const;
+export type TunnelKind = keyof typeof TUNNEL_PROTOCOL;
+
 /**
  * Ask the agent to come to the relay and meet the browser that is waiting at
- * `tunnelId` - the step that actually starts a desktop session.
+ * `tunnelId` - the step that actually starts a session, of the desktop or of
+ * the machine's files.
  *
  * Done from here rather than from the browser, for two reasons:
  *
@@ -650,7 +655,9 @@ export const isTunnelId = (id: string) => /^[0-9a-z]{4,40}$/.test(id);
  *     relay refuses the agent as unauthenticated and the browser waits for a
  *     machine that already tried. Minted here, it never reaches a browser.
  */
-export async function requestDesktopTunnel(nodeId: string, tunnelId: string): Promise<{ error?: string }> {
+export async function requestRemoteTunnel(
+  nodeId: string, tunnelId: string, kind: TunnelKind = "desktop",
+): Promise<{ error?: string }> {
   const cfg = remoteConfig();
   if (!cfg) return { error: NOT_CONFIGURED };
   if (!nodeId) return { error: "That machine has no node id yet." };
@@ -660,10 +667,11 @@ export async function requestDesktopTunnel(nodeId: string, tunnelId: string): Pr
     const agentAuth = encodeEngineCookie(
       { ruserid: engineUserId(cfg.adminUser), expire: Math.ceil(CONNECT_TTL_SECONDS / 60) }, cfg.loginKey,
     );
-    // p=2 is the desktop. The leading `*` tells the agent "the server you are
-    // already talking to", so the relay address never has to be spelled out.
-    const value = `*/meshrelay.ashx?p=2&nodeid=${node}&id=${tunnelId}&rauth=${agentAuth}`;
-    await engineCall(cfg, "msg", { type: "tunnel", nodeid: node, value, usage: 2 });
+    // The leading `*` tells the agent "the server you are already talking
+    // to", so the relay address never has to be spelled out.
+    const p = TUNNEL_PROTOCOL[kind];
+    const value = `*/meshrelay.ashx?p=${p}&nodeid=${node}&id=${tunnelId}&rauth=${agentAuth}`;
+    await engineCall(cfg, "msg", { type: "tunnel", nodeid: node, value, usage: p });
     return {};
   } catch (e) {
     const why = (e as Error).message;
