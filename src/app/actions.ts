@@ -105,10 +105,11 @@ import { accountReady, checkoutSession, connectAuthorizeUrl, signConnectState, s
 import { cleanBody, messageableFrom } from "@/lib/messages";
 import { QUALIFICATIONS, DOC_TYPES, SIG_ROLES, canApprove, canDelete, canExecute, canRevokeApproval, isProtocol } from "@/lib/gxp";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
+import { formatSize } from "@/lib/remoteFiles";
 import { cleanNickname, deviceLabel } from "@/lib/deviceName";
 import {
   agentInstallerLink, applyDeviceConsent, connectUrl, deviceWithOrg, ensureOrgGroup, NOT_CONFIGURED,
-  isTunnelId, remoteConfigured, requestDesktopTunnel, viewerCredentials, type ViewerCredentials,
+  isTunnelId, remoteConfigured, requestRemoteTunnel, viewerCredentials, type TunnelKind, type ViewerCredentials,
 } from "@/lib/remote";
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
@@ -6672,25 +6673,77 @@ export async function connectRemoteDevice(
 
 /**
  * The in-portal viewer's second step: it is waiting at the relay under
- * `tunnelId`, and this asks the machine to come and meet it. Called by the
- * viewer, so it is a public endpoint like any action - which is why it passes
- * the same gate as the page did, rather than trusting that the page was
- * loaded first.
+ * `tunnelId`, and this asks the machine to come and meet it - for the
+ * desktop, or for the machine's files. Called by the viewer, so it is a
+ * public endpoint like any action - which is why it passes the same gate as
+ * the page did, rather than trusting that the page was loaded first.
  *
  * Audited separately from the page's "opened a remote session": that line
- * records the decision and the consent mode; this one records that a desktop
- * was actually asked for, and how many times - a reconnect is another line.
+ * records the decision and the consent mode; this one records what was
+ * actually reached for, and how many times - a reconnect is another line.
  */
-export async function openRemoteTunnel(deviceId: number, tunnelId: string): Promise<{ error?: string }> {
+export async function openRemoteTunnel(
+  deviceId: number, tunnelId: string, kind: TunnelKind = "desktop",
+): Promise<{ error?: string }> {
   const gate = await remoteConnectGate(deviceId);
   if ("error" in gate) return gate;
   const { u, device } = gate;
   if (!isTunnelId(tunnelId)) return { error: "That isn't a session this viewer started." };
+  if (kind !== "desktop" && kind !== "files") return { error: "Not a kind of session this viewer opens." };
   await audit({
     actor: u.email, instrumentId: device.instrumentId, entityType: "remote", entityId: device.id,
-    action: `connected to the desktop of ${device.name || "a machine"}`,
+    action: kind === "files"
+      ? `opened the files on ${device.name || "a machine"}`
+      : `connected to the desktop of ${device.name || "a machine"}`,
   });
-  return requestDesktopTunnel(device.nodeId, tunnelId);
+  return requestRemoteTunnel(device.nodeId, tunnelId, kind);
+}
+
+/**
+ * A fresh relay credential for another session beside the desktop - the
+ * files panel, which runs its own relay pipe and may be opened and closed
+ * many times in one visit. The page's own credential is single-use and is
+ * spent by the desktop.
+ *
+ * Gated like the session itself; not audited, because minting is not
+ * reaching anything (an unused credential is a non-event, as in
+ * connectRemoteDevice). The audit line is written when the tunnel is asked
+ * for, and per file when one moves.
+ */
+export async function remoteRelayCredential(deviceId: number): Promise<{ error?: string; viewer?: ViewerCredentials }> {
+  const gate = await remoteConnectGate(deviceId);
+  if ("error" in gate) return gate;
+  const viewer = viewerCredentials(gate.device.nodeId);
+  return "error" in viewer ? viewer : { viewer };
+}
+
+/**
+ * Write down that a file is about to cross between the engineer's device and
+ * a customer's machine - BEFORE it does, the order the rest of this module
+ * keeps: decide, write it down, then act. The viewer will not start a
+ * transfer this refuses.
+ *
+ * What it records is what the viewer says it is about to move; the bytes go
+ * browser <-> relay <-> agent and never past us. The engine keeps its own
+ * log of the same transfer on the far side.
+ */
+export async function recordRemoteFileTransfer(
+  deviceId: number, data: { direction: "download" | "upload"; path: string; size: number },
+): Promise<{ error?: string }> {
+  const gate = await remoteConnectGate(deviceId);
+  if ("error" in gate) return gate;
+  const { u, device } = gate;
+  if (data.direction !== "download" && data.direction !== "upload") return { error: "Not a transfer" };
+  const path = String(data.path ?? "").trim().slice(0, 500);
+  if (!path) return { error: "Which file?" };
+  const size = Number.isFinite(data.size) && data.size >= 0 ? Math.floor(data.size) : 0;
+  await audit({
+    actor: u.email, instrumentId: device.instrumentId, entityType: "remote", entityId: device.id,
+    action: data.direction === "download"
+      ? `copied ${path} (${formatSize(size)}) from ${device.name || "a machine"}`
+      : `copied ${path} (${formatSize(size)}) to ${device.name || "a machine"}`,
+  });
+  return {};
 }
 
 // ---------------- Work orders ----------------

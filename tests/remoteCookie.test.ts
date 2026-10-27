@@ -231,7 +231,7 @@ describe("the in-portal viewer's credentials", () => {
   });
 
   it("hands the browser nothing that opens the admin channel", () => {
-    // The control channel stays server-side (requestDesktopTunnel). A login
+    // The control channel stays server-side (requestRemoteTunnel). A login
     // token in the page would be a key to the whole engine.
     const c = creds() as Record<string, unknown>;
     expect(Object.keys(c).sort()).toEqual(["nodeId", "relayAuth", "relayBase"]);
