@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  bytesOf, childPath, crumbs, downloadBlock, encodeCommand, formatSize, parentPath, parseCommand, parseListing,
+  bytesOf, checkFolderName, childPath, crumbs, downloadBlock, encodeCommand, formatSize, parentPath, parseCommand, parseListing,
   safeUploadName, uploadFrame,
 } from "@/lib/remoteFiles";
 
@@ -106,5 +106,29 @@ describe("names and sizes", () => {
     expect(formatSize(1536)).toBe("1.5 KB");
     expect(formatSize(5 * 1024 * 1024)).toBe("5.0 MB");
     expect(formatSize(300 * 1024 * 1024)).toBe("300 MB");
+  });
+});
+
+describe("new folder names", () => {
+  it("takes an ordinary name, trimmed", () => {
+    expect(checkFolderName("  LBA671 data ", [], "windows")).toEqual({ name: "LBA671 data" });
+  });
+
+  it("refuses a path rather than quietly making something else", () => {
+    expect(checkFolderName("reports/2026", [], "unix")).toHaveProperty("error");
+    expect(checkFolderName("..\\up", [], "windows")).toHaveProperty("error");
+    expect(checkFolderName("..", [], "unix")).toHaveProperty("error");
+  });
+
+  it("holds Windows to Windows' rules, and nobody else to them", () => {
+    expect(checkFolderName("a:b", [], "windows")).toHaveProperty("error");
+    expect(checkFolderName("trailing.", [], "windows")).toHaveProperty("error");
+    expect(checkFolderName("a:b", [], "unix")).toEqual({ name: "a:b" });
+  });
+
+  it("won't reuse a name already in the folder - without case on Windows", () => {
+    expect(checkFolderName("Data", ["data"], "windows")).toHaveProperty("error");
+    expect(checkFolderName("Data", ["data"], "unix")).toEqual({ name: "Data" });
+    expect(checkFolderName("data", ["data"], "unix")).toHaveProperty("error");
   });
 });

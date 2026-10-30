@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { openRemoteTunnel, recordRemoteFileTransfer, remoteRelayCredential } from "@/app/actions";
+import { openRemoteTunnel, recordRemoteFileTransfer, recordRemoteFolder, remoteRelayCredential } from "@/app/actions";
 import { loadEngine, RELAY_SAYS, type MeshModule, type MeshRedirect } from "@/components/meshEngine";
 import {
-  childPath, crumbs, downloadBlock, encodeCommand, formatSize, parentPath, parseCommand, parseListing,
+  checkFolderName, childPath, crumbs, downloadBlock, encodeCommand, formatSize, parentPath, parseCommand, parseListing,
   safeUploadName, UPLOAD_BLOCK, UPLOAD_PRIMING, uploadFrame, type Flavor, type RemoteEntry,
 } from "@/lib/remoteFiles";
 
@@ -76,6 +76,11 @@ export default function RemoteFiles({ deviceId, machineName, onClose }: {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [clash, setClash] = useState<{ files: File[]; names: string[] } | null>(null);
   const [dragging, setDragging] = useState(false);
+  /** The new-folder field: null while closed. */
+  const [newFolder, setNewFolder] = useState<string | null>(null);
+  const [folderBusy, setFolderBusy] = useState(false);
+  /** A folder just asked for, checked off against the next listing of where it was made. */
+  const madeRef = useRef<{ at: string; name: string } | null>(null);
 
   const redirectRef = useRef<MeshRedirect<MeshModule> | null>(null);
   const reqRef = useRef(0);
@@ -214,6 +219,14 @@ export default function RemoteFiles({ deviceId, machineName, onClose }: {
     }
     if (listing.entries === null) { setEntries([]); setFolderError("That folder can't be opened - it may not exist, or this account can't read it."); return; }
     setEntries(listing.entries);
+    // The agent does not answer a mkdir; the folder showing up is the answer.
+    const made = madeRef.current;
+    if (made && made.at === listing.path) {
+      madeRef.current = null;
+      if (!listing.entries.some((e) => e.name === made.name && e.kind === "folder")) {
+        setFolderError(`Couldn't make "${made.name}" here - this account may not be allowed to write to this folder.`);
+      }
+    }
   }, [finish, list, patch, pump, send]);
 
   // ---------------- The session ----------------
@@ -278,6 +291,26 @@ export default function RemoteFiles({ deviceId, machineName, onClose }: {
     void runNext();
   };
 
+  const folderCheck = newFolder === null ? null
+    : checkFolderName(newFolder, (entries ?? []).map((e) => e.name), flavor ?? "unix");
+
+  /** Written down, then made, then the folder re-read to see that it was. */
+  const makeFolder = async () => {
+    if (!folderCheck || "error" in folderCheck || folderBusy) return;
+    const at = pathRef.current;
+    const target = childPath(at, folderCheck.name, flavorRef.current ?? "unix");
+    setFolderBusy(true);
+    const noted = await recordRemoteFolder(deviceId, target)
+      .catch(() => ({ error: "Couldn't reach the portal to record it." }));
+    setFolderBusy(false);
+    if (noted.error) { setFolderError(noted.error); return; }
+    reqRef.current += 1;
+    send({ action: "mkdir", reqid: reqRef.current, path: target });
+    madeRef.current = { at, name: folderCheck.name };
+    setNewFolder(null);
+    list(at);
+  };
+
   const download = (e: RemoteEntry) =>
     enqueue([{ direction: "download", name: e.name, remote: childPath(pathRef.current, e.name, flavorRef.current ?? "unix"), size: e.size }]);
 
@@ -335,6 +368,11 @@ export default function RemoteFiles({ deviceId, machineName, onClose }: {
             <button type="button" className="btn sm" disabled={atTop}
               onClick={() => { const up = parentPath(path, flavor); if (up !== null) list(up); }}>↑ Up</button>
             <button type="button" className="btn sm" onClick={() => list(path)}>Refresh</button>
+            <button type="button" className="btn sm" disabled={flavor === "windows" && path === ""}
+              title={flavor === "windows" && path === "" ? "Open a drive first" : undefined}
+              onClick={() => { setNewFolder(""); setFolderError(""); }}>
+              New folder
+            </button>
             <button type="button" className="btn sm accent" style={{ marginLeft: "auto" }}
               disabled={flavor === "windows" && path === ""}
               title={flavor === "windows" && path === "" ? "Open a drive first" : undefined}
@@ -345,6 +383,22 @@ export default function RemoteFiles({ deviceId, machineName, onClose }: {
               onChange={(e) => { offer(e.target.files); e.target.value = ""; }} />
           </div>
         </>
+      )}
+
+      {newFolder !== null && (
+        <form className="rdesk-files-new" onSubmit={(e) => { e.preventDefault(); void makeFolder(); }}>
+          <input value={newFolder} autoFocus aria-label="New folder name" placeholder="Folder name"
+            onChange={(e) => setNewFolder(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") setNewFolder(null); }} />
+          <button type="submit" className="btn sm primary"
+            disabled={folderBusy || !folderCheck || "error" in folderCheck}>
+            {folderBusy ? "Making…" : "Make it"}
+          </button>
+          <button type="button" className="btn sm" onClick={() => setNewFolder(null)}>Cancel</button>
+          {newFolder.trim() !== "" && folderCheck && "error" in folderCheck && (
+            <div className="t-meta" style={{ color: "var(--t-bad-fg)", flexBasis: "100%" }}>{folderCheck.error}</div>
+          )}
+        </form>
       )}
 
       {clash && (

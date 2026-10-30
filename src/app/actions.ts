@@ -6718,6 +6718,23 @@ export async function remoteRelayCredential(deviceId: number): Promise<{ error?:
 }
 
 /**
+ * Write down that a folder is about to be made on a customer's machine -
+ * before it is, like every other change the files panel makes there.
+ */
+export async function recordRemoteFolder(deviceId: number, path: string): Promise<{ error?: string }> {
+  const gate = await remoteConnectGate(deviceId);
+  if ("error" in gate) return gate;
+  const { u, device } = gate;
+  const where = String(path ?? "").trim().slice(0, 500);
+  if (!where) return { error: "Which folder?" };
+  await audit({
+    actor: u.email, instrumentId: device.instrumentId, entityType: "remote", entityId: device.id,
+    action: `made the folder ${where} on ${device.name || "a machine"}`,
+  });
+  return {};
+}
+
+/**
  * Write down that a file is about to cross between the engineer's device and
  * a customer's machine - BEFORE it does, the order the rest of this module
  * keeps: decide, write it down, then act. The viewer will not start a

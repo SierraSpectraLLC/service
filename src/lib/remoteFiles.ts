@@ -178,3 +178,26 @@ export function safeUploadName(raw: string): string | null {
   if (!clean || clean === "." || clean === "..") return null;
   return clean.slice(0, 255);
 }
+
+/**
+ * A new folder's name as typed, or why it can't be one. Refused rather than
+ * cleaned, unlike an upload's name: somebody is typing it, and quietly
+ * creating "reports2026" when they typed "reports/2026" makes a folder they
+ * did not ask for. `existing` is what the open folder already holds; Windows
+ * compares without case.
+ */
+export function checkFolderName(
+  raw: string, existing: string[], flavor: Flavor,
+): { name: string } | { error: string } {
+  const name = raw.trim();
+  if (!name) return { error: "Name the folder" };
+  if (name === "." || name === "..") return { error: "That name is taken by the system" };
+  if (/[\\/]/.test(name)) return { error: "A folder name can't contain / or \\" };
+  // eslint-disable-next-line no-control-regex
+  if (flavor === "windows" && /[\u0000-\u001f<>:"|?*]/.test(name)) return { error: "Windows won't take < > : \" | ? * in a name" };
+  if (flavor === "windows" && /[. ]$/.test(name)) return { error: "Windows won't take a name ending in a dot or space" };
+  if (name.length > 255) return { error: "That name is too long" };
+  const norm = (n: string) => (flavor === "windows" ? n.toLowerCase() : n);
+  if (existing.some((e) => norm(e) === norm(name))) return { error: "Something here already has that name" };
+  return { name };
+}
