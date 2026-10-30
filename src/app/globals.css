@@ -2835,19 +2835,30 @@ table.fc .why { font-size: var(--fs-meta); color: var(--mut); display: block; fo
 /* The viewer's body: the desktop, and the machine's files beside it when open.
    Beside on a desk, so the screen stays in view while files move; over it on a
    phone, where there is no room for both. */
-.rdesk-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; gap: 6px; }
+/* The panel is positioned against the body, never sized by its own contents:
+   a folder of 200 files used to stretch the body, the page and the desktop's
+   box with it, so the desktop was refitted into a 6,700px-tall stage and drawn
+   halfway down the page. The body's height comes from the window alone; the
+   panel fills it and scrolls inside, and the desktop gives up the panel's
+   width instead. */
+.rdesk-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; }
 .rdesk-body > .rdesk-stage { flex: 1 1 auto; min-width: 0; }
+.rdesk-body.files-open > .rdesk-stage { margin-right: 368px; }
 .rdesk-files {
-  flex: 0 0 360px; display: flex; flex-direction: column; gap: 8px; min-height: 0;
+  position: absolute; top: 0; right: 0; bottom: 0; width: 360px; z-index: 3;
+  display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: hidden;
   background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px;
 }
 @media (max-width: 760px) {
-  .rdesk-files { position: absolute; inset: 0; z-index: 3; flex: none; }
+  .rdesk-body.files-open > .rdesk-stage { margin-right: 0; }
+  .rdesk-files { left: 0; width: auto; }
 }
 .rdesk-files-head { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
 .rdesk-files-path { font-size: var(--fs-small); overflow-x: auto; white-space: nowrap; line-height: 1.6; padding: 2px 0; flex: none; }
 .rdesk-files-path .btn.link { font-size: var(--fs-small); }
-.rdesk-files-tools { display: flex; gap: 6px; align-items: center; }
+.rdesk-files-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; flex: none; }
+.rdesk-files-new { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; flex: none; }
+.rdesk-files-new input { flex: 1 1 140px; min-width: 0; }
 .rdesk-files-list { position: relative; flex: 1 1 auto; min-height: 120px; overflow-y: auto; border-top: 1px solid var(--line); }
 .rdesk-files-list.dropping { outline: 2px dashed var(--sky); outline-offset: -2px; }
 .rdesk-file {

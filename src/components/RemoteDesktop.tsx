@@ -753,7 +753,7 @@ export default function RemoteDesktop({ deviceId, creds, machineName }: {
         </span>
       </div>
 
-      <div className="rdesk-body">
+      <div className={`rdesk-body${filesOpen ? " files-open" : ""}`}>
       <div
         ref={stageRef}
         className="rdesk-stage"
