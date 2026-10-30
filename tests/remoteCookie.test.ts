@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bareEngineId, connectUrl, decodeEngineCookie, encodeEngineCookie, ENGINE_KEY_HEX_CHARS, engineUserId,
-  createdGroupId, isReplyTo, mintEngineToken, namedGroups, pickExistingGroup, viewerCredentials, isTunnelId,
+  createdGroupId, isReplyTo, mintEngineToken, namedGroups, pickExistingGroup, viewerCredentials, isTunnelId, CONSENT_FLAGS,
 } from "@/lib/remote";
 
 // The remote-support host authenticates the portal by a token it encrypts with a
@@ -251,6 +251,18 @@ describe("the in-portal viewer's credentials", () => {
     expect(isTunnelId("k3j9x0abq1")).toBe(true);
     expect(isTunnelId("abc&rauth=x")).toBe(false);
     expect(isTunnelId("")).toBe(false);
+  });
+});
+
+describe("what the far screen shows", () => {
+  it("shows nothing for an unattended session", () => {
+    // The owner's call: our own machines and systems still on our bench
+    // connect without a popup. 0 removes the device's flags in the engine.
+    expect(CONSENT_FLAGS.unattended).toBe(0);
+  });
+
+  it("still asks first, for all three, wherever consent is required", () => {
+    for (const prompt of [8, 16, 32]) expect(CONSENT_FLAGS.consent & prompt).toBe(prompt);
   });
 });
 
