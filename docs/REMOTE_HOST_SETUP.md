@@ -598,7 +598,7 @@ controls and verified end to end against a real 1.2.4 server and agent. What
   own single-use relay cookie (`remoteRelayCredential`) and its own tunnel
   request (`openRemoteTunnel(..., "files")`), and every file is written to the
   audit trail before it moves (`recordRemoteFileTransfer`). The consent flags
-  already cover it: unattended machines show a files notice, consent-required
+  already cover it: unattended machines connect silently, consent-required
   ones prompt for it, exactly as for the desktop.
 
 None of this involves the engine's session cookie, so `sessionSameSite` could go

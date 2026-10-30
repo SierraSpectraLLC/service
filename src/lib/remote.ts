@@ -53,11 +53,20 @@ export const ENGINE_KEY_HEX_CHARS = ENGINE_KEY_BYTES * 2;
  * What the far end sees. Bits are the engine's, summed: 1/2/4 notify for
  * desktop/terminal/files, 8/16/32 prompt for the same three.
  *
- * `unattended` is notify-only rather than silent on purpose - a bench PC in our
- * own shop still says out loud that somebody is on it, which costs nothing and
- * is the difference between remote support and surveillance.
+ * `unattended` is silent: no notice on the far screen. It was notify-only, on
+ * the view that a bench PC should still say somebody is on it; the owner
+ * decided otherwise - connecting to our own machines, and to systems still on
+ * our bench, should not throw a popup at whoever is using them. What makes it
+ * unattended is unchanged (lib/remoteAccess consentModeFor: our custody, or
+ * staff's say-so), every session is still audited, and `consent` - a shipped
+ * system, one that changed hands, or staff's override - still prompts and
+ * waits for a yes.
+ *
+ * Zero is "no flags on this device": the engine ORs in its server-wide
+ * setting, the device group's and the connecting user's, so it is silent only
+ * while those are clear too. The groups this portal creates carry none.
  */
-export const CONSENT_FLAGS = { unattended: 1 | 2 | 4, consent: 1 | 2 | 4 | 8 | 16 | 32 } as const;
+export const CONSENT_FLAGS = { unattended: 0, consent: 1 | 2 | 4 | 8 | 16 | 32 } as const;
 
 export type RemoteConfig = { url: string; loginKey: string; adminUser: string };
 
@@ -337,8 +346,8 @@ export async function agentBranding(): Promise<AgentBranding | null> {
 }
 
 /**
- * Set what the far end sees before a session opens: a notification, or a prompt
- * it has to accept. The engine holds this per machine and applies it when the
+ * Set what the far end sees before a session opens: nothing, or a prompt it
+ * has to accept. The engine holds this per machine and applies it when the
  * session starts, so it is a property of the device rather than of the link -
  * which is why it is set here and not passed in the URL.
  *
