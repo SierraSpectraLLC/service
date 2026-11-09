@@ -134,13 +134,19 @@ export default async function ModelPage({ params, searchParams }: {
   const specs = parseModelSpecs(term.specs);
   const modelRefs = refsForUnits(
     refRows.map((r) => ({
-      id: r.id, assetType: r.assetType, model: r.model, kind: r.kind,
+      id: r.id, assetType: r.assetType, model: r.model, series: r.series, kind: r.kind,
       title: r.title, url: r.url, body: r.body, createdBy: r.createdBy,
       provenance: r.provenance,
       when: shopDay(r.createdAt),
     })),
-    [{ kind: term.assetType, model: term.name }],
+    [{ kind: term.assetType, model: term.name, series: term.series }],
   );
+  // The other models in this one's family, named so the header can say what
+  // "every ISQ" actually reaches.
+  const siblings = term.series
+    ? terms.filter((t) => t.kind === "model" && t.id !== term.id
+        && same(t.assetType, term.assetType) && same(t.series, term.series)).map((t) => t.name)
+    : [];
 
   const tab = ["procedures", "parts", "reference", "fleet"].includes(sp.tab ?? "") ? sp.tab! : "overview";
   const tabs: TabItem[] = [
@@ -169,7 +175,7 @@ export default async function ModelPage({ params, searchParams }: {
         imageAlt={term.name}
         eyebrow={term.manufacturer || term.assetType}
         title={term.name}
-        meta={[term.assetType, ...term.categories, ...term.gases].join(" · ")}
+        meta={[term.assetType, ...(term.series ? [`${term.series} series`] : []), ...term.categories, ...term.gases].join(" · ")}
         stats={heroStats}
       />
 
@@ -177,7 +183,9 @@ export default async function ModelPage({ params, searchParams }: {
 
       {tab === "overview" && <>
       <ModelHeaderCard termId={term.id} name={term.name} hasPhoto={!!term.photoUrl}
-        photoFraming={term.photoFraming} manufacturer={term.manufacturer} />
+        photoFraming={term.photoFraming} manufacturer={term.manufacturer}
+        series={term.series} seriesSiblings={siblings}
+        knownSeries={[...new Set(terms.filter((t) => t.kind === "model" && t.series).map((t) => t.series))].sort()} />
 
       <ModelSpecsCard
         termId={term.id} modelName={term.name}
@@ -299,9 +307,10 @@ export default async function ModelPage({ params, searchParams }: {
       </div>}
 
       {tab === "reference" && <ReferencePanel canEdit
-        sub={`Manuals, links and field notes for ${term.name} - and for any ${term.assetType.toLowerCase()}. Filed here, they show on every unit.`}
+        sub={`Manuals, links and field notes for ${term.name}${term.series ? `, for every ${term.series}` : ""} and for any ${term.assetType.toLowerCase()}. Filed here, they show on every unit.`}
         scopes={[
           { assetType: term.assetType, model: term.name, label: `${term.name} (every unit)` },
+          ...(term.series ? [{ assetType: term.assetType, model: "", series: term.series, label: `every ${term.series}` }] : []),
           { assetType: term.assetType, model: "", label: `any ${term.assetType.toLowerCase()}` },
         ]}
         refs={modelRefs}

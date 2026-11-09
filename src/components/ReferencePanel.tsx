@@ -19,12 +19,18 @@ type PickFile = {
 
 export type RefRow = {
   id: number; assetType: string; model: string; kind: string;
+  /** The family a model-less reference is filed on - "every ISQ". */
+  series?: string;
   title: string; url: string; body: string; createdBy: string; when: string;
   /** '' | original | facts | oem - see lib/provenance. */
   provenance?: string;
 };
 
-export type RefScope = { assetType: string; model: string; label: string };
+/**
+ * Somewhere a reference may be filed: one model, every model of a family
+ * (`series`, with `model` blank), or the whole module type (both blank).
+ */
+export type RefScope = { assetType: string; model: string; series?: string; label: string };
 
 /**
  * The reference shelf for a piece of equipment: manuals, links and field notes
@@ -117,7 +123,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
     setError("");
     startTransition(async () => {
       const res = await addCatalogRef({
-        assetType: scope.assetType, model: scope.model,
+        assetType: scope.assetType, model: scope.model, series: scope.series ?? "",
         kind: draft.kind,
         // A shelf file needs no title typed: its own name is one.
         // A file names itself, however it arrived; a web address does not.
@@ -178,7 +184,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
             <select value={draft.scope} aria-label="Filed under" className="t-small"
               onChange={(e) => setDraft({ ...draft, scope: parseInt(e.target.value) })}
               style={{ width: "auto" }}>
-              {scopes.map((s, i) => <option key={`${s.assetType}|${s.model}`} value={i}>{s.label}</option>)}
+              {scopes.map((s, i) => <option key={`${s.assetType}|${s.model}|${s.series ?? ""}`} value={i}>{s.label}</option>)}
             </select>
           </div>
           <label>Title <span className="mut" style={{ fontWeight: 400 }}>(a chosen file names itself)</span></label>
@@ -322,7 +328,9 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
                   onClick={async () => {
                     if (!(await confirmDialog({
                       title: `Remove this from ${g}?`,
-                      body: "It disappears from every unit that shows it.",
+                      body: r.series && !r.model
+                        ? `It is filed on the whole ${r.series} family and disappears from every model in it.`
+                        : "It disappears from every unit that shows it.",
                       action: "Remove reference", tone: "bad",
                     }))) return;
                     startTransition(async () => {

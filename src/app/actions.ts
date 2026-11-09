@@ -256,6 +256,7 @@ import { assignableNames, visibleDirectory } from "@/lib/directory";
 import { composeSystemDossier } from "@/lib/dossier";
 import { cleanMakerName } from "@/lib/makers";
 import { cleanProvenance, isPublishable, PROVENANCE_LABEL } from "@/lib/provenance";
+import { refScopeLabel } from "@/lib/catalogRefs";
 import { partsFlag, visitFlag } from "@/lib/entitlementFlags";
 import { parseModelSpecs, serializeModelSpecs } from "@/lib/modelSpecs";
 import { MAX_SUMMARY, modelSlug, publishBlockers, uniqueSlug } from "@/lib/publicCatalog";
@@ -14399,6 +14400,36 @@ export async function setVocabManufacturer(termId: number, manufacturer: string)
 }
 
 /**
+ * Put a model in a family, or take it out of one.
+ *
+ * "ISQ" on the 7000 and the 7610 is what lets one ISQ manual be filed once
+ * and reach both - see catalog_refs.series. Clearing it does not touch any
+ * reference: a manual filed on the series stays filed there and simply stops
+ * reaching this model, which is the honest reading of "this one is different".
+ */
+export async function setVocabSeries(termId: number, series: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [t] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
+  if (!t || t.kind !== "model") return { error: "Not found" };
+  if (readTenant(u) !== null && t.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  const next = series.replace(/\s+/g, " ").trim().slice(0, 60);
+  if (next === t.series) return {};
+  await db.update(vocabTerms).set({ series: next }).where(eq(vocabTerms.id, termId));
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: termId, tenantOrgId: t.tenantOrgId,
+    action: next
+      ? `model "${t.name}" (${t.assetType}) is part of the ${next} series`
+      : `model "${t.name}" (${t.assetType}) is in no series`,
+    field: "series", oldValue: t.series, newValue: next,
+  });
+  revalidatePath("/settings/catalog");
+  revalidatePath(`/catalog/${termId}`);
+  revalidatePath("/manuals");
+  rev();
+  return {};
+}
+
+/**
  * Rename a manufacturer/vendor everywhere the name is typed.
  *
  * The name lives as a bare string in eight columns - model catalog, systems,
@@ -15082,6 +15113,8 @@ const cleanCatalog = (d: CatalogInput) => {
 
 export type CatalogRefInput = {
   assetType: string; model: string; kind: string;
+  /** The family, for a reference filed on every model of one. Ignored when a model is named. */
+  series?: string;
   title: string; url: string; body: string;
   /** Whose material this is - see lib/provenance. Asked at filing time. */
   provenance?: string;
@@ -15271,15 +15304,19 @@ export async function addCatalogRef(data: CatalogRefInput): Promise<{ error?: st
   }
   if (kind === "link" && !url) return { error: "A link needs a URL" };
   if (kind === "note" && !body && !url) return { error: "A note needs some text (or at least a picture)" };
+  const model = data.model.trim().slice(0, 120);
+  // A family only means something when no model is named: a row that said
+  // both would read as two scopes, and refCovers reads the model first anyway.
+  const series = model ? "" : (data.series ?? "").trim().slice(0, 60);
   const [row] = await db.insert(catalogRefs).values({
     tenantOrgId: myTenantOrgId(u),
-    assetType, model: data.model.trim().slice(0, 120), kind, title, url, body,
+    assetType, model, series, kind, title, url, body,
     provenance: cleanProvenance(data.provenance),
     createdBy: u.name || u.email,
   }).returning();
   await audit({
     actor: u.email, entityType: "catalog_ref", entityId: row.id, tenantOrgId: row.tenantOrgId,
-    action: `filed ${kind} "${title || url || body.slice(0, 40)}" under ${row.model || `any ${assetType}`}`,
+    action: `filed ${kind} "${title || url || body.slice(0, 40)}" under ${refScopeLabel(row)}`,
   });
   revalidatePath("/settings/catalog");
   revalidatePath("/manuals");
@@ -15340,7 +15377,7 @@ export async function removeCatalogRef(id: number): Promise<{ error?: string }> 
   await db.delete(catalogRefs).where(eq(catalogRefs.id, id));
   await audit({
     actor: u.email, entityType: "catalog_ref", entityId: id, tenantOrgId: row.tenantOrgId,
-    action: `removed ${row.kind} "${row.title || row.url || row.body.slice(0, 40)}" from ${row.model || `any ${row.assetType}`}`,
+    action: `removed ${row.kind} "${row.title || row.url || row.body.slice(0, 40)}" from ${refScopeLabel(row)}`,
   });
   revalidatePath("/settings/catalog");
   revalidatePath("/manuals");

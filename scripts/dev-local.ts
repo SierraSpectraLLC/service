@@ -728,6 +728,7 @@ const FIXTURE = `
     ('model', 'Mass spec', '6495C', '{"LC-MS"}'),
     ('model', 'Mass spec', 'LCMS-8060', '{"LC-MS"}'),
     ('model', 'Mass spec', 'ISQ 7000', '{"GC-MS"}'),
+    ('model', 'Mass spec', 'ISQ 7610', '{"GC-MS"}'),
     ('model', 'Pump', '1290 Quat Pump', '{"LC-MS"}'),
     ('model', 'Autosampler', 'TriPlus RSH', '{"GC-MS"}')
     ON CONFLICT DO NOTHING;
@@ -742,17 +743,26 @@ const FIXTURE = `
     WHERE kind = 'model' AND name = 'ISQ 7000';
   UPDATE vocab_terms SET manufacturer = 'Agilent' WHERE kind = 'model' AND name = '1290 Quat Pump';
   UPDATE vocab_terms SET manufacturer = 'Thermo Fisher' WHERE kind = 'model' AND name = 'TriPlus RSH';
+  -- The two ISQs are one family: every ISQ shares the ISQ manuals unless a
+  -- manual is filed on one model alone. See catalog_refs.series.
+  UPDATE vocab_terms SET manufacturer = 'Thermo Fisher', series = 'ISQ'
+    WHERE kind = 'model' AND name IN ('ISQ 7000', 'ISQ 7610');
 
   -- A few manuals on the reference shelf, so /manuals has folders with
-  -- something in them: two on one model, one on a whole module type, and one
-  -- on a model the catalog never defined - the unsorted bucket's reason to
-  -- exist. Web links only; the harness has no Blob store to upload into.
-  INSERT INTO catalog_refs (asset_type, model, kind, title, url, body, provenance, created_by) VALUES
-    ('Mass spec', 'ISQ 7000', 'link', 'ISQ 7000 hardware manual', 'https://example.test/isq7000-hardware.pdf', '', 'oem', 'dev@local.test'),
-    ('Mass spec', 'ISQ 7000', 'note', 'Source removal', '', 'Vent first - the ExtractaBrite source pulls straight out once the lock ring is turned a quarter turn. Do not lever it.', 'original', 'dev@local.test'),
-    ('Autosampler', 'TriPlus RSH', 'link', 'TriPlus RSH user guide', 'https://example.test/triplus-rsh-user.pdf', '', 'oem', 'dev@local.test'),
-    ('Mass spec', '', 'note', 'Venting any mass spec', '', 'Turn the turbo off and wait for it to spin down before opening the vent valve. Thirty minutes minimum.', 'original', 'dev@local.test'),
-    ('GC', 'Trace 1310', 'link', 'Trace 1310 service manual', 'https://example.test/trace1310-service.pdf', '', '', 'dev@local.test');
+  -- something in them: one on the whole ISQ family, one on the 7610 alone,
+  -- one on a whole module type, and one on a model the catalog never defined
+  -- - the unsorted bucket's reason to exist. Web links only; the harness has
+  -- no Blob store to upload into.
+  -- Stamped with the operator's tenant like the rows above: a system page
+  -- reads references through its own stamp, so an unstamped row would show
+  -- in the library and nowhere else.
+  INSERT INTO catalog_refs (tenant_org_id, asset_type, model, series, kind, title, url, body, provenance, created_by) VALUES
+    (3, 'Mass spec', '', 'ISQ', 'link', 'ISQ series hardware manual', 'https://example.test/isq-hardware.pdf', '', 'oem', '${OWNER}'),
+    (3, 'Mass spec', '', 'ISQ', 'note', 'Source removal', '', 'Vent first - the ExtractaBrite source pulls straight out once the lock ring is turned a quarter turn. Do not lever it.', 'original', '${OWNER}'),
+    (3, 'Mass spec', 'ISQ 7610', '', 'link', 'ISQ 7610 firmware addendum', 'https://example.test/isq7610-firmware.pdf', '', 'oem', '${OWNER}'),
+    (3, 'Autosampler', 'TriPlus RSH', '', 'link', 'TriPlus RSH user guide', 'https://example.test/triplus-rsh-user.pdf', '', 'oem', '${OWNER}'),
+    (3, 'Mass spec', '', '', 'note', 'Venting any mass spec', '', 'Turn the turbo off and wait for it to spin down before opening the vent valve. Thirty minutes minimum.', 'original', '${OWNER}'),
+    (3, 'GC', 'Trace 1310', '', 'link', 'Trace 1310 service manual', 'https://example.test/trace1310-service.pdf', '', '', '${OWNER}');
 
   -- Three of the five go PUBLIC. The harness switches public_catalog_enabled
   -- on, so before this the library pages it unlocked - /equipment, every

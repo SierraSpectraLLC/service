@@ -104,6 +104,8 @@ export type SharedPart = {
 export type SharedRef = {
   assetType: string;
   model: string;
+  /** The family a model-less reference was filed on. Absent on older payloads. */
+  series?: string;
   kind: string;        // link | note
   title: string;
   url: string;

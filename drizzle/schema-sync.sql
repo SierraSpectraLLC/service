@@ -4784,3 +4784,9 @@ ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "album" text NOT NULL DEFAULT
 ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "parent_id" integer REFERENCES "work_orders"("id") ON DELETE SET NULL;
 ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "step_kind" text NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS "work_orders_parent_idx" ON "work_orders" ("parent_id");
+
+-- A model's FAMILY ("ISQ", "TSQ"), and references filed on one: a series
+-- manual reaches every model of the family, a model-filed one stays on its
+-- model. See db/schema vocab_terms.series and catalog_refs.series.
+ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "series" text NOT NULL DEFAULT '';
+ALTER TABLE "catalog_refs" ADD COLUMN IF NOT EXISTS "series" text NOT NULL DEFAULT '';

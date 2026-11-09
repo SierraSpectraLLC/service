@@ -58,7 +58,7 @@ import WorkOrdersPanel from "@/components/WorkOrdersPanel";
 import SiteCard from "@/components/SiteCard";
 import MaintenancePanel from "@/components/MaintenancePanel";
 import ReferencePanel from "@/components/ReferencePanel";
-import { refsForUnits } from "@/lib/catalogRefs";
+import { refsForUnits, withSeries } from "@/lib/catalogRefs";
 import { parseModelSpecs } from "@/lib/modelSpecs";
 import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import HoursPanel from "@/components/HoursPanel";
@@ -256,12 +256,21 @@ export default async function InstrumentPage({ params, searchParams }: {
     db.select().from(catalogRefs).where(forTenant(catalogRefs.tenantOrgId, inst.tenantOrgId))
       .orderBy(asc(catalogRefs.assetType), asc(catalogRefs.model), asc(catalogRefs.id)).catch(() => []),
   ]);
-  const refRows = refsForUnits(refRowsAll, assetRows.map((a) => ({ kind: a.kind, model: a.model })));
-  // Where a new reference may be filed: each distinct model here, and each type.
+  // Each module with its catalog family attached, so a manual filed on
+  // "every ISQ" reaches the ISQ 7000 on this bench. See lib/catalogRefs.
+  const refUnits = withSeries(
+    assetRows.map((a) => ({ kind: a.kind, model: a.model })),
+    vocabRows.filter((t) => t.kind === "model"),
+  );
+  const refRows = refsForUnits(refRowsAll, refUnits);
+  // Where a new reference may be filed: each distinct model here, each family
+  // those models belong to, and each type.
   const refScopes = [
-    ...[...new Map(assetRows.filter((a) => a.model).map((a) => [`${a.kind}|${a.model}`, a])).values()]
+    ...[...new Map(refUnits.filter((a) => a.model).map((a) => [`${a.kind}|${a.model}`, a])).values()]
       .map((a) => ({ assetType: a.kind, model: a.model, label: `${a.model} (every unit)` })),
-    ...[...new Set(assetRows.map((a) => a.kind))]
+    ...[...new Map(refUnits.filter((a) => a.series).map((a) => [`${a.kind}|${a.series}`, a])).values()]
+      .map((a) => ({ assetType: a.kind, model: "", series: a.series, label: `every ${a.series}` })),
+    ...[...new Set(refUnits.map((a) => a.kind))]
       .map((k) => ({ assetType: k, model: "", label: `any ${k.toLowerCase()}` })),
   ];
   const isStaff = user.role === "owner" || user.role === "staff";
@@ -1100,7 +1109,7 @@ export default async function InstrumentPage({ params, searchParams }: {
           { key: "reference", label: "Reference", node: (
             <ReferencePanel canEdit={isStaff} scopes={refScopes}
               refs={refRows.map((r) => ({
-                id: r.id, assetType: r.assetType, model: r.model, kind: r.kind,
+                id: r.id, assetType: r.assetType, model: r.model, series: r.series, kind: r.kind,
                 title: r.title, url: r.url, body: r.body, createdBy: r.createdBy,
                 provenance: r.provenance,
                 when: shopDay(r.createdAt),

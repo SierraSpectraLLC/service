@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { addVocabTerm, addVocabTerms, deleteVocabTerm, setVocabCategories, setVocabManufacturer } from "@/app/actions";
+import { addVocabTerm, addVocabTerms, deleteVocabTerm, setVocabCategories, setVocabManufacturer, setVocabSeries } from "@/app/actions";
 import CatalogGrid from "./CatalogGrid";
 import { CardGrid, EntityCard, FacetStrip, PageHead, Pager, Panel, Pill, RowActions, Toolbar } from "@/components/ui";
 import { pageOf } from "@/lib/paging";
@@ -14,7 +14,7 @@ import { toast } from "@/components/ui/Toast";
     narrowest - enough to scan, short enough to reach the bottom of. */
 const PAGE_SIZE = 48;
 
-type Model = { id: number; assetType: string; name: string; categories: string[]; manufacturer: string; inUse: number; hasPhoto: boolean };
+type Model = { id: number; assetType: string; name: string; categories: string[]; manufacturer: string; series?: string; inUse: number; hasPhoto: boolean };
 type Category = { id: number | null; name: string; systems: number };
 type AssetType = { id: number | null; name: string; models: number; inUse: number };
 
@@ -156,7 +156,7 @@ export default function CatalogForm({ categories, models, types, makers }: {
     facet === "all" ? models
     : facet === "nomaker" ? models.filter((m) => !m.manufacturer)
     : modelsIn(activeCategory)
-  ).filter((m) => !needle || `${m.name} ${m.manufacturer} ${m.assetType} ${m.categories.join(" ")}`.toLowerCase().includes(needle))
+  ).filter((m) => !needle || `${m.name} ${m.manufacturer} ${m.series ?? ""} ${m.assetType} ${m.categories.join(" ")}`.toLowerCase().includes(needle))
     .slice()
     .sort((a, b) => (a.manufacturer || "~").localeCompare(b.manufacturer || "~") || a.name.localeCompare(b.name));
 
@@ -179,6 +179,25 @@ export default function CatalogForm({ categories, models, types, makers }: {
       const res = await setVocabManufacturer(m.id, next);
       if (res?.error) { setError(res.error); return; }
       toast({ message: next ? `${m.name} is made by ${next}` : `Cleared the maker on ${m.name}` });
+    });
+  };
+
+  /**
+   * Which family a model is in - "ISQ", "TSQ". The first word of the name is
+   * offered as the default because it almost always is the family, and a
+   * manual filed on the series reaches every model in it (lib/catalogRefs).
+   */
+  const seriesFlow = async (m: Model) => {
+    const next = await inputDialog({
+      title: `Which family is ${m.name} in?`, action: "Save series", label: "Series",
+      initial: m.series || (m.name.trim().split(/\s+/)[0] ?? ""), allowEmpty: true,
+      hint: "Manuals filed on the series reach every model in it. Blank takes it out of any family.",
+    });
+    if (next === null || next === (m.series ?? "")) return;
+    startTransition(async () => {
+      const res = await setVocabSeries(m.id, next);
+      if (res?.error) { setError(res.error); return; }
+      toast({ message: next ? `${m.name} is in the ${next} series` : `${m.name} is in no series now` });
     });
   };
 
@@ -299,11 +318,12 @@ export default function CatalogForm({ categories, models, types, makers }: {
             eyebrow={m.manufacturer || <span style={{ fontStyle: "italic" }}>maker not set</span>}
             title={m.name}
             href={`/catalog/${m.id}`}
-            meta={`${m.assetType}${m.categories.length ? ` · ${m.categories.join(", ")}` : " · any system type"}`}
+            meta={`${m.assetType}${m.series ? ` · ${m.series} series` : ""}${m.categories.length ? ` · ${m.categories.join(", ")}` : " · any system type"}`}
             pills={<Pill tone={m.inUse ? "info" : "faint"}>{m.inUse ? `${m.inUse} in fleet` : "unused"}</Pill>}
             kebab={
               <RowActions inline={0} menuLabel={`Actions for ${m.name}`} items={[
                 { label: m.manufacturer ? "Change maker" : "Set maker", onClick: () => { void makerFlow(m); } },
+                { label: m.series ? "Change series" : "Set series", onClick: () => { void seriesFlow(m); } },
                 ...(activeCategory && m.categories.length > 1
                   ? [{ label: `Untag from ${activeCategory}`, onClick: () => untag(m, activeCategory) }]
                   : []),
@@ -322,6 +342,29 @@ export default function CatalogForm({ categories, models, types, makers }: {
         <div className="empty" style={{ marginBottom: 12 }}>
           <b>{q || facet !== "all" ? "No models match" : "No models yet"}</b>
           Add the first one above - it lands under {activeCategory ?? "whichever category you pick"}.
+        </div>
+      )}
+      {/* Type "ISQ", and every ISQ the catalog has is on screen - which is
+          exactly the set that should be in the ISQ series. One dialog, not
+          one per card. */}
+      {needle && shownModels.length > 0 && (
+        <div style={{ margin: "0 0 12px" }}>
+          <button className="btn sm" disabled={pending}
+            onClick={async () => {
+              const next = await inputDialog({
+                title: `Put all ${shownModels.length} shown in a series`, action: "Set series",
+                label: "Series", initial: q.trim(),
+                hint: `Applied to all ${shownModels.length} models this search matches, not just the page you can see. Manuals filed on the series reach every one of them.`,
+              });
+              if (next === null || !next) return;
+              startTransition(async () => {
+                for (const m of shownModels) {
+                  const res = await setVocabSeries(m.id, next);
+                  if (res?.error) { setError(res.error); return; }
+                }
+                toast({ message: `Put ${shownModels.length} model${shownModels.length === 1 ? "" : "s"} in the ${next} series` });
+              });
+            }}>Set series for all shown</button>
         </div>
       )}
       {facet === "nomaker" && shownModels.length > 0 && (

@@ -63,6 +63,7 @@ export default async function CatalogPage() {
 
   const models = terms.filter((t) => t.kind === "model").map((m) => ({
     id: m.id, assetType: m.assetType, name: m.name, categories: m.categories, manufacturer: m.manufacturer,
+    series: m.series,
     inUse: assetRows.filter((a) => a.kind === m.assetType && a.model.toLowerCase() === m.name.toLowerCase()).length,
     hasPhoto: !!m.photoUrl,
   }));
@@ -134,10 +135,13 @@ export default async function CatalogPage() {
         sub="Reference material per model or module type."
         scopes={[
           ...models.map((m) => ({ assetType: m.assetType, model: m.name, label: `${m.name} (${m.assetType})` })),
+          // Each family once per module type it appears in.
+          ...[...new Map(models.filter((m) => m.series).map((m) => [`${m.assetType}|${m.series}`, m])).values()]
+            .map((m) => ({ assetType: m.assetType, model: "", series: m.series, label: `every ${m.series} (${m.assetType})` })),
           ...types.filter((t) => t.id !== null).map((t) => ({ assetType: t.name, model: "", label: `any ${t.name.toLowerCase()}` })),
         ]}
         refs={refRows.map((r) => ({
-          id: r.id, assetType: r.assetType, model: r.model, kind: r.kind,
+          id: r.id, assetType: r.assetType, model: r.model, series: r.series, kind: r.kind,
           title: r.title, url: r.url, body: r.body, createdBy: r.createdBy,
           provenance: r.provenance,
           when: shopDay(r.createdAt),

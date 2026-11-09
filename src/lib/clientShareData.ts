@@ -6,11 +6,11 @@ import { and, asc, eq, inArray, ne, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
   assets, catalogRefs, clientShares, instruments, invoiceLines, invoices, orgSites, orgs,
-  parts, pmSchedules, providerProfiles,
+  parts, pmSchedules, providerProfiles, vocabTerms,
 } from "@/db/schema";
 import { forTenant } from "@/lib/tenancy";
 import { siteLabel } from "@/lib/sites";
-import { refsForUnits } from "@/lib/catalogRefs";
+import { refsForUnits, withSeries } from "@/lib/catalogRefs";
 import { isPublishable } from "@/lib/provenance";
 import {
   freeTag, parsePayload, provenanceLine, redactPayload, SHARE_VERSION,
@@ -267,12 +267,19 @@ export async function composePayload(opts: {
    * inventory the recipient is shown is counted off this list, so what an
    * offer advertises is exactly what acceptance delivers.
    */
-  const units = assetRows.map((a) => ({ kind: a.kind ?? "", model: a.model ?? "" }));
+  // With each module's catalog family, so a series-filed manual that covers
+  // this fleet travels with it. Read from the sender's catalog, which is the
+  // one the references were filed against.
+  const familyRows = await db.select({ assetType: vocabTerms.assetType, name: vocabTerms.name, series: vocabTerms.series })
+    .from(vocabTerms)
+    .where(and(eq(vocabTerms.kind, "model"), forTenant(vocabTerms.tenantOrgId, opts.tenantOrgId)))
+    .catch(() => []);
+  const units = withSeries(assetRows.map((a) => ({ kind: a.kind ?? "", model: a.model ?? "" })), familyRows);
   const refs: SharedRef[] = refsForUnits(
     refRowsAll.filter((r) => isPublishable(r.provenance)),
     units,
   ).slice(0, 500).map((r) => ({
-    assetType: r.assetType, model: r.model, kind: r.kind,
+    assetType: r.assetType, model: r.model, series: r.series, kind: r.kind,
     title: r.title, url: r.url, body: r.body,
   }));
 
@@ -446,7 +453,10 @@ export async function materialize(opts: {
     if (fresh.length) {
       await db.insert(catalogRefs).values(fresh.map((r) => ({
         tenantOrgId: opts.destTenantOrgId,
-        assetType: r.assetType, model: r.model, kind: r.kind,
+        // The family travels as a name. It only reaches anything once the
+        // recipient's own catalog puts models in a series of that name,
+        // which is the honest state: it is their catalog that decides.
+        assetType: r.assetType, model: r.model, series: r.series ?? "", kind: r.kind,
         title: r.title, url: r.url, body: r.body,
         createdBy: `${p.from.operator} (handed over)`,
       })));

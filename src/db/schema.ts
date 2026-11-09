@@ -2551,6 +2551,15 @@ export const catalogRefs = pgTable("catalog_refs", {
   tenantOrgId: tenantStamp(),
   assetType: text("asset_type").notNull(),          // catalog module type
   model: text("model").notNull().default(""),       // "" = every model of the type
+  /**
+   * The middle scope: filed on every model of a FAMILY (vocab_terms.series)
+   * rather than on one model or on the whole type. "All ISQs share the ISQ
+   * manuals unless a manual says otherwise" is this column: a row with
+   * model '' and series 'ISQ' reaches every mass spec whose catalog entry
+   * says series ISQ, and a manual that is only for the 7610 is filed on the
+   * model instead. Blank on a model-filed or type-filed row.
+   */
+  series: text("series").notNull().default(""),
   kind: text("kind").notNull().default("link"),     // 'link' | 'note'
   title: text("title").notNull().default(""),
   // The manual's URL on a link; on a note, an optional image or file URL
@@ -2821,6 +2830,15 @@ export const vocabTerms = pgTable("vocab_terms", {
   // unusable, so the catalog groups by this and asset forms fill the unit's
   // manufacturer in from it.
   manufacturer: text("manufacturer").notNull().default(""),
+  /**
+   * Models only: the FAMILY the model belongs to - "ISQ" for an ISQ 7000 and
+   * an ISQ 7610, "TSQ" for the Altis, the Quantis and the 9000. Blank = no
+   * family, which is most models. It exists for the reference shelf: a
+   * manufacturer writes one hardware manual for the series and the shop
+   * wants to file it once, so catalog_refs.series points at this. A folder
+   * level between the maker and the model in the manuals library.
+   */
+  series: text("series").notNull().default(""),
   // Models only: system categories this model appears under. [] = all of them.
   // An array rather than one value because a pump can serve LC-MS and HPLC
   // alike - same reasoning as checkout_items.model_scope.

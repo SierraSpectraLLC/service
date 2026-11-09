@@ -21,6 +21,7 @@ vi.mock("@/app/actions", () => ({
   deleteVocabTerm: vi.fn(async () => ({})),
   setVocabCategories: vi.fn(async () => ({})),
   setVocabManufacturer: vi.fn(async () => ({})),
+  setVocabSeries: vi.fn(async () => ({})),
 }));
 
 afterEach(cleanup);

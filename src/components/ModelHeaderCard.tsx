@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
-import { setCatalogPhoto, setCatalogPhotoFraming, setVocabManufacturer } from "@/app/actions";
+import { setCatalogPhoto, setCatalogPhotoFraming, setVocabManufacturer, setVocabSeries } from "@/app/actions";
 import { inputDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 import PhotoFramer from "@/components/PhotoFramer";
@@ -22,14 +22,26 @@ import { fmtBytes } from "@/lib/storage";
  * sending them away from the record the photo is of. The tile shows the
  * framing rather than a raw crop, so what is adjusted is what every unit of
  * this model will show (lib/photoFrame).
+ *
+ * The family lives here too, beside the maker, because the two together are
+ * what the manuals library files under: Thermo, then ISQ, then this model. A
+ * series is what lets one ISQ manual be filed once for every ISQ.
  */
-export default function ModelHeaderCard({ termId, name, hasPhoto, photoFraming = "", manufacturer }: {
+export default function ModelHeaderCard({
+  termId, name, hasPhoto, photoFraming = "", manufacturer, series = "", seriesSiblings = [], knownSeries = [],
+}: {
   termId: number;
   name: string;
   hasPhoto: boolean;
   /** How the stock photo sits in its tile - "rot,zoom,x,y,aspect". See lib/photoFrame. */
   photoFraming?: string;
   manufacturer: string;
+  /** The family this model is in - "ISQ". Blank = none. */
+  series?: string;
+  /** The other models in that family, so the line can say what it shares with. */
+  seriesSiblings?: string[];
+  /** Every family already named in the catalog, for the suggestions list. */
+  knownSeries?: string[];
 }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
@@ -51,6 +63,24 @@ export default function ModelHeaderCard({ termId, name, hasPhoto, photoFraming =
     } finally {
       setBusy("");
     }
+  };
+
+  // The family's name is almost always the model name's first word - ISQ
+  // 7000, TSQ Altis, TriPlus 500 - so that is what the dialog offers first.
+  const guessSeries = name.trim().split(/\s+/)[0] ?? "";
+
+  const seriesFlow = async () => {
+    const next = await inputDialog({
+      title: `Which family is ${name} in?`, action: "Save series", label: "Series",
+      initial: series || guessSeries, allowEmpty: true,
+      hint: `Manuals filed on the series reach every model in it. Blank takes it out of any family.${
+        knownSeries.length ? ` Already named: ${knownSeries.join(", ")}.` : ""}`,
+    });
+    if (next === null || next === series) return;
+    const res = await setVocabSeries(termId, next);
+    if (res?.error) { setError(res.error); return; }
+    toast({ message: next ? `${name} is in the ${next} series` : `${name} is in no series now` });
+    router.refresh();
   };
 
   return (
@@ -94,6 +124,20 @@ export default function ModelHeaderCard({ termId, name, hasPhoto, photoFraming =
                 toast({ message: next ? `${name} is made by ${next}` : `Cleared the maker on ${name}` });
                 router.refresh();
               }}>{manufacturer ? "change" : "set the maker"}</button>
+          </div>
+          {/* The family, and what it shares with. "Every ISQ" is only a useful
+              scope if somebody can see which models that is. */}
+          <div className="t-body" style={{ marginBottom: 6 }}>
+            {series ? <>Part of the <b>{series}</b> series</> : <span className="mut">In no series</span>}
+            {series && seriesSiblings.length > 0 && (
+              <span className="mut t-small"> · shares series manuals with {seriesSiblings.join(", ")}</span>
+            )}
+            {series && seriesSiblings.length === 0 && (
+              <span className="mut t-small"> · the only model in it so far</span>
+            )}
+            <button className="btn link" style={{ marginLeft: 8 }} onClick={() => { void seriesFlow(); }}>
+              {series ? "change" : "put it in a series"}
+            </button>
           </div>
           <div className="mut t-small">
             The catalog&apos;s stock photo for {name}: it shows on every unit that has no photo of its own.

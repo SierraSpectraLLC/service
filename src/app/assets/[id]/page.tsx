@@ -29,7 +29,7 @@ import { unitLabel } from "@/lib/assetServes";
 import ReferencePanel from "@/components/ReferencePanel";
 import SpecTable from "@/components/SpecTable";
 import { parseModelSpecs } from "@/lib/modelSpecs";
-import { refsForUnits } from "@/lib/catalogRefs";
+import { refsForUnits, withSeries } from "@/lib/catalogRefs";
 import { copyTargetsFor } from "@/lib/copyTargets";
 import { canOfferResale, resaleFlagFor } from "@/lib/owner";
 import {
@@ -120,7 +120,9 @@ export default async function AssetPage({ params, searchParams }: {
   const refRowsAll = await db.select().from(catalogRefs)
     .where(forTenant(catalogRefs.tenantOrgId, asset.tenantOrgId))
     .orderBy(asc(catalogRefs.assetType), asc(catalogRefs.model), asc(catalogRefs.id)).catch(() => []);
-  const refRows = refsForUnits(refRowsAll, [{ kind: asset.kind, model: asset.model }]);
+  // With its catalog family attached, so a series-filed manual reaches it.
+  const [refUnit] = withSeries([{ kind: asset.kind, model: asset.model }], vocab.filter((t) => t.kind === "model"));
+  const refRows = refsForUnits(refRowsAll, [refUnit]);
 
   // Checklists and note threads for this asset's tasks (same shape the system page uses).
   const taskIds = taggedTasks.map((t) => t.id);
@@ -530,10 +532,11 @@ export default async function AssetPage({ params, searchParams }: {
             <ReferencePanel canEdit={isStaff}
               scopes={[
                 ...(asset.model ? [{ assetType: asset.kind, model: asset.model, label: `${asset.model} (every unit)` }] : []),
+                ...(refUnit.series ? [{ assetType: asset.kind, model: "", series: refUnit.series, label: `every ${refUnit.series}` }] : []),
                 { assetType: asset.kind, model: "", label: `any ${asset.kind.toLowerCase()}` },
               ]}
               refs={refRows.map((r) => ({
-                id: r.id, assetType: r.assetType, model: r.model, kind: r.kind,
+                id: r.id, assetType: r.assetType, model: r.model, series: r.series, kind: r.kind,
                 title: r.title, url: r.url, body: r.body, createdBy: r.createdBy,
                 provenance: r.provenance,
                 when: shopDay(r.createdAt),
