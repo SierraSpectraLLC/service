@@ -15282,6 +15282,7 @@ export async function addCatalogRef(data: CatalogRefInput): Promise<{ error?: st
     action: `filed ${kind} "${title || url || body.slice(0, 40)}" under ${row.model || `any ${assetType}`}`,
   });
   revalidatePath("/settings/catalog");
+  revalidatePath("/manuals");
   return { id: row.id };
 }
 
@@ -15327,6 +15328,7 @@ export async function setProvenance(
   }
   revalidatePath("/settings/catalog");
   revalidatePath("/settings/procedures");
+  revalidatePath("/manuals");
   return {};
 }
 
@@ -15341,6 +15343,7 @@ export async function removeCatalogRef(id: number): Promise<{ error?: string }> 
     action: `removed ${row.kind} "${row.title || row.url || row.body.slice(0, 40)}" from ${row.model || `any ${row.assetType}`}`,
   });
   revalidatePath("/settings/catalog");
+  revalidatePath("/manuals");
   return {};
 }
 

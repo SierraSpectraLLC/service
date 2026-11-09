@@ -743,6 +743,17 @@ const FIXTURE = `
   UPDATE vocab_terms SET manufacturer = 'Agilent' WHERE kind = 'model' AND name = '1290 Quat Pump';
   UPDATE vocab_terms SET manufacturer = 'Thermo Fisher' WHERE kind = 'model' AND name = 'TriPlus RSH';
 
+  -- A few manuals on the reference shelf, so /manuals has folders with
+  -- something in them: two on one model, one on a whole module type, and one
+  -- on a model the catalog never defined - the unsorted bucket's reason to
+  -- exist. Web links only; the harness has no Blob store to upload into.
+  INSERT INTO catalog_refs (asset_type, model, kind, title, url, body, provenance, created_by) VALUES
+    ('Mass spec', 'ISQ 7000', 'link', 'ISQ 7000 hardware manual', 'https://example.test/isq7000-hardware.pdf', '', 'oem', 'dev@local.test'),
+    ('Mass spec', 'ISQ 7000', 'note', 'Source removal', '', 'Vent first - the ExtractaBrite source pulls straight out once the lock ring is turned a quarter turn. Do not lever it.', 'original', 'dev@local.test'),
+    ('Autosampler', 'TriPlus RSH', 'link', 'TriPlus RSH user guide', 'https://example.test/triplus-rsh-user.pdf', '', 'oem', 'dev@local.test'),
+    ('Mass spec', '', 'note', 'Venting any mass spec', '', 'Turn the turbo off and wait for it to spin down before opening the vent valve. Thirty minutes minimum.', 'original', 'dev@local.test'),
+    ('GC', 'Trace 1310', 'link', 'Trace 1310 service manual', 'https://example.test/trace1310-service.pdf', '', '', 'dev@local.test');
+
   -- Three of the five go PUBLIC. The harness switches public_catalog_enabled
   -- on, so before this the library pages it unlocked - /equipment, every
   -- /equipment/<slug>, and the exhibit on the landing page - rendered their

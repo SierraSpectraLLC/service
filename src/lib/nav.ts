@@ -365,6 +365,11 @@ function staffSections(ctx: NavContext): NavSection[] {
          way in. */
       { href: "/settings/catalog", label: "Equipment catalog" },
       { href: "/settings/parts", label: "Parts catalog" },
+      /* The catalog's reference shelf read as a drive - maker, then model,
+         then the manuals filed on it. Beside Documents rather than inside it:
+         Documents is everything the organization stores, and a manual is
+         filed on a MODEL, which is the catalog's axis, not a folder's. */
+      { href: "/manuals", label: "Manuals" },
       { href: "/documents", label: LABEL.documents },
       { href: "/gallery", label: "Gallery" },
       { href: "/pdf", label: "PDF studio" },

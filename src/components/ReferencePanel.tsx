@@ -208,7 +208,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
               <div className="mut t-meta" style={{ marginTop: 6 }}>
                 {uploading
                   ? `Uploading ${uploading}…`
-                  : "It lands on the file shelf under Library → Files as well, so the next person can find it there."}
+                  : "It lands under Library → Documents as well, so the next person can find it there."}
               </div>
             </div>
           ) : source === "web" ? (
@@ -233,7 +233,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
               {files === "loading" && <div className="mut t-small">Loading the shelf…</div>}
               {Array.isArray(files) && files.length === 0 && (
                 <div className="mut t-small">
-                  Nothing stored yet. Upload manuals under Library → Files, then point at them here.
+                  Nothing stored yet. Upload here, or put manuals under Library → Documents and point at them.
                 </div>
               )}
               {Array.isArray(files) && (() => {

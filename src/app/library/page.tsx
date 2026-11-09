@@ -26,6 +26,7 @@ export const dynamic = "force-dynamic";
 const BLURB: Record<string, string> = {
   "/settings/catalog": "Models, procedures and what each one needs",
   "/settings/parts": "Part numbers, and the paper behind them",
+  "/manuals": "By manufacturer, then model",
   "/documents": "Everything filed, by system and by client",
   "/gallery": "Photos, across every job",
   "/pdf": "Assemble a packet from what is already filed",
