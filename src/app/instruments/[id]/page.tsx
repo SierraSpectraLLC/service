@@ -1015,7 +1015,7 @@ export default async function InstrumentPage({ params, searchParams }: {
           { key: "parts", label: "Parts", node: (
             <PartsPanel target={{ instrumentId: inst.id, assetId: null }}
               parts={redactParts(partRows, user, inst.ownerOrgId, inst.tenantOrgId).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
-              systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} - ${a.model || a.serial || "?"}` }))}
+              systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} - ${a.model || a.serial || "?"}`, kind: a.kind, model: a.model }))}
               canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook}
               serviceEvents={serviceEvents} visitNames={visitNames}
               moduleTypes={vocabRows.filter((v) => v.kind === "asset_type").map((v) => v.name)}

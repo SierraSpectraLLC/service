@@ -478,6 +478,7 @@ export default async function AssetPage({ params, searchParams }: {
                 .map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
               systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook}
               serviceEvents={serviceEvents} visitNames={visitNames}
+              unit={{ kind: asset.kind ?? "", model: asset.model ?? "" }}
               moduleTypes={vocab.filter((v) => v.kind === "asset_type").map((v) => v.name)}
               moduleModels={vocab.filter((v) => v.kind === "model")
                 .map((v) => ({ assetType: v.assetType, name: v.name, manufacturer: v.manufacturer }))}

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   allNumbers, catalogEntry, catalogLabel, catalogName, CATALOG_KINDS, cleanAliases, currentNumber,
   isCatalogued, isService, kitContents, lineKindFor, liveNumbers, numberClash, PART_KINDS,
-  quotedUnitCents, searchCatalog, suggestParts, uncatalogued, unitFor,
+  quotedUnitCents, searchCatalog, suggestParts, uncatalogued, unitFor, suitsFor,
 } from "@/lib/partCatalog";
 
 const entry = (over: Partial<import("@/lib/partCatalog").CatalogEntry> = {}) => ({
@@ -412,5 +412,29 @@ describe("the numbers that are not things", () => {
     // An hour is the sane default for labor and travel with nothing said.
     expect(unitFor({ kind: "labor" })).toBe("h");
     expect(unitFor({ kind: "part" })).toBe("");
+  });
+});
+
+describe("what a part catalogued from a record suits", () => {
+  const book = {
+    assetTypes: ["Mass spec", "Pump"],
+    modelsByType: { "Mass spec": ["ISQ 7000", "TSQ 9000"], Pump: ["LC-30AD"] },
+  };
+
+  it("reads the record's type and model in the book's own spelling", () => {
+    expect(suitsFor({ kind: "Mass Spec", model: "isq 7000" }, book))
+      .toEqual({ assetTypes: ["Mass spec"], models: ["ISQ 7000"] });
+  });
+
+  it("never invents a type or model the book doesn't have", () => {
+    expect(suitsFor({ kind: "Detector", model: "ISQ-7000" }, book)).toEqual({ assetTypes: [], models: [] });
+  });
+
+  it("still finds the model when the record has no type", () => {
+    expect(suitsFor({ kind: "", model: "LC-30AD" }, book)).toEqual({ assetTypes: [], models: ["LC-30AD"] });
+  });
+
+  it("suits nothing in particular with no unit behind it", () => {
+    expect(suitsFor(null, book)).toEqual({ assetTypes: [], models: [] });
   });
 });

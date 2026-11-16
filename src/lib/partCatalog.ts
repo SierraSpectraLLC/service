@@ -438,3 +438,27 @@ export function suggestParts<T extends CatalogEntry>(
     };
   });
 }
+
+/**
+ * What a part catalogued from a record suits, read off the unit it was fitted
+ * to: the record's module type and model, in the book's own spelling.
+ *
+ * Only what the book already has. "Suits" and "Specific models" are pickers
+ * over the shop's equipment catalog, and a token typed in from a record's free
+ * text ("Mass Spec" on an asset the book calls "Mass spec") would be a new
+ * spelling of an old thing - so a near miss in case matches, and anything the
+ * book does not know is left for the person to pick.
+ */
+export function suitsFor(
+  unit: { kind?: string; model?: string } | null,
+  book: { assetTypes: string[]; modelsByType: Record<string, string[]> },
+): { assetTypes: string[]; models: string[] } {
+  if (!unit) return { assetTypes: [], models: [] };
+  const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  const type = unit.kind ? book.assetTypes.find((t) => same(t, unit.kind!)) : undefined;
+  // A model's spelling is looked for under its own type first, then anywhere:
+  // a record with no type still knows what model it is.
+  const pools = type ? [book.modelsByType[type] ?? []] : Object.values(book.modelsByType);
+  const model = unit.model ? pools.flat().find((m) => same(m, unit.model!)) : undefined;
+  return { assetTypes: type ? [type] : [], models: model ? [model] : [] };
+}
