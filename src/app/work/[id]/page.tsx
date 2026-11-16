@@ -605,7 +605,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         <PartsPanel target={target}
           parts={redactParts(woPartRows, user, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null, wo.tenantOrgId)
             .map((pp) => ({ ...pp, createdAt: pp.createdAt.toISOString() }))}
-          systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} - ${a.model || a.serial || "?"}` }))}
+          systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} - ${a.model || a.serial || "?"}`, kind: a.kind, model: a.model }))}
           canEdit={canAdd} isStaff={staff}
           moduleTypes={vocabRows.filter((v) => v.kind === "asset_type").map((v) => v.name)}
           moduleModels={vocabRows.filter((v) => v.kind === "model")

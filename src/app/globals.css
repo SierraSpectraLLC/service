@@ -2886,3 +2886,15 @@ table.fc .why { font-size: var(--fs-meta); color: var(--mut); display: block; fo
   .rdesk-wide-only { display: none !important; }
   .menu-panel .rdesk-narrow-only { display: block; }
 }
+
+/* On a record's part form: the offer to put a number the catalog doesn't know
+   into the catalog too (PartsPanel). A label, so the whole line toggles the box. */
+.parts-catalog-offer {
+  margin: 0 0 8px; padding: 8px 10px; border-radius: var(--radius);
+  background: var(--t-info-bg); border: 1px solid var(--t-info-bd);
+}
+.parts-catalog-offer label {
+  display: flex; gap: 8px; align-items: flex-start; margin: 0; cursor: pointer;
+  font-weight: 400; color: var(--ink); text-transform: none; letter-spacing: 0;
+}
+.parts-catalog-offer input[type="checkbox"] { width: 15px; height: 15px; flex: none; margin-top: 2px; }

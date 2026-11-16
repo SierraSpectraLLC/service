@@ -57,13 +57,19 @@ export type PartPhoto = { id: number; url: string; caption: string };
  * to do afterwards; everything between is this component's business.
  */
 export default function PartDialog({
-  id, seed, seedLines = [], assetTypes, modelsByType, prices = [], photos = [],
+  id, seed, seedLines = [], seedVendor, assetTypes, modelsByType, prices = [], photos = [],
   makers = [], today = "", onClose, onSaved,
 }: {
   /** The part being edited. Absent = a new one. */
   id?: number;
   seed?: Partial<PartDraft>;
   seedLines?: KitLine[];
+  /**
+   * Who it was bought from and for how much, when the form is opened from a
+   * record that already says. Typed into the vendor row, and kept on Save -
+   * see save() - so the price is not lost for want of a press of ＋ Vendor.
+   */
+  seedVendor?: { vendor: string; price: string };
   assetTypes: string[];
   modelsByType: Record<string, string[]>;
   prices?: VendorPrice[];
@@ -78,7 +84,10 @@ export default function PartDialog({
   const router = useRouter();
   const [draft, setDraft] = useState<PartDraft>({ ...emptyPartDraft, ...seed });
   const [lines, setLines] = useState<KitLine[]>(seedLines);
-  const [vendorDraft, setVendorDraft] = useState({ vendor: "", price: "", isOem: false, url: "", leadDays: "", dropShips: false, expediteOk: false });
+  const [vendorDraft, setVendorDraft] = useState({
+    vendor: seedVendor?.vendor ?? "", price: seedVendor?.price ?? "",
+    isOem: false, url: "", leadDays: "", dropShips: false, expediteOk: false,
+  });
   const [busy, setBusy] = useState("");
   const photoInput = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
@@ -105,6 +114,19 @@ export default function PartDialog({
       if (saved !== undefined && draft.kind === "kit") {
         const r2 = await setKitLines(saved, lines);
         if (r2?.error) { setError(r2.error); return; }
+      }
+      // Opened from a record that said who it was bought from: the row it
+      // filled in is the price, so it is kept rather than lost for want of a
+      // press of ＋ Vendor. Only then - anywhere else a half-typed row is a
+      // half-typed row.
+      if (seedVendor && vendorDraft.vendor.trim() && vendorDraft.price.trim()) {
+        const r3 = await addPartPrices([{
+          partNumber: draft.partNumber, vendor: vendorDraft.vendor, price: vendorDraft.price,
+          isOem: vendorDraft.isOem, url: vendorDraft.url, leadDays: vendorDraft.leadDays,
+          dropShips: vendorDraft.dropShips, expediteOk: vendorDraft.expediteOk,
+        }]);
+        if (r3?.error) { setError(r3.error); return; }
+        if (r3.failures?.length) { setError(r3.failures[0].error); return; }
       }
       // The book just changed; the next field to open must see it.
       forgetCatalog();

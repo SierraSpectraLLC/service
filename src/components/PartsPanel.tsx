@@ -1,13 +1,15 @@
 "use client";
 
 import { confirmReason } from "@/components/ui/ConfirmDialog";
-import { useMemo, useOptimistic, useState, useTransition } from "react";
+import { useEffect, useMemo, useOptimistic, useState, useTransition } from "react";
 import {
   CARRIERS, MAKE_STATES, PART_STATES, PART_TONE, ORDER_STATES, isMadeState, trackUrl,
 } from "@/lib/stages";
 import type { PartyChoice } from "@/lib/parties";
 import { modelsForType, moduleTypeOptions, type CatalogModel } from "@/lib/moduleTypes";
-import { intakeModule } from "@/app/actions";
+import { catalogBook, intakeModule } from "@/app/actions";
+import { catalogEntry, suitsFor } from "@/lib/partCatalog";
+import PartDialog, { type PartDraft } from "./PartDialog";
 import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/lib/partSpecs";
 import {
   createPart, updatePart, setPartStatus, setPartAsset, deletePart, nameServiceVisit, type WorkTarget,
@@ -15,7 +17,7 @@ import {
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { pricesFor, type PriceEntry } from "@/lib/priceBook";
-import PartNumberField from "./PartNumberField";
+import PartNumberField, { loadCatalogParts, type LookupPart } from "./PartNumberField";
 import { formatCents, centsToInput } from "@/lib/money";
 import { dayText, isoDay, partGroups, type ServiceEvent } from "@/lib/partGroups";
 
@@ -76,8 +78,16 @@ const empty = { kind: "part", moduleKind: "", expandKit: true, pmScheduleId: nul
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
-export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [], serviceEvents = [], visitNames = {}, pmJobs = [], moduleTypes = [], moduleModels = [], makers = [] }: {
-  target: WorkTarget; parts: Part[]; systemAssets: { id: number; label: string }[]; canEdit: boolean; isStaff: boolean;
+type SystemAsset = { id: number; label: string; kind?: string; model?: string };
+
+export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [], serviceEvents = [], visitNames = {}, pmJobs = [], moduleTypes = [], moduleModels = [], makers = [], unit = null }: {
+  target: WorkTarget; parts: Part[]; systemAssets: SystemAsset[]; canEdit: boolean; isStaff: boolean;
+  /**
+   * The unit this record IS, when it is one (an asset's own page): what a part
+   * catalogued from here suits. On a system, the unit a part is tagged to says
+   * the same thing, from systemAssets.
+   */
+  unit?: { kind: string; model: string } | null;
   /** Jobs completed, by day, so a visit can be named after the work it was. */
   serviceEvents?: ServiceEvent[];
   /** Names somebody gave a day themselves, keyed YYYY-MM-DD. Beats the jobs. */
@@ -154,15 +164,66 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
   // Which day's heading is being renamed, and to what.
   const [naming, setNaming] = useState<null | { day: string; title: string }>(null);
 
-  const openNew = () => { setDraft(empty); setSpecPairs([]); setForm({ mode: "new" }); };
+  /*
+   * The parts catalog, beside the record.
+   *
+   * A part fitted on a repair is a number the shop will meet again, and the
+   * catalog is where it gets described once - so a number the book does not
+   * know is offered to it, through the catalog's OWN form (PartDialog), the
+   * same one the catalog, a model page and the quote builder open. Not a copy
+   * of its fields grown into this form: two forms for one thing drift.
+   *
+   * Staff only, because only staff may write the book (addCatalogPart). It
+   * never blocks the record: a part fitted at 2am lands either way, and
+   * unticking the box is how.
+   */
+  const [catalog, setCatalog] = useState<LookupPart[] | null>(null);
+  const [alsoCatalog, setAlsoCatalog] = useState(true);
+  const [book, setBook] = useState<Awaited<ReturnType<typeof catalogBook>> | null>(null);
+  /** The catalog form, open in place of this one. `then` is what its save goes on to do. */
+  const [cataloging, setCataloging] = useState<null | { seed: Partial<PartDraft>; seedVendor?: { vendor: string; price: string }; then: "save" | "return" }>(null);
+  const [catalogNote, setCatalogNote] = useState("");
+  useEffect(() => {
+    if (form && isStaff && catalog === null) void loadCatalogParts().then(setCatalog);
+  }, [form, isStaff, catalog]);
+
+  const openNew = () => { setDraft(empty); setSpecPairs([]); setAlsoCatalog(true); setCatalogNote(""); setForm({ mode: "new" }); };
   const openEdit = (p: Part) => {
     // A date input only accepts a calendar day, so a row still carrying one of
     // the old year-less strings opens blank and says what is stored underneath.
     setDraft({ kind: p.kind, moduleKind: p.moduleKind ?? "", expandKit: false, pmScheduleId: p.pmScheduleId ?? null, assetId: p.assetId, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note, installedAt: isoDay(p.installedAt), removedAt: isoDay(p.removedAt), requestReplacement: false, makerOrgId: p.makerOrgId ?? null });
     setSpecPairs(parseSpecs(p.specs));
+    setCatalogNote("");
     setForm({ mode: "edit", id: p.id });
   };
-  const close = () => { setForm(null); setDraft(empty); setSpecPairs([]); };
+  const close = () => { setForm(null); setDraft(empty); setSpecPairs([]); setCataloging(null); };
+
+  const pn = draft.partNumber.trim();
+  /** Typed, staff, and the book has no entry answering to it under any of its numbers. */
+  const uncatalogued = isStaff && catalog !== null && pn !== "" && catalogEntry(catalog, pn) === null;
+
+  /** Open the catalog's own form for the number on this record, filled in from it. */
+  const openCatalog = async (then: "save" | "return") => {
+    let b = book;
+    if (!b) {
+      try { b = await catalogBook(); setBook(b); } catch { toast({ message: "Could not open the catalog form", tone: "bad" }); return; }
+    }
+    // The unit it went into says what it suits: the asset it is tagged to on
+    // a system, or the record itself on an asset's own page.
+    const tagged = draft.assetId !== null ? systemAssets.find((a) => a.id === draft.assetId) : undefined;
+    const suits = suitsFor(tagged ? { kind: tagged.kind, model: tagged.model } : unit, b);
+    setCataloging({
+      then,
+      seed: {
+        partNumber: pn, name: draft.name.trim(),
+        // A unit on order is a thing in a box to the book; kinds match otherwise.
+        kind: draft.moduleKind ? "part" : draft.kind,
+        assetTypes: suits.assetTypes, models: suits.models,
+      },
+      seedVendor: showCosts && draft.vendor.trim() && draft.cost.trim()
+        ? { vendor: draft.vendor.trim(), price: draft.cost.trim() } : undefined,
+    });
+  };
 
   /**
    * The four pills, over the two fields that actually carry the answer.
@@ -228,7 +289,15 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
 
   const save = () => {
     if (!draft.name.trim() || !form) return;
-    const payload = { ...draft, specs: serializeSpecs(specPairs) };
+    // A new number goes to the book first, through its own form; the record
+    // is written when that form saves (see the PartDialog below).
+    if (form.mode === "new" && uncatalogued && alsoCatalog) { void openCatalog("save"); return; }
+    doSave();
+  };
+
+  const doSave = (partNumber?: string) => {
+    if (!draft.name.trim() || !form) return;
+    const payload = { ...draft, ...(partNumber ? { partNumber } : {}), specs: serializeSpecs(specPairs) };
     startTransition(async () => {
       if (form.mode === "new") {
         const res = await createPart(target, payload);
@@ -240,7 +309,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
           res?.flag ?? "",
         ].filter(Boolean).join(" ");
         setFlag(flagMsg);
-        if (!flagMsg) toast({ message: "Added the part" });
+        if (!flagMsg) toast({ message: partNumber ? `Added the part, and ${partNumber} to the catalog` : "Added the part" });
       } else { await updatePart(form.id, payload); toast({ message: "Saved the part" }); }
       close();
     });
@@ -265,7 +334,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
       )}
 
       {form && (
-        <Dialog open onClose={close} size="lg" title={form.mode === "new" ? "New part" : "Edit part"}
+        <Dialog open={!cataloging} onClose={close} size="lg" title={form.mode === "new" ? "New part" : "Edit part"}
           footer={
             <>
               <span className="dialog-status" />
@@ -285,6 +354,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               <button className="btn" onClick={close} disabled={pending}>Cancel</button>
               <button className="btn accent" onClick={save} disabled={pending}>
                 {pending ? "Saving..." : form.mode !== "new" ? "Save changes"
+                  : uncatalogued && alsoCatalog ? "Next: describe it for the catalog"
                   // The pill decided what this is; the button that commits it
                   // should not go back to calling everything a part.
                   : pillKind === "asset" ? "Add unit"
@@ -392,6 +462,33 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
             <div><label>Vendor</label><input value={draft.vendor} onChange={(e) => setDraft({ ...draft, vendor: e.target.value })} placeholder="Restek" /></div>
             <div><label>Qty</label><input value={draft.qty} onChange={(e) => setDraft({ ...draft, qty: e.target.value })} placeholder="1" /></div>
           </div>
+          {/* The book's side of it. Said only when there is something to say:
+              a number it already knows needs nothing, and somebody who may not
+              write the book is never offered to. */}
+          {uncatalogued && (
+            <div className="parts-catalog-offer">
+              {form.mode === "new" ? (
+                <label className="t-small">
+                  <input type="checkbox" checked={alsoCatalog} onChange={(e) => setAlsoCatalog(e.target.checked)} />
+                  <span>
+                    <b className="mono">{pn}</b> isn&apos;t in the parts catalog yet. <b>Also add it to the catalog</b>
+                    <span className="mut"> - saving opens the catalog&apos;s own form to describe it, then records the part here.</span>
+                  </span>
+                </label>
+              ) : (
+                <div className="t-small" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span><b className="mono">{pn}</b> isn&apos;t in the parts catalog yet.</span>
+                  <button type="button" className="btn sm" onClick={() => void openCatalog("return")}>＋ Add to the catalog</button>
+                </div>
+              )}
+            </div>
+          )}
+          {catalogNote && <div className="t-small mut" style={{ marginBottom: 8 }}>{catalogNote}</div>}
+          {isStaff && form.mode === "new" && pn === "" && catalog !== null && (
+            <div className="mut t-meta" style={{ marginBottom: 8 }}>
+              Give it a part number to put it in the parts catalog too.
+            </div>
+          )}
           {showCosts && (() => {
             // Known offers for the PN as typed - tap one to fill vendor + cost.
             const offers = pricesFor(priceBook, draft.partNumber);
@@ -536,6 +633,26 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
         </Dialog>
       )}
 
+      {cataloging && book && (
+        <PartDialog seed={cataloging.seed} seedVendor={cataloging.seedVendor}
+          assetTypes={book.assetTypes} modelsByType={book.modelsByType}
+          makers={book.makers} today={book.today}
+          onClose={() => {
+            // Closed without saving: back to the record, with nothing written,
+            // and the way to record it without cataloguing said out loud.
+            setCataloging(null);
+            if (form?.mode === "new") setCatalogNote("Not added to the catalog. Save again to describe it, or untick the box to record the part without it.");
+          }}
+          onSaved={(partNumber) => {
+            const then = cataloging.then;
+            setCataloging(null);
+            setCatalog(null); // re-read: the book just changed
+            setCatalogNote("");
+            setDraft((d) => ({ ...d, partNumber }));
+            if (then === "save") doSave(partNumber);
+          }} />
+      )}
+
       {parts.length === 0 && !form && <div className="mut t-body">No parts tracked yet.</div>}
       {(() => {
         const renderRow = (p: Part) => {
@@ -553,7 +670,11 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                 ) : assetLabel(p.assetId) ? (
                   <span className="pill accent">{assetLabel(p.assetId)}</span>
                 ) : null}
-                {p.assetId !== null && !assetLabel(p.assetId) && (
+                {/* Not on the asset's own page: a part tagged to THIS asset is
+                    exactly where it belongs, and the page lists no assets to
+                    name it by - which is what made every row there say
+                    "detached". */}
+                {p.assetId !== null && p.assetId !== target.assetId && !assetLabel(p.assetId) && (
                   <span className="pill faint">asset detached</span>
                 )}
                 {canEdit ? (

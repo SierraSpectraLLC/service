@@ -34,6 +34,8 @@ const loadCatalog = (): Promise<LookupPart[]> => {
 };
 /** Called after the book changes, so the next field to open sees the new part. */
 export const forgetCatalog = () => { cache = null; };
+/** The same shared copy, for a form that needs to ask "is this number in the book?". */
+export const loadCatalogParts = loadCatalog;
 
 /**
  * A part number that resolves against the parts catalog before it is inserted.
