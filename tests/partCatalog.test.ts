@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   allNumbers, catalogEntry, catalogLabel, catalogName, CATALOG_KINDS, cleanAliases, currentNumber,
   isCatalogued, isService, kitContents, lineKindFor, liveNumbers, numberClash, PART_KINDS,
-  quotedUnitCents, searchCatalog, suggestParts, uncatalogued, unitFor, suitsFor,
+  quotedUnitCents, searchCatalog, suggestParts, uncatalogued, unitFor, suitsFor, inBookSpelling, reviewOrder,
 } from "@/lib/partCatalog";
 
 const entry = (over: Partial<import("@/lib/partCatalog").CatalogEntry> = {}) => ({
@@ -128,6 +128,7 @@ describe("seeding the catalog from what the shop actually uses", () => {
     expect(u).toEqual({
       partNumber: "638-59300-00", name: "2500 ml Syringe",
       assetTypes: ["TOC"], models: ["TOC-VW"], sources: ["stock", "maintenance"],
+      kind: "", manufacturer: "", vendor: "", priceCents: null, uses: 2,
     });
   });
 
@@ -142,6 +143,7 @@ describe("seeding the catalog from what the shop actually uses", () => {
     expect(u).toEqual({
       partNumber: "5063-6589", name: "Plunger seal",
       assetTypes: ["Pump", "LC System"], models: ["LC-20AD"], sources: ["kit"],
+      kind: "", manufacturer: "", vendor: "", priceCents: null, uses: 2,
     });
   });
 
@@ -436,5 +438,48 @@ describe("what a part catalogued from a record suits", () => {
 
   it("suits nothing in particular with no unit behind it", () => {
     expect(suitsFor(null, book)).toEqual({ assetTypes: [], models: [] });
+  });
+});
+
+describe("undescribed numbers, ready to approve", () => {
+  it("carries what the records knew: kind, maker, and a vendor with its own price", () => {
+    const [u] = uncatalogued([], [
+      { partNumber: "1R120380-0001", source: "stock" },
+      { partNumber: "1R120380-0001", name: "Power Module - A/C Input", kind: "part", manufacturer: "Thermo",
+        vendor: "Thermo", priceCents: 41250, assetType: "Mass spec", models: ["ISQ 7000"], source: "fitted" },
+      { partNumber: "1R120380-0001", vendor: "eBay", priceCents: 9900, source: "purchasing" },
+    ]);
+    expect(u).toMatchObject({
+      name: "Power Module - A/C Input", kind: "part", manufacturer: "Thermo",
+      vendor: "Thermo", priceCents: 41250, uses: 3, sources: ["stock", "fitted", "purchasing"],
+    });
+  });
+
+  it("never pairs one mention's vendor with another's price", () => {
+    const [u] = uncatalogued([], [
+      { partNumber: "X-1", vendor: "Restek", priceCents: null, source: "fitted" },
+      { partNumber: "X-1", vendor: "", priceCents: 500, source: "fitted" },
+    ]);
+    expect(u).toMatchObject({ vendor: "", priceCents: null });
+  });
+
+  it("ignores a kind the catalog has no word for", () => {
+    const [u] = uncatalogued([], [{ partNumber: "X-2", kind: "labor", source: "fitted" }]);
+    expect(u.kind).toBe("");
+  });
+
+  it("puts the most-used first, then the best filled in", () => {
+    const list = uncatalogued([], [
+      { partNumber: "A-1", source: "stock" },
+      { partNumber: "B-1", source: "fitted" }, { partNumber: "B-1", source: "fitted" },
+      { partNumber: "C-1", name: "Named", source: "fitted" },
+    ]);
+    expect(reviewOrder(list).map((u) => u.partNumber)).toEqual(["B-1", "C-1", "A-1"]);
+  });
+
+  it("offers only the book's own spelling of a fit", () => {
+    const book = { assetTypes: ["Mass spec"], modelsByType: { "Mass spec": ["ISQ 7000"] } };
+    expect(inBookSpelling({ assetTypes: ["Mass Spec", "Detector"], models: ["isq 7000", "ISQ-7000"] }, book))
+      .toEqual({ assetTypes: ["Mass spec"], models: ["ISQ 7000"] });
   });
 });
