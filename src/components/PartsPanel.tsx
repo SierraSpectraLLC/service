@@ -670,7 +670,11 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                 ) : assetLabel(p.assetId) ? (
                   <span className="pill accent">{assetLabel(p.assetId)}</span>
                 ) : null}
-                {p.assetId !== null && !assetLabel(p.assetId) && (
+                {/* Not on the asset's own page: a part tagged to THIS asset is
+                    exactly where it belongs, and the page lists no assets to
+                    name it by - which is what made every row there say
+                    "detached". */}
+                {p.assetId !== null && p.assetId !== target.assetId && !assetLabel(p.assetId) && (
                   <span className="pill faint">asset detached</span>
                 )}
                 {canEdit ? (
