@@ -58,7 +58,7 @@ export type PartPhoto = { id: number; url: string; caption: string };
  */
 export default function PartDialog({
   id, seed, seedLines = [], seedVendor, assetTypes, modelsByType, prices = [], photos = [],
-  makers = [], today = "", onClose, onSaved,
+  makers = [], today = "", onClose, onSaved, review,
 }: {
   /** The part being edited. Absent = a new one. */
   id?: number;
@@ -80,6 +80,13 @@ export default function PartDialog({
   onClose: () => void;
   /** Called after a successful save, with the number that was written. */
   onSaved?: (partNumber: string) => void;
+  /**
+   * Stepping through numbers already used on real work (Settings > Parts,
+   * "Review"). The same form - that is the point - with the queue's buttons:
+   * Save becomes Approve and moves on, Skip leaves this one undescribed, and
+   * closing stops the review rather than the one number.
+   */
+  review?: { position: string; seenOn: string; onSkip: () => void };
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<PartDraft>({ ...emptyPartDraft, ...seed });
@@ -130,8 +137,9 @@ export default function PartDialog({
       }
       // The book just changed; the next field to open must see it.
       forgetCatalog();
-      onClose();
-      toast({ message: `Saved ${draft.partNumber.trim()}` });
+      // In a review the queue moves on to the next number instead of closing.
+      if (!review) onClose();
+      toast({ message: review ? `Approved ${draft.partNumber.trim()}` : `Saved ${draft.partNumber.trim()}` });
       onSaved?.(draft.partNumber.trim());
       router.refresh();
     });
@@ -143,7 +151,9 @@ export default function PartDialog({
         Catalog. It travels with the fields that read it, the way every other
         panel with a maker input does, so the dialog works on any page. */}
     <datalist id="maker-book">{makers.map((m) => <option key={m} value={m} />)}</datalist>
-    <Dialog open onClose={() => onClose()} title={id ? "Edit part number" : "New part number"}
+    <Dialog open onClose={() => onClose()}
+      title={review ? `Review ${review.position}` : id ? "Edit part number" : "New part number"}
+      context={review?.seenOn}
       footer={
         <>
           <span className={`dialog-status${error ? " err" : ""}`}>
@@ -151,9 +161,13 @@ export default function PartDialog({
               ? catalogLabel({ partNumber: draft.partNumber, name: draft.name, manufacturer: draft.manufacturer })
               : "A part number is the one thing this needs.")}
           </span>
-          <button className="btn" onClick={() => onClose()} disabled={pending}>Cancel</button>
+          {review && (
+            <button className="btn" onClick={review.onSkip} disabled={pending}
+              title="Leave this number undescribed and go on to the next">Skip</button>
+          )}
+          <button className="btn" onClick={() => onClose()} disabled={pending}>{review ? "Stop" : "Cancel"}</button>
           <button className="btn accent" onClick={save} disabled={pending || !draft.partNumber.trim()}>
-            {pending ? "Saving..." : "Save part"}
+            {pending ? "Saving..." : review ? "Approve" : "Save part"}
           </button>
         </>
       }>

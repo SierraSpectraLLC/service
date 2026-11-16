@@ -1,8 +1,8 @@
-import { asc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import {
-  instruments, partCatalog, partKitLines, partNumbers, partPhotos, partPrices, parts, pmSchedules,
+  assets, instruments, partCatalog, partKitLines, partNumbers, partPhotos, partPrices, parts, pmSchedules,
   poLines, procedures, purchaseOrders, stockItems, stockrooms, vocabTerms,
 } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
@@ -46,16 +46,28 @@ export default async function PartsCatalogPage({ searchParams }: { searchParams:
     // shelf line to its room, a PO line to its order - so each one borrows the
     // stamp of the record above it. Left unfiltered this was a reading of what
     // every other service company on the instance fits and stocks.
-    db.selectDistinct({ pn: parts.partNumber }).from(parts)
+    //
+    // Each mention brings what its record already knows - the name it was
+    // entered under, its kind, who it was bought from and for how much, and
+    // the unit it went into - so reviewing one is confirming a filled-in form
+    // rather than researching a bare number. Kit contents are skipped: they
+    // arrive through the kit's own lines below, carrying the kit's fit.
+    db.select({
+      pn: parts.partNumber, name: parts.name, kind: parts.kind, vendor: parts.vendor, costCents: parts.costCents,
+      assetKind: assets.kind, assetModel: assets.model, assetMaker: assets.manufacturer,
+    }).from(parts)
       .leftJoin(instruments, eq(instruments.id, parts.instrumentId))
-      .where(tenant === null ? undefined
-        : or(isNull(parts.instrumentId), eq(instruments.tenantOrgId, tenant))),
-    db.selectDistinct({ pn: stockItems.partNumber }).from(stockItems)
+      .leftJoin(assets, eq(assets.id, parts.assetId))
+      .where(and(ne(parts.partNumber, ""), isNull(parts.parentPartId),
+        tenant === null ? undefined : or(isNull(parts.instrumentId), eq(instruments.tenantOrgId, tenant)))),
+    db.select({ pn: stockItems.partNumber, name: stockItems.name, kind: stockItems.kind, costCents: stockItems.unitCostCents })
+      .from(stockItems)
       .innerJoin(stockrooms, eq(stockrooms.id, stockItems.stockroomId))
-      .where(forTenant(stockrooms.tenantOrgId, tenant)),
-    db.selectDistinct({ pn: poLines.partNumber }).from(poLines)
+      .where(and(ne(stockItems.partNumber, ""), forTenant(stockrooms.tenantOrgId, tenant))),
+    db.select({ pn: poLines.partNumber, name: poLines.name, vendor: purchaseOrders.vendor, costCents: poLines.unitCents })
+      .from(poLines)
       .innerJoin(purchaseOrders, eq(purchaseOrders.id, poLines.poId))
-      .where(forTenant(purchaseOrders.tenantOrgId, tenant)),
+      .where(and(ne(poLines.partNumber, ""), forTenant(purchaseOrders.tenantOrgId, tenant))),
   ]);
   // The maker/vendor book, suggested on every manufacturer and vendor field.
   const bookNames = await makerNames(tenant);
@@ -132,9 +144,20 @@ export default async function PartsCatalogPage({ searchParams }: { searchParams:
   });
 
   const used: (string | UsedPart)[] = [
-    ...usedParts.map((r) => ({ partNumber: r.pn, source: "fitted" })),
-    ...usedStock.map((r) => ({ partNumber: r.pn, source: "stock" })),
-    ...usedPo.map((r) => ({ partNumber: r.pn, source: "purchasing" })),
+    ...usedParts.map((r): UsedPart => ({
+      partNumber: r.pn, name: r.name, kind: r.kind, source: "fitted",
+      // The unit it went into is what it suits - and, for a part, who made
+      // it: a part fitted to a Thermo ISQ is most likely Thermo's. Not for a
+      // consumable, where the ferrule in an Agilent is as often Restek's.
+      assetType: r.assetKind ?? undefined, models: r.assetModel ? [r.assetModel] : [],
+      manufacturer: r.kind === "consumable" ? undefined : r.assetMaker ?? undefined,
+      vendor: r.vendor, priceCents: r.costCents,
+    })),
+    // No vendor on a shelf line, so its cost is not a price anybody quoted.
+    ...usedStock.map((r): UsedPart => ({ partNumber: r.pn, name: r.name, kind: r.kind, source: "stock" })),
+    ...usedPo.map((r): UsedPart => ({
+      partNumber: r.pn, name: r.name, source: "purchasing", vendor: r.vendor, priceCents: r.costCents,
+    })),
     ...maintenanceParts,
     ...kitParts,
   ];

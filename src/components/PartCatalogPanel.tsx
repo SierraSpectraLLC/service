@@ -16,7 +16,7 @@ import { formatCents } from "@/lib/money";
 import { isStalePrice } from "@/lib/sourcing";
 import {
   ALIAS_KIND_LABEL, ALIAS_KINDS, catalogLabel, CATALOG_KINDS, isService, isSuperseded, kitContents,
-  MAX_PART_PHOTOS, PART_KIND_LABEL, searchCatalog, unitFor, type PartAlias,
+  inBookSpelling, MAX_PART_PHOTOS, PART_KIND_LABEL, reviewOrder, searchCatalog, unitFor, type PartAlias,
 } from "@/lib/partCatalog";
 import type { UncataloguedPart } from "@/lib/partCatalog";
 import type { Tone } from "@/lib/tones";
@@ -95,6 +95,34 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
      drift apart. See PartDialog. */
   const [sheet, setSheet] = useState<null | { id?: number; seed?: Partial<PartDraft>; lines?: KitLine[] }>(null);
   const [pending, startTransition] = useTransition();
+
+  /*
+   * The review: every number real work has used that the book doesn't
+   * describe, one after another, each in the catalog's own form already
+   * filled in from the records that used it - so cataloguing the shop's parts
+   * is pressing Approve, not typing. Most-used first. A snapshot, so a list
+   * that refreshes as entries land never shuffles under the reviewer.
+   */
+  const [queue, setQueue] = useState<null | { list: UncataloguedPart[]; i: number; approved: number; skipped: number }>(null);
+  const startReview = () => setQueue({ list: reviewOrder(unnamed), i: 0, approved: 0, skipped: 0 });
+  const advance = (how: "approved" | "skipped") => {
+    if (!queue) return;
+    const next = {
+      ...queue, i: queue.i + 1,
+      approved: queue.approved + (how === "approved" ? 1 : 0),
+      skipped: queue.skipped + (how === "skipped" ? 1 : 0),
+    };
+    if (next.i < next.list.length) { setQueue(next); return; }
+    setQueue(null);
+    toast({ message: `Review done - ${next.approved} approved${next.skipped ? `, ${next.skipped} skipped` : ""}` });
+  };
+  const stopReview = () => {
+    if (queue && (queue.approved || queue.skipped)) {
+      toast({ message: `Stopped - ${queue.approved} approved${queue.skipped ? `, ${queue.skipped} skipped` : ""}, ${queue.list.length - queue.i} still to review` });
+    }
+    setQueue(null);
+  };
+  const reviewing = queue ? queue.list[queue.i] : null;
 
   const shown = useMemo(() => searchCatalog(items, query, 200), [items, query]);
 
@@ -234,7 +262,17 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
       <PageHead
         title="Parts catalog"
         sub="What each part number means."
-        actions={<button className="btn sm primary" onClick={() => openAdd()}>+ Part number</button>}
+        actions={
+          <>
+            {unnamed.length > 0 && (
+              <button className="btn sm accent" onClick={startReview}
+                title="Step through the numbers used on systems, assets, stock and orders that the catalog doesn't describe">
+                Review {unnamed.length} used but not described
+              </button>
+            )}
+            <button className="btn sm primary" onClick={() => openAdd()}>+ Part number</button>
+          </>
+        }
       />
       <Toolbar
         search={
@@ -264,7 +302,8 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
       {facet === "undescribed" && (
         <div className="mut t-meta" style={{ margin: "0 0 8px" }}>
           Numbers on real work - fitted, stocked, ordered, named by a maintenance task, or packed
-          inside a kit - with no catalog entry yet. Describing one keeps everything already said about it.
+          inside a kit - with no catalog entry yet. Describing one keeps everything already said about it;
+          <b> Review</b> steps through them all, each filled in from the records that used it.
         </div>
       )}
       <DataTable
@@ -281,6 +320,28 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
           : shownRows.map(toRow)}
         empty={query ? "Nothing matches that" : "Nothing cataloged yet"}
       />
+
+      {reviewing && queue && (
+        <PartDialog
+          // One form per number, so nothing typed for the last one carries over.
+          key={reviewing.partNumber}
+          seed={{
+            partNumber: reviewing.partNumber, name: reviewing.name,
+            kind: reviewing.kind || "part", manufacturer: reviewing.manufacturer,
+            ...inBookSpelling(reviewing, { assetTypes, modelsByType }),
+          }}
+          seedVendor={reviewing.vendor && reviewing.priceCents
+            ? { vendor: reviewing.vendor, price: (reviewing.priceCents / 100).toFixed(2) } : undefined}
+          assetTypes={assetTypes} modelsByType={modelsByType}
+          prices={prices} makers={makers} today={today}
+          review={{
+            position: `${queue.i + 1} of ${queue.list.length}`,
+            seenOn: `Used ${reviewing.uses} time${reviewing.uses === 1 ? "" : "s"} · ${reviewing.sources.join(", ")}`,
+            onSkip: () => advance("skipped"),
+          }}
+          onClose={stopReview}
+          onSaved={() => advance("approved")} />
+      )}
 
       {sheet && (
         <PartDialog

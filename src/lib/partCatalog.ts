@@ -262,6 +262,13 @@ export type UsedPart = {
   models?: string[];
   /** Where it was seen - "maintenance", "fitted", "stock", "purchasing". */
   source?: string;
+  /** What the record called it: part, consumable, kit. */
+  kind?: string;
+  /** Who makes it, when the record knows - the maker of the unit it was fitted to. */
+  manufacturer?: string;
+  /** Who it was bought from, and for how much, when the record says. */
+  vendor?: string;
+  priceCents?: number | null;
 };
 
 export type UncataloguedPart = {
@@ -270,6 +277,14 @@ export type UncataloguedPart = {
   assetTypes: string[];
   models: string[];
   sources: string[];
+  /** The first kind a mention gave it, or "" - the review form opens on it. */
+  kind: string;
+  manufacturer: string;
+  /** A vendor and price from the same mention, so the pair is never mixed up. */
+  vendor: string;
+  priceCents: number | null;
+  /** How many mentions there were: the numbers used most get reviewed first. */
+  uses: number;
 };
 
 /**
@@ -290,8 +305,20 @@ export function uncatalogued(catalog: CatalogEntry[], used: (string | UsedPart)[
     const u: UsedPart = typeof raw === "string" ? { partNumber: raw } : raw;
     const pn = normalizePn(u.partNumber);
     if (!pn || known.has(pn)) continue;
-    const cur = out.get(pn) ?? { partNumber: u.partNumber.trim(), name: "", assetTypes: [], models: [], sources: [] };
+    const cur = out.get(pn) ?? {
+      partNumber: u.partNumber.trim(), name: "", assetTypes: [], models: [], sources: [],
+      kind: "", manufacturer: "", vendor: "", priceCents: null, uses: 0,
+    };
+    cur.uses += 1;
     if (!cur.name && u.name?.trim()) cur.name = u.name.trim();
+    if (!cur.kind && u.kind && (PART_KINDS as readonly string[]).includes(u.kind)) cur.kind = u.kind;
+    if (!cur.manufacturer && u.manufacturer?.trim()) cur.manufacturer = u.manufacturer.trim();
+    // The pair travels together: one mention's vendor with another's price
+    // would be a price nobody was ever quoted.
+    if (cur.priceCents === null && u.vendor?.trim() && typeof u.priceCents === "number" && u.priceCents > 0) {
+      cur.vendor = u.vendor.trim();
+      cur.priceCents = u.priceCents;
+    }
     if (u.assetType?.trim() && !cur.assetTypes.includes(u.assetType.trim())) cur.assetTypes.push(u.assetType.trim());
     for (const m of u.models ?? []) {
       if (m.trim() && !cur.models.some((x) => x.toLowerCase() === m.trim().toLowerCase())) cur.models.push(m.trim());
@@ -461,4 +488,31 @@ export function suitsFor(
   const pools = type ? [book.modelsByType[type] ?? []] : Object.values(book.modelsByType);
   const model = unit.model ? pools.flat().find((m) => same(m, unit.model!)) : undefined;
   return { assetTypes: type ? [type] : [], models: model ? [model] : [] };
+}
+
+/**
+ * The undescribed numbers in the order a reviewer should meet them: the ones
+ * the shop uses most first, and among equals the ones that arrive best filled
+ * in (a name to confirm beats a bare number to research), then by number.
+ */
+export function reviewOrder<T extends UncataloguedPart>(list: T[]): T[] {
+  const filled = (u: T) => (u.name ? 2 : 0) + (u.assetTypes.length || u.models.length ? 1 : 0);
+  return [...list].sort((a, b) => b.uses - a.uses || filled(b) - filled(a)
+    || a.partNumber.localeCompare(b.partNumber, undefined, { sensitivity: "base" }));
+}
+
+/**
+ * A mention's module types and models in the book's own spelling, dropping any
+ * the book doesn't have - the same rule as suitsFor, for a list rather than a
+ * unit, so a review never offers "Mass Spec" to a book that says "Mass spec".
+ */
+export function inBookSpelling(
+  fit: { assetTypes: string[]; models: string[] },
+  book: { assetTypes: string[]; modelsByType: Record<string, string[]> },
+): { assetTypes: string[]; models: string[] } {
+  const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  const allModels = Object.values(book.modelsByType).flat();
+  const pick = (want: string[], have: string[]) =>
+    [...new Set(want.map((w) => have.find((h) => same(h, w))).filter((x): x is string => !!x))];
+  return { assetTypes: pick(fit.assetTypes, book.assetTypes), models: pick(fit.models, allModels) };
 }
