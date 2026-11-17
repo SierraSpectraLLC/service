@@ -103,12 +103,14 @@ Import the repo in Vercel. Add all env vars from `.env`. Then:
   is a supported state - the portal tells clients how to send a check. The
   operator connects their own account through Connect OAuth from Settings >
   Billing; Stripe returns them to `/api/stripe/oauth/callback` on whichever
-  host they were on (apex or www - register both redirect URIs), and every
-  call after that uses the platform key with the `Stripe-Account` header. The
-  account belongs to the operator, not the platform: money moves bank to
-  bank, no card number reaches this server, and Ridgeline never holds funds.
-  The webhook at `/api/stripe/webhook` verifies signatures before parsing
-  anything.
+  host they were on (apex or www - register both redirect URIs). Payments
+  are destination charges: the client pays through the PLATFORM's Stripe,
+  on the operator's behalf, and Stripe sends it on to the operator's
+  account less the platform fee - so the platform pays Stripe's processing
+  fee and takes refunds and disputes first. No card number reaches this
+  server. The webhook at `/api/stripe/webhook` verifies signatures before
+  parsing anything, against `STRIPE_WEBHOOK_SECRET` (the platform's own
+  events) and `STRIPE_CONNECT_WEBHOOK_SECRET` (connected accounts' events).
 - **Cron**: `vercel.json` schedules `GET /api/cron/sheet-sync` and
   `GET /api/cron/daily-digest` hourly. Set `CRON_SECRET` in project env; Vercel
   sends it as the bearer token.

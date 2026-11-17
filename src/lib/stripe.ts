@@ -2,11 +2,18 @@
 //
 // THE SHAPE OF THIS, and why it is the shape it is:
 //
-//   Connect Express. The Stripe account belongs to the OPERATOR - the service
-//   company - not to Ridgeline. Stripe does the KYB on them, money moves bank
-//   to bank from the client to them, and this platform never holds funds. A
-//   platform that holds other people's money is a money transmitter, which is
-//   a licence, an audit and a different company.
+//   Connect, with DESTINATION CHARGES. Each service company - the operator -
+//   connects its own Stripe account, and Stripe does the KYB on them. A client
+//   paying an invoice pays through the PLATFORM's Stripe: the charge is the
+//   platform's, made on the operator's behalf (their name on the checkout and
+//   the client's statement), and Stripe sends it straight on to the
+//   operator's account, less the platform's application fee. The operator's
+//   balance pays out to their bank on their own schedule.
+//
+//   Stripe holds the money the whole way; nothing is parked in the platform's
+//   balance for later. What the platform takes on is the charge itself: it
+//   pays Stripe's processing fee, and refunds and disputes come out of its
+//   balance first. Setting the application fee is how that is paid for.
 //
 //   No card data, ever. The pay page hands off to a Stripe-hosted checkout;
 //   no card number reaches this server, this database, or these logs. That is

@@ -346,8 +346,8 @@ export const orgs = pgTable("orgs", {
   billingPolicy: jsonb("billing_policy"),
   /**
    * The operator's own Stripe Connect account - THEIRS, not the platform's.
-   * Money moves bank to bank between the client and the service company;
-   * Ridgeline never holds funds and never sees a card number. Blank means
+   * A client's payment goes through the platform's Stripe and on to this
+   * account (lib/stripe); nobody here sees a card number. Blank means
    * nobody has connected one, and the pay buttons simply do not render.
    */
   stripeAccountId: text("stripe_account_id").notNull().default(""),

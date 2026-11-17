@@ -8,11 +8,12 @@
 // reading before trusting either file with money.
 //
 // ONE KEY, MANY ACCOUNTS. Every request goes out under the PLATFORM's secret
-// key, and the connected account it concerns rides in the `Stripe-Account`
-// header. That is how Connect works for an account the operator authorized
-// through OAuth (api/stripe/oauth/callback): the platform never holds the
-// operator's own key, and a request without the header would land on the
-// platform's balance instead of theirs.
+// key. A request ABOUT a connected account - is it ready, what did Stripe keep
+// of an old direct charge - carries the account in the `Stripe-Account`
+// header. The checkout does not: it is a destination charge, created on the
+// platform and sent on to the account (see checkoutSession). Either way the
+// platform never holds the operator's own key; the OAuth in
+// api/stripe/oauth/callback gives it the account id and nothing else.
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { platformFee, type PayMethod } from "@/lib/stripe";
@@ -56,9 +57,11 @@ async function call(path: string, body: Record<string, string>, account?: string
  * yet or the lookup fails: a missing fee row is a parity finding, a wrong one
  * is a lie in the books.
  *
- * The payment lives on the CONNECTED account - a direct charge - so the read
- * has to say whose it is; asked without the header, Stripe has never heard of
- * the intent.
+ * For the DIRECT charges made before checkout switched to destination
+ * charges: those live on the CONNECTED account, so the read has to say whose
+ * it is; asked without the header, Stripe has never heard of the intent. A
+ * destination charge needs no lookup - what the operator gave up is the
+ * application fee, and that is on the intent itself.
  */
 export async function paymentFee(paymentIntentId: string, account: string): Promise<number> {
   if (!platformKey() || !paymentIntentId || !account) return 0;
@@ -189,15 +192,22 @@ export async function accountReady(accountId: string): Promise<boolean> {
 /**
  * One checkout, for the two things this app takes money for.
  *
- * Created ON the operator's account - a direct charge, the request sent under
- * their `Stripe-Account` - so the money lands in their balance and the
- * processing fee is theirs; the application fee is the platform's cut and is
- * zero unless an instance has set one. `ref` is what the webhook matches the
- * payment back to, and it is a key and an id rather than an invoice id
- * because a referral fee between two service companies is not an invoice - it
- * moves the same way and settles a different row. Both go on the SESSION and
- * the PAYMENT INTENT: Stripe hands back whichever it feels like, and a payment
- * nobody can attribute is worse than a payment that failed.
+ * A DESTINATION CHARGE: created on the PLATFORM's account - no
+ * `Stripe-Account` header - so the payment shows up in the platform's Stripe
+ * first, and Stripe moves it on to the operator's connected account at once,
+ * less the application fee. `on_behalf_of` makes the operator the business of
+ * record: their name is what the client sees on checkout and on their
+ * statement, because it is their invoice being paid. Stripe's processing fee
+ * is charged to the platform, not the operator; the application fee is what
+ * the operator gives up, and the platform's margin is that less Stripe's cut.
+ *
+ * `ref` is what the webhook matches the payment back to, and it is a key and
+ * an id rather than an invoice id because a referral fee between two service
+ * companies is not an invoice - it moves the same way and settles a different
+ * row. Both go on the SESSION and the PAYMENT INTENT: Stripe hands back
+ * whichever it feels like, and a payment nobody can attribute is worse than a
+ * payment that failed. The destination rides in the metadata too, as a second
+ * way for the webhook to say whose books the money belongs in.
  */
 export type PayRef = { key: "invoiceId" | "referralFeeId"; id: number; label: string };
 
@@ -211,10 +221,14 @@ export async function checkoutSession(input: {
   cancelUrl: string;
   customerEmail?: string;
 }): Promise<string> {
-  if (!input.accountId) throw new Error("No connected Stripe account to charge on.");
+  if (!input.accountId) throw new Error("No connected Stripe account to pay into.");
   const fee = platformFee(input.amountCents, input.platformFeeBps);
   const body: Record<string, string> = {
     mode: "payment",
+    "payment_intent_data[transfer_data][destination]": input.accountId,
+    "payment_intent_data[on_behalf_of]": input.accountId,
+    "metadata[ridgeline_account]": input.accountId,
+    "payment_intent_data[metadata][ridgeline_account]": input.accountId,
     "line_items[0][quantity]": "1",
     "line_items[0][price_data][currency]": "usd",
     "line_items[0][price_data][unit_amount]": String(input.amountCents),
@@ -235,8 +249,34 @@ export async function checkoutSession(input: {
   }
   if (fee > 0) body["payment_intent_data[application_fee_amount]"] = String(fee);
   if (input.customerEmail) body.customer_email = input.customerEmail;
-  const session = await call("/checkout/sessions", body, input.accountId);
+  const session = await call("/checkout/sessions", body);
   return String(session.url);
+}
+
+/**
+ * The connected account a platform-side payment belongs to: where it was sent
+ * on to, who it was made on behalf of, or - failing both - what the checkout
+ * wrote in its metadata. Empty when the object names none, which is every
+ * payment this app did not create. Only ever read off a verified webhook.
+ */
+export function destinationOf(obj: Record<string, unknown>): string {
+  const s = (v: unknown) => (typeof v === "string" ? v : "");
+  const td = obj.transfer_data as { destination?: unknown } | null | undefined;
+  const md = (obj.metadata ?? {}) as Record<string, unknown>;
+  return s(td?.destination) || s(obj.on_behalf_of) || s(md.ridgeline_account);
+}
+
+/**
+ * Every webhook signing secret this instance answers to. The platform's own
+ * events (destination charges, their refunds) and its connected accounts'
+ * events (payouts, and direct charges made before the switch) come from two
+ * endpoints in Stripe, and each endpoint signs with its own secret.
+ */
+export function webhookSecrets(env: Record<string, string | undefined> = process.env): string[] {
+  return [env.STRIPE_WEBHOOK_SECRET, env.STRIPE_CONNECT_WEBHOOK_SECRET]
+    .flatMap((v) => (v ?? "").split(","))
+    .map((v) => v.trim())
+    .filter(Boolean);
 }
 
 /**
