@@ -48,7 +48,7 @@ beforeAll(async () => {
     INSERT INTO house_members (email, org_id, role, name) VALUES ('joe@sierra.test', 3, 'owner', 'Joe');
   `);
 });
-beforeEach(() => { process.env.STRIPE_WEBHOOK_SECRET = SECRET; });
+beforeEach(() => { process.env.STRIPE_WEBHOOK_SECRET = SECRET; delete process.env.STRIPE_CONNECT_WEBHOOK_SECRET; });
 
 /** A sent invoice with one line, in the workspace given. */
 async function sentInvoice(number: string, cents: number, tenant = SIERRA, orgId = LABZEN): Promise<number> {
@@ -65,9 +65,9 @@ const shape = (e: { lines: { account: string; debitCents: number; creditCents: n
   e.lines.map((l) => [l.account, l.debitCents, l.creditCents] as const).sort((a, b) => a[0].localeCompare(b[0]));
 
 let n = 0;
-const signed = (event: object, raw = JSON.stringify(event)) => {
+const signed = (event: object, raw = JSON.stringify(event), secret = SECRET) => {
   const t = Math.floor(Date.now() / 1000);
-  const v1 = createHmac("sha256", SECRET).update(`${t}.${raw}`).digest("hex");
+  const v1 = createHmac("sha256", secret).update(`${t}.${raw}`).digest("hex");
   return new Request("http://x/api/stripe/webhook", { method: "POST", body: raw, headers: { "stripe-signature": `t=${t},v1=${v1}` } });
 };
 const intent = (over: Record<string, unknown>, account = ACCOUNT) => ({
@@ -202,6 +202,69 @@ describe("POST /api/stripe/webhook", () => {
     expect(await res.json()).toEqual({ posted: "po_1" });
     const stranger = await POST(signed({ id: "evt_po2", type: "payout.paid", account: "acct_x", data: { object: { id: "po_2", amount: 5 } } }));
     expect(await stranger.json()).toEqual({ ignored: "no workspace owns that account" });
+  });
+
+  // ── Destination charges: the platform's own events, with no account on them ──
+  const platformIntent = (over: Record<string, unknown>) => ({
+    id: `evt_${++n}`, type: "payment_intent.succeeded", created: 1789516800,
+    data: { object: {
+      object: "payment_intent", payment_method_types: ["card"], created: 1789516800,
+      transfer_data: { destination: ACCOUNT }, on_behalf_of: ACCOUNT, ...over,
+    } },
+  });
+
+  it("settles a destination charge in the workspace it was sent on to, with the platform fee as the cost", async () => {
+    const id = await sentInvoice("INV-4101", 100000);
+    const res = await POST(signed(platformIntent({
+      // pi_known would read 388 off a balance transaction: on the platform that
+      // is Stripe's fee to the PLATFORM, and must not land in Sierra's books.
+      id: "pi_known", amount_received: 100000, application_fee_amount: 250,
+      metadata: { ridgeline_invoice_id: String(id), ridgeline_account: ACCOUNT },
+    })));
+    expect(await res.json()).toEqual({ recorded: id });
+    expect((await paymentsOn(id))[0]).toMatchObject({ amountCents: 100000, reference: "pi_known", tenantOrgId: SIERRA });
+    expect(await statusOf(id)).toBe("paid");
+    expect((await ledger.timelineFor(SIERRA, "invoice", id)).map(shape)).toEqual([
+      [["receivable", 0, 100000], ["stripe", 100000, 0]],
+      [["cost_processing", 250, 0], ["stripe", 0, 250]],
+    ]);
+  });
+
+  it("never settles a destination charge in a workspace it was not sent to", async () => {
+    const id = await sentInvoice("INV-4102", 40000);
+    const res = await POST(signed(platformIntent({
+      id: "pi_sent_to_rival", amount_received: 40000, transfer_data: { destination: "acct_rival" }, on_behalf_of: "acct_rival",
+      metadata: { ridgeline_invoice_id: String(id) },
+    })));
+    expect(await res.json()).toMatchObject({ reason: "that invoice is not in the workspace the money reached" });
+    expect(await paymentsOn(id)).toHaveLength(0);
+    // A platform payment that went to nobody here records nothing.
+    const none = await POST(signed(platformIntent({ id: "pi_plain", amount_received: 500, transfer_data: null, on_behalf_of: null })));
+    expect(await none.json()).toEqual({ ignored: "no workspace owns that account" });
+  });
+
+  it("records a destination charge's refund in the workspace it was sent on to", async () => {
+    const id = await sentInvoice("INV-4103", 30000);
+    await POST(signed(platformIntent({ id: "pi_dest_refund", amount_received: 30000, metadata: { ridgeline_invoice_id: String(id) } })));
+    const res = await POST(signed({
+      id: "evt_dr1", type: "charge.refunded", created: 1789603200,
+      data: { object: { object: "charge", id: "ch_dest", payment_intent: "pi_dest_refund", amount: 30000, amount_refunded: 30000, transfer_data: { destination: ACCOUNT } } },
+    }));
+    expect(await res.json()).toEqual({ refunded: 30000 });
+    expect(await statusOf(id)).toBe("sent");
+  });
+
+  it("leaves the platform's own payouts out of every workspace's books", async () => {
+    const res = await POST(signed({ id: "evt_platform_po", type: "payout.paid", data: { object: { id: "po_platform", amount: 9000, metadata: { ridgeline_account: ACCOUNT } } } }));
+    expect(await res.json()).toEqual({ ignored: "nothing to post" });
+  });
+
+  it("answers the connected-accounts endpoint under its own secret", async () => {
+    process.env.STRIPE_CONNECT_WEBHOOK_SECRET = "whsec_connect";
+    const event = { id: "evt_po_connect", type: "payout.paid", account: ACCOUNT, data: { object: { id: "po_c", amount: 1200, arrival_date: 1789516800 } } };
+    expect(await (await POST(signed(event, JSON.stringify(event), "whsec_connect"))).json()).toEqual({ posted: "po_c" });
+    const forged = { ...event, id: "evt_forged" };
+    expect((await POST(signed(forged, JSON.stringify(forged), "whsec_wrong"))).status).toBe(400);
   });
 
   it("still listens to one event for money in", async () => {

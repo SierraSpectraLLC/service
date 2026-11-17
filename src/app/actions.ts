@@ -17624,8 +17624,9 @@ export async function saveOrgBilling(orgId: number, data: {
  * Send the owner to Stripe to authorize this platform on their account.
  *
  * Connect OAuth: the account is THEIRS - an existing Stripe account or one
- * they make on the spot - and what comes back is its id, nothing more. Money
- * moves bank to bank and Ridgeline never holds funds. `origin` is the host
+ * they make on the spot - and what comes back is its id, nothing more.
+ * Payments go through the platform's Stripe and on to that account
+ * (lib/stripe). `origin` is the host
  * the owner is on (apex or www), so Stripe returns them to the same one and
  * the session cookie is still there when it does; anything unexpected falls
  * back to APP_URL (lib/stripe.connectOrigin).

@@ -4,7 +4,7 @@ import {
   claimEvent, forgetEvent, orgForAccount, recordReferralPayment, recordStripePayment, recordStripePayout,
   recordStripeRefund, suggestStripePayment,
 } from "@/lib/stripeSettle";
-import { paymentFee, verifyWebhook } from "@/lib/stripeApi";
+import { destinationOf, paymentFee, verifyWebhook, webhookSecrets } from "@/lib/stripeApi";
 import { shopToday } from "@/lib/shopday";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +34,22 @@ function methodOf(obj: StripeObject): "card" | "ach" {
   return /bank|ach|customer_balance/.test(kind) ? "ach" : "card";
 }
 
+/**
+ * The connected account an event is about. A connected account's own event
+ * (a payout, a direct charge from before the switch) says so on the event.
+ * The platform's own events say nothing there: a destination charge, and its
+ * refund, are the platform's objects, and name the account they were sent on
+ * to. Only money-in and money-back read the object - a payout of the
+ * platform's own balance belongs to no workspace and must stay that way.
+ */
+function accountOf(event: StripeEvent): string {
+  const onEvent = str(event.account);
+  if (onEvent) return onEvent;
+  const type = str(event.type);
+  if (type !== "payment_intent.succeeded" && type !== "charge.refunded") return "";
+  return destinationOf(event.data?.object ?? {});
+}
+
 /** The invoice named on the object, under the name this app writes or the older one. */
 function invoiceIdOn(obj: StripeObject): number | null {
   const md = (obj.metadata ?? {}) as Record<string, unknown>;
@@ -54,21 +70,23 @@ function invoiceIdOn(obj: StripeObject): number | null {
  * attacker which part of their forgery was wrong is helping them.
  *
  * Then, in order: the event id is claimed, so a redelivery is answered and
- * not re-run; the connected account on the event says WHOSE books this is;
+ * not re-run; the connected account - on the event, or for the platform's own
+ * destination charges the one the money was sent on to - says WHOSE books
+ * this is;
  * and only an invoice in that workspace can be settled by it. Money with no
  * invoice named is never guessed at - it becomes a suggestion somebody
  * confirms on the money overview.
  */
 export async function POST(req: Request) {
-  const secret = (process.env.STRIPE_WEBHOOK_SECRET ?? "").trim();
-  if (!secret) {
+  const secrets = webhookSecrets();
+  if (!secrets.length) {
     // Not configured is not an error state - this instance simply takes no
     // online payments - but it must never fall through to processing.
     return NextResponse.json({ skipped: "no webhook secret configured" }, { status: 200 });
   }
   const raw = await req.text();
   const sig = req.headers.get("stripe-signature") ?? "";
-  if (!verifyWebhook(raw, sig, secret)) {
+  if (!secrets.some((secret) => verifyWebhook(raw, sig, secret))) {
     return NextResponse.json({ error: "bad signature" }, { status: 400 });
   }
 
@@ -80,7 +98,7 @@ export async function POST(req: Request) {
   }
   const eventId = str(event.id);
   const type = str(event.type);
-  const account = str(event.account);
+  const account = accountOf(event);
   if (!eventId || !type) return NextResponse.json({ error: "bad payload" }, { status: 400 });
 
   // Whose books. Resolved before the claim so the event row carries it.
@@ -106,7 +124,10 @@ export async function POST(req: Request) {
 
 async function handle(event: StripeEvent, org: { id: number; name: string } | null): Promise<Record<string, unknown>> {
   const type = str(event.type);
-  const account = str(event.account);
+  const account = accountOf(event);
+  // Made on the connected account (a direct charge) or on the platform and
+  // sent on (a destination charge). It decides where the operator's cost is.
+  const direct = Boolean(str(event.account));
   const obj = event.data?.object ?? {};
 
   // The balance went to the bank. A payout is not a payment - no invoice, no
@@ -144,10 +165,14 @@ async function handle(event: StripeEvent, org: { id: number; name: string } | nu
 
     const invoiceId = invoiceIdOn(obj);
     if (invoiceId !== null) {
-      // Stripe's cut, read off the charge: its own cost row beside the
-      // payment. Best effort - a fee that has not settled yet is zero here
-      // and a parity finding later, not a 500.
-      const feeCents = intentId ? await paymentFee(intentId, account).catch(() => 0) : 0;
+      // What the operator gave up, as its own cost row beside the payment.
+      // On a destination charge that is the application fee, on the intent:
+      // Stripe's own fee is the platform's. On a direct charge it is Stripe's
+      // cut, read off the charge - best effort, so a fee that has not settled
+      // yet is zero here and a parity finding later, not a 500.
+      const feeCents = !direct
+        ? cents(obj.application_fee_amount)
+        : intentId ? await paymentFee(intentId, account).catch(() => 0) : 0;
       const r = await recordStripePayment({
         invoiceId, amountCents, reference, method, feeCents, tenantOrgId: org.id, receivedOn,
       });

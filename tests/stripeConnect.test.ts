@@ -6,7 +6,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectOrigin } from "@/lib/stripe";
 import {
-  accountReady, checkoutSession, connectAuthorizeUrl, exchangeConnectCode, readConnectState, signConnectState,
+  accountReady, checkoutSession, connectAuthorizeUrl, destinationOf, exchangeConnectCode, readConnectState, signConnectState,
+  webhookSecrets,
 } from "@/lib/stripeApi";
 import { safeNext } from "@/lib/loginNext";
 
@@ -124,7 +125,7 @@ describe("connectOrigin", () => {
 });
 
 describe("calls about a connected account", () => {
-  it("creates the checkout ON the operator's account, as a direct charge", async () => {
+  it("creates the checkout on the platform and sends it on to the operator - a destination charge", async () => {
     answer = () => reply(200, { url: "https://checkout.stripe.com/c/pay/cs_1" });
     const url = await checkoutSession({
       accountId: "acct_operator", ref: { key: "invoiceId", id: 14, label: "Invoice INV-14" },
@@ -135,13 +136,37 @@ describe("calls about a connected account", () => {
     expect(calls[0].url).toBe("https://api.stripe.com/v1/checkout/sessions");
     const h = headersOf(calls[0]);
     expect(h.Authorization).toBe("Bearer sk_test_platform");
-    expect(h["Stripe-Account"]).toBe("acct_operator");
+    // Made AS the platform: a Stripe-Account header would make it a direct
+    // charge on the operator's account, and Stripe refuses the destination
+    // fields on one of those.
+    expect(h["Stripe-Account"]).toBeUndefined();
     const body = bodyOf(calls[0]);
+    expect(body.get("payment_intent_data[transfer_data][destination]")).toBe("acct_operator");
+    expect(body.get("payment_intent_data[on_behalf_of]")).toBe("acct_operator");
     expect(body.get("payment_intent_data[application_fee_amount]")).toBe("210");
+    expect(body.get("payment_intent_data[metadata][ridgeline_account]")).toBe("acct_operator");
     expect(body.get("metadata[invoiceId]")).toBe("14");
-    // Destination-charge fields would be refused on a request made as the account.
-    expect(body.has("payment_intent_data[on_behalf_of]")).toBe(false);
-    expect(body.has("payment_intent_data[transfer_data][destination]")).toBe(false);
+  });
+
+  it("will not create a checkout with nowhere to send the money", async () => {
+    await expect(checkoutSession({
+      accountId: "", ref: { key: "invoiceId", id: 1, label: "x" }, amountCents: 100, method: "card",
+      platformFeeBps: 0, successUrl: "https://x/s", cancelUrl: "https://x/c",
+    })).rejects.toThrow(/No connected Stripe account/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("reads whose a platform-side payment is off the payment", () => {
+    expect(destinationOf({ transfer_data: { destination: "acct_a" }, on_behalf_of: "acct_b" })).toBe("acct_a");
+    expect(destinationOf({ on_behalf_of: "acct_b" })).toBe("acct_b");
+    expect(destinationOf({ metadata: { ridgeline_account: "acct_c" } })).toBe("acct_c");
+    expect(destinationOf({ transfer_data: null })).toBe("");
+  });
+
+  it("answers to both webhook endpoints' secrets", () => {
+    expect(webhookSecrets({ STRIPE_WEBHOOK_SECRET: " whsec_a ", STRIPE_CONNECT_WEBHOOK_SECRET: "whsec_b" })).toEqual(["whsec_a", "whsec_b"]);
+    expect(webhookSecrets({ STRIPE_WEBHOOK_SECRET: "whsec_a,whsec_old" })).toEqual(["whsec_a", "whsec_old"]);
+    expect(webhookSecrets({})).toEqual([]);
   });
 
   it("asks the account itself whether it may be paid into", async () => {

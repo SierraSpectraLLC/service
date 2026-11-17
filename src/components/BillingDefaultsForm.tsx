@@ -226,7 +226,7 @@ export default function BillingDefaultsForm({
                 </Field>
               </>
             )}
-            <Field label="Platform fee (%)" htmlFor="pfee" hint="Platform's cut of processed volume">
+            <Field label="Platform fee (%)" htmlFor="pfee" hint="Taken from each payment before it reaches you. Stripe's processing fee comes out of it.">
               <input id="pfee" inputMode="decimal" style={{ width: 90 }} value={form.platformFee}
                 onChange={(e) => set("platformFee", e.target.value)} />
             </Field>
