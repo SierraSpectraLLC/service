@@ -18,7 +18,7 @@ import {
   serviceReports,
   awards, shareLinkSystems, providerProfiles, providerLinks, clientShares, referralFees,
   leads, leadOffers, calendarNotes,
-  catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
+  catalogRefs, catalogSeries, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, bills, stipends, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
   dunningEvents, creditOverrides, quotes, quoteLines, payroll, perks, bugReports,
@@ -259,7 +259,8 @@ import { cleanMakerName } from "@/lib/makers";
 import { cleanProvenance, isPublishable, PROVENANCE_LABEL } from "@/lib/provenance";
 import { refScopeLabel } from "@/lib/catalogRefs";
 import { partsFlag, visitFlag } from "@/lib/entitlementFlags";
-import { parseModelSpecs, serializeModelSpecs } from "@/lib/modelSpecs";
+import { ownSpecsFrom, parseModelSpecs, serializeModelSpecs } from "@/lib/modelSpecs";
+import { loadSeriesSheets, seriesSpecsFor, specsForTerm } from "@/lib/modelSpecsData";
 import { MAX_SUMMARY, modelSlug, publishBlockers, uniqueSlug } from "@/lib/publicCatalog";
 import { makerNames, tenantCatalogIds } from "@/lib/makersData";
 import {
@@ -15287,20 +15288,90 @@ export async function setModelSpecs(
   const [term] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
   if (!term || term.kind !== "model") return { error: "Not found" };
   if (readTenant(u) !== null && term.tenantOrgId !== readTenant(u)) return { error: "Not found" };
-  const next = serializeModelSpecs(specs);
+  // The editor works on the MERGED sheet when the model is in a family. Only
+  // what differs from the family is this model's to keep: a row that reads
+  // exactly what every ISQ says is inherited, and must go on following the
+  // ISQ sheet rather than freezing here as a copy. See lib/modelSpecs.
+  const family = seriesSpecsFor(await loadSeriesSheets(term.tenantOrgId), term.assetType, term.series);
+  const next = serializeModelSpecs(ownSpecsFrom(specs, family));
   if (next === term.specs) return {};
   const before = parseModelSpecs(term.specs);
   const after = parseModelSpecs(next);
   await db.update(vocabTerms).set({ specs: next }).where(eq(vocabTerms.id, termId));
   await audit({
     actor: u.email, entityType: "vocab", entityId: termId, tenantOrgId: term.tenantOrgId,
-    action: `updated ${term.name}'s spec sheet: ${after.length} row${after.length === 1 ? "" : "s"} (was ${before.length})`,
+    action: `updated ${term.name}'s spec sheet: ${after.length} row${after.length === 1 ? "" : "s"}`
+      + `${family.length ? ` of its own beside the ${term.series} sheet` : ""} (was ${before.length})`,
     field: "specs",
     oldValue: before.map((s) => `${s.name}: ${s.value}`).join("; ").slice(0, 500),
     newValue: after.map((s) => `${s.name}: ${s.value}`).join("; ").slice(0, 500),
   });
   revalidatePath("/settings/catalog");
   revalidatePath(`/catalog/${termId}`);
+  return {};
+}
+
+/**
+ * Replace a FAMILY's spec sheet - the rows every model in the series shares.
+ *
+ * Reached through one of its members rather than by name, so the family is
+ * whichever one that model's catalog entry says and the caller's rights are
+ * the same as for editing the model. Every member reads the new sheet at
+ * once, except where a member has written a different value of its own
+ * (lib/modelSpecs.effectiveSheet); members whose own rows now merely repeat
+ * the family's are tidied so they go back to following it.
+ */
+export async function setSeriesSpecs(
+  termId: number, specs: { name: string; value: string }[],
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [term] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
+  if (!term || term.kind !== "model") return { error: "Not found" };
+  if (readTenant(u) !== null && term.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  if (!term.series.trim()) return { error: `${term.name} is in no series yet - put it in one first.` };
+
+  const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  const existing = (await db.select().from(catalogSeries)
+    .where(and(eq(catalogSeries.assetType, term.assetType), forTenant(catalogSeries.tenantOrgId, term.tenantOrgId))))
+    .find((s) => same(s.name, term.series)) ?? null;
+  const next = serializeModelSpecs(specs);
+  if (next === (existing?.specs ?? "")) return {};
+  const before = parseModelSpecs(existing?.specs ?? "");
+  const after = parseModelSpecs(next);
+
+  let seriesId: number;
+  if (existing) {
+    await db.update(catalogSeries).set({ specs: next }).where(eq(catalogSeries.id, existing.id));
+    seriesId = existing.id;
+  } else {
+    const [made] = await db.insert(catalogSeries).values({
+      tenantOrgId: term.tenantOrgId, assetType: term.assetType, name: term.series.trim(), specs: next,
+    }).returning({ id: catalogSeries.id });
+    seriesId = made.id;
+  }
+
+  // Members whose own rows now say exactly what the family says: drop those
+  // rows, so a later change to the family reaches them. Done here because the
+  // family changed under them; a member's own editor does the same for itself.
+  const members = (await db.select().from(vocabTerms)
+    .where(and(eq(vocabTerms.kind, "model"), eq(vocabTerms.assetType, term.assetType), forTenant(vocabTerms.tenantOrgId, term.tenantOrgId))))
+    .filter((m) => same(m.series, term.series));
+  for (const m of members) {
+    const tidy = serializeModelSpecs(ownSpecsFrom(parseModelSpecs(m.specs), after));
+    if (tidy !== m.specs) await db.update(vocabTerms).set({ specs: tidy }).where(eq(vocabTerms.id, m.id));
+    revalidatePath(`/catalog/${m.id}`);
+    if (m.published && m.publicSlug) revalidatePath(`/equipment/${m.publicSlug}`);
+  }
+
+  await audit({
+    actor: u.email, entityType: "catalog_series", entityId: seriesId, tenantOrgId: term.tenantOrgId,
+    action: `updated the ${term.series} series sheet (${term.assetType}): ${after.length} row${after.length === 1 ? "" : "s"}`
+      + ` (was ${before.length}), shared by ${members.length} model${members.length === 1 ? "" : "s"}`,
+    field: "specs",
+    oldValue: before.map((s) => `${s.name}: ${s.value}`).join("; ").slice(0, 500),
+    newValue: after.map((s) => `${s.name}: ${s.value}`).join("; ").slice(0, 500),
+  });
+  revalidatePath("/settings/catalog");
   return {};
 }
 
@@ -15363,7 +15434,8 @@ export async function setModelPublished(termId: number, published: boolean): Pro
 
   const blockers = publishBlockers({
     manufacturer: term.manufacturer, name: term.name, summary: term.publicSummary,
-    specs: parseModelSpecs(term.specs), hasPhoto: !!term.photoUrl,
+    // The sheet the page will show: the family's rows count as the model's.
+    specs: specsForTerm(term, await loadSeriesSheets(term.tenantOrgId)), hasPhoto: !!term.photoUrl,
   });
   if (blockers.length) return { error: blockers[0] };
 

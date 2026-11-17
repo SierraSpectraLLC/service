@@ -59,7 +59,7 @@ import SiteCard from "@/components/SiteCard";
 import MaintenancePanel from "@/components/MaintenancePanel";
 import ReferencePanel from "@/components/ReferencePanel";
 import { refsForUnits, withSeries } from "@/lib/catalogRefs";
-import { parseModelSpecs } from "@/lib/modelSpecs";
+import { loadSeriesSheets, specsForTerm } from "@/lib/modelSpecsData";
 import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import HoursPanel from "@/components/HoursPanel";
 import DiscussionPanel from "@/components/DiscussionPanel";
@@ -149,6 +149,9 @@ export default async function InstrumentPage({ params, searchParams }: {
   // tagged to no category is universal kit, so it's always offered.
   const catalogModels: Record<string, string[]> = {};
   const gridModels: Record<string, { name: string; manufacturer: string }[]> = {};
+  // The family sheets behind the modules' spec fold-outs: one query, whatever
+  // the module count. A model in a series shows the series' rows under its own.
+  const seriesSheets = await loadSeriesSheets(await viewTenant(user));
   for (const v of vocabRows) {
     if (v.kind !== "model" || !v.assetType) continue;
     if (v.categories.length && !v.categories.some((c) => c.toLowerCase() === inst.category.trim().toLowerCase())) continue;
@@ -881,7 +884,7 @@ export default async function InstrumentPage({ params, searchParams }: {
                 return ({
                 id: a.id, kind: a.kind, model: a.model, serial: a.serial, status: a.status, note: a.note,
                 servesAssetId: a.servesAssetId, servesRole: a.servesRole,
-                specs: term ? parseModelSpecs(term.specs) : [],
+                specs: term ? specsForTerm(term, seriesSheets) : [],
                 specTermId: term?.id ?? null,
                 ...unitPhoto(a),
                 openItems:

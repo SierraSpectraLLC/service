@@ -65,6 +65,67 @@ export function mergeModelSpecs(mine: Spec[], incoming: Spec[]): Spec[] {
   return [...mine, ...incoming.filter((s) => !have.has(s.name.toLowerCase()))].slice(0, MAX_SPECS);
 }
 
+// ── A family's sheet, and a model's place in it ─────────────────────────────
+//
+// Every ISQ shares most of its numbers; the ISQ-LT differs in one or two. So
+// the family (vocab_terms.series) gets a sheet of its own (catalog_series),
+// and a model's own sheet holds ONLY what differs. What a reader sees is the
+// two merged, the model's row winning wherever both name the same spec.
+// Change a shared number on the family and every member changes; change it
+// on one model and that model alone does, and keeps doing so until its row is
+// taken away again - which is what "allow me to change 1 or 2 at will" means.
+
+const key = (name: string) => name.trim().toLowerCase();
+
+/**
+ * One row of the merged sheet, and where it came from:
+ *   series    the family's value, this model says nothing of its own
+ *   override  the family has a value and this model replaced it
+ *   own       this model alone has the row
+ * `seriesValue` is what the family says, on an override, so the editor can
+ * offer to go back to it.
+ */
+export type SheetRow = Spec & { source: "series" | "override" | "own"; seriesValue?: string };
+
+/**
+ * The sheet a reader sees. Family order first - the shared sheet is the one
+ * written to read top-down - then whatever is this model's alone, in its own
+ * order. A model in no family is all "own".
+ */
+export function effectiveSheet(own: Spec[], series: Spec[]): SheetRow[] {
+  const mine = new Map(own.map((s) => [key(s.name), s]));
+  const shared = new Set(series.map((s) => key(s.name)));
+  const fromSeries: SheetRow[] = series.map((s) => {
+    const o = mine.get(key(s.name));
+    return o
+      ? { name: s.name, value: o.value, source: "override", seriesValue: s.value }
+      : { name: s.name, value: s.value, source: "series" };
+  });
+  const onlyMine: SheetRow[] = own.filter((s) => !shared.has(key(s.name))).map((s) => ({ ...s, source: "own" }));
+  return [...fromSeries, ...onlyMine].slice(0, MAX_SPECS);
+}
+
+/** The same merge as plain name/value rows - for everything that only displays. */
+export const effectiveSpecs = (own: Spec[], series: Spec[]): Spec[] =>
+  effectiveSheet(own, series).map(({ name, value }) => ({ name, value }));
+
+/**
+ * What a model should STORE after its merged sheet has been edited: only the
+ * rows that are its own. A row that reads exactly what the family says is not
+ * written down - it is inherited, and will follow the family when the family
+ * changes. A row the family has that the editor blanked out is dropped too,
+ * which puts it back on the family's value: a model cannot subtract a shared
+ * spec, only say a different one, and taking a spec off every ISQ is an edit
+ * to the ISQ sheet.
+ */
+export function ownSpecsFrom(edited: { name: string; value: string }[], series: Spec[]): Spec[] {
+  const shared = new Map(series.map((s) => [key(s.name), s.value]));
+  return edited
+    .map(cleanOne)
+    .filter((s): s is Spec => s !== null)
+    .filter((s) => shared.get(key(s.name)) !== s.value);
+}
+
 /** Every distinct spec name across sibling sheets - the datalist's rows. */
 export function specNameSuggestions(sheets: Spec[][]): string[] {
   const seen = new Map<string, string>();

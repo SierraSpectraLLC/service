@@ -28,7 +28,7 @@ import { mergeAssetHistory } from "@/lib/assetHistory";
 import { unitLabel } from "@/lib/assetServes";
 import ReferencePanel from "@/components/ReferencePanel";
 import SpecTable from "@/components/SpecTable";
-import { parseModelSpecs } from "@/lib/modelSpecs";
+import { loadSeriesSheets, specsForTerm } from "@/lib/modelSpecsData";
 import { refsForUnits, withSeries } from "@/lib/catalogRefs";
 import { copyTargetsFor } from "@/lib/copyTargets";
 import { canOfferResale, resaleFlagFor } from "@/lib/owner";
@@ -243,7 +243,8 @@ export default async function AssetPage({ params, searchParams }: {
   const specTerm = asset.model ? vocab.find((v) => v.kind === "model"
     && v.assetType.trim().toLowerCase() === asset.kind.trim().toLowerCase()
     && v.name.trim().toLowerCase() === asset.model.trim().toLowerCase()) ?? null : null;
-  const modelSpecs = specTerm ? parseModelSpecs(specTerm.specs) : [];
+  // Its own rows over its family's - every ISQ shows the ISQ numbers.
+  const modelSpecs = specTerm ? specsForTerm(specTerm, await loadSeriesSheets(specTerm.tenantOrgId)) : [];
   const coverSrc = coverId !== null ? fileSrc(coverId) : unitStock ? stockSrc(unitStock.id) : "";
   // The unit's own recurring upkeep, wherever it currently sits.
   const pmRows = await db.select().from(pmSchedules).where(eq(pmSchedules.assetId, assetId)).orderBy(asc(pmSchedules.nextDue));

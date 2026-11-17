@@ -17,6 +17,7 @@ import { appUrl } from "@/lib/appUrl";
 import { makerNames } from "@/lib/makersData";
 import { getModules } from "@/lib/flags";
 import { parseModelSpecs, specNameSuggestions } from "@/lib/modelSpecs";
+import { loadSeriesSheets, seriesSpecsFor, specsForTerm } from "@/lib/modelSpecsData";
 import ProceduresPanel from "@/components/ProceduresPanel";
 import ReferencePanel from "@/components/ReferencePanel";
 import ModelPartsAdd from "@/components/ModelPartsAdd";
@@ -52,7 +53,7 @@ export default async function ModelPage({ params, searchParams }: {
   if (!term || term.kind !== "model") notFound();
   if (tenant !== null && term.tenantOrgId !== tenant) notFound();
 
-  const [terms, procRows, refRows, units, partRows] = await Promise.all([
+  const [terms, procRows, refRows, units, partRows, seriesSheets] = await Promise.all([
     db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, tenant)).orderBy(asc(vocabTerms.name)),
     db.select().from(procedures)
       .where(and(eq(procedures.assetType, term.assetType), forTenant(procedures.tenantOrgId, tenant)))
@@ -65,6 +66,8 @@ export default async function ModelPage({ params, searchParams }: {
     db.select().from(partCatalog)
       .where(and(eq(partCatalog.archived, false), forTenant(partCatalog.tenantOrgId, tenant)))
       .orderBy(asc(partCatalog.partNumber)),
+    // What each family shares - the half of a spec sheet a model inherits.
+    loadSeriesSheets(tenant),
   ]);
 
   // The public library is a module: off means the control isn't here and the
@@ -130,8 +133,15 @@ export default async function ModelPage({ params, searchParams }: {
     : [];
   const instOf = new Map(instRows.map((i) => [i.id, i.externalId]));
 
-  // Hoisted so the tab counts and the panels read the same slice.
-  const specs = parseModelSpecs(term.specs);
+  // Hoisted so the tab counts and the panels read the same slice. `specs` is
+  // what a reader sees - the family's rows under this model's own; `ownSpecs`
+  // is only what this model says for itself.
+  const ownSpecs = parseModelSpecs(term.specs);
+  const seriesSpecs = seriesSpecsFor(seriesSheets, term.assetType, term.series);
+  const specs = specsForTerm(term, seriesSheets);
+  // A sibling's sheet, for copying and for name suggestions, is its merged
+  // one too - the family's rows are as much its sheet as its own.
+  const sheetOf = (t: typeof term) => specsForTerm(t, seriesSheets);
   const modelRefs = refsForUnits(
     refRows.map((r) => ({
       id: r.id, assetType: r.assetType, model: r.model, series: r.series, kind: r.kind,
@@ -189,15 +199,15 @@ export default async function ModelPage({ params, searchParams }: {
 
       <ModelSpecsCard
         termId={term.id} modelName={term.name}
-        specs={specs}
+        specs={ownSpecs}
+        series={term.series} seriesSpecs={seriesSpecs} seriesMembers={siblings}
         // Copy sources: same-type siblings that actually have a sheet.
         siblings={terms
           .filter((t) => t.kind === "model" && t.id !== term.id
-            && same(t.assetType, term.assetType) && parseModelSpecs(t.specs).length > 0)
-          .map((t) => ({ name: t.name, specs: parseModelSpecs(t.specs) }))}
+            && same(t.assetType, term.assetType) && sheetOf(t).length > 0)
+          .map((t) => ({ name: t.name, specs: sheetOf(t) }))}
         nameSuggestions={specNameSuggestions(
-          terms.filter((t) => t.kind === "model" && same(t.assetType, term.assetType))
-            .map((t) => parseModelSpecs(t.specs)),
+          terms.filter((t) => t.kind === "model" && same(t.assetType, term.assetType)).map(sheetOf),
         )}
       />
 
@@ -206,11 +216,11 @@ export default async function ModelPage({ params, searchParams }: {
         published={term.published} slug={term.publicSlug} summary={term.publicSummary}
         blockers={publishBlockers({
           manufacturer: term.manufacturer, name: term.name, summary: term.publicSummary,
-          specs: parseModelSpecs(term.specs), hasPhoto: !!term.photoUrl,
+          specs, hasPhoto: !!term.photoUrl,
         })}
         warnings={publishWarnings({
           manufacturer: term.manufacturer, name: term.name, summary: term.publicSummary,
-          specs: parseModelSpecs(term.specs), hasPhoto: !!term.photoUrl,
+          specs, hasPhoto: !!term.photoUrl,
         })}
         siteUrl={appUrl()}
       />}
@@ -307,7 +317,11 @@ export default async function ModelPage({ params, searchParams }: {
       </div>}
 
       {tab === "reference" && <ReferencePanel canEdit
-        sub={`Manuals, links and field notes for ${term.name}${term.series ? `, for every ${term.series}` : ""} and for any ${term.assetType.toLowerCase()}. Filed here, they show on every unit.`}
+        sub={`Manuals, links and field notes for ${term.name}${term.series ? `, for every ${term.series}` : ""} and for any ${term.assetType.toLowerCase()}. Filed here, they show on every unit.${
+          // The scope between the model and the whole type exists only once
+          // the model is in a family - said here, where somebody filing the
+          // third copy of the same manual would otherwise not find out.
+          term.series ? "" : ` To file one manual for a whole family - every ISQ, say - put ${term.name} in a series on the Overview tab first.`}`}
         scopes={[
           { assetType: term.assetType, model: term.name, label: `${term.name} (every unit)` },
           ...(term.series ? [{ assetType: term.assetType, model: "", series: term.series, label: `every ${term.series}` }] : []),

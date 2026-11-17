@@ -4790,3 +4790,23 @@ CREATE INDEX IF NOT EXISTS "work_orders_parent_idx" ON "work_orders" ("parent_id
 -- model. See db/schema vocab_terms.series and catalog_refs.series.
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "series" text NOT NULL DEFAULT '';
 ALTER TABLE "catalog_refs" ADD COLUMN IF NOT EXISTS "series" text NOT NULL DEFAULT '';
+
+-- A family of models as a record of its own, holding what every member shares:
+-- today the spec sheet. A model's own sheet keeps only what differs, and the
+-- two are merged at read time with the model's rows winning. See db/schema
+-- catalog_series and lib/modelSpecs.effectiveSheet.
+CREATE TABLE IF NOT EXISTS "catalog_series" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer,
+  "asset_type" text NOT NULL,
+  "name" text NOT NULL,
+  "specs" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "catalog_series_type_idx" ON "catalog_series" ("asset_type");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'catalog_series_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "catalog_series" ADD CONSTRAINT "catalog_series_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;

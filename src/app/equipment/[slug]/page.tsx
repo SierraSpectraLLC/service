@@ -7,7 +7,7 @@ import { catalogRefs, partCatalog, partKitLines, procedures, vocabTerms } from "
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import { appUrl } from "@/lib/appUrl";
-import { parseModelSpecs } from "@/lib/modelSpecs";
+import { loadSeriesSheets, specsForTerm } from "@/lib/modelSpecsData";
 import { parseProcParts, partsForModel } from "@/lib/procedures";
 import { article, cadenceWords, metaDescription, pageTitle, productJsonLd, publicRefs } from "@/lib/publicCatalog";
 import { stockSrc } from "@/lib/photos";
@@ -94,7 +94,9 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
   ]);
 
   const url = appUrl();
-  const specs = parseModelSpecs(term.specs);
+  // The family's rows under the model's own - the sheet the shop sees, so the
+  // public page says what every ISQ shares without anyone retyping it.
+  const specs = specsForTerm(term, await loadSeriesSheets(term.tenantOrgId));
 
   // Recurring work only, named and timed - never the checklist that carries it out.
   const upkeep = procRows

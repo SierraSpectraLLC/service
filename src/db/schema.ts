@@ -2575,6 +2575,31 @@ export const catalogRefs = pgTable("catalog_refs", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("catalog_refs_type_idx").on(t.assetType)]);
 
+/**
+ * What a whole FAMILY of models shares, said once.
+ *
+ * vocab_terms.series names the family on each model ("ISQ" on the ISQ 7000,
+ * the ISQ 7610 and the ISQ-LT); this row is the family itself, and what it
+ * holds applies to every member. Today that is the spec sheet: the numbers
+ * every ISQ has in common live here, each model's own sheet holds only what
+ * differs, and a reader sees the two merged with the model's rows winning
+ * (lib/modelSpecs.effectiveSheet). Change a shared number here and every
+ * member changes; change it on one model and only that model does.
+ *
+ * Keyed by name, like catalog_refs.series, so a family exists the moment a
+ * model names it and this row is made only when somebody writes something on
+ * the family. Matched case-insensitively within (tenant, module type).
+ */
+export const catalogSeries = pgTable("catalog_series", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  assetType: text("asset_type").notNull(),
+  name: text("name").notNull(),
+  /** JSON [{name, value}] rows, the same shape as vocab_terms.specs. */
+  specs: text("specs").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("catalog_series_type_idx").on(t.assetType)]);
+
 // What is in a kit. Lines are part NUMBERS, not catalog ids, for the same reason
 // the rest of the system keys on numbers: a kit can list a part nobody has
 // catalogued, and should, rather than refusing to be written down.
