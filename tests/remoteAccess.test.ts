@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
+import { consentModeFor, keepsSystemLink, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
 
 // These rules decide whether somebody can take control of a lab PC, so they get
 // the same treatment as the tenancy rules: every combination stated, including
@@ -126,5 +126,23 @@ describe("consentModeFor - attended vs unattended follows custody", () => {
     const r = consentModeFor({ orgId: 1, consentOverride: false }, { ownerOrgId: 2, stages: ["Shipped"] });
     expect(r.mode).toBe("unattended");
     expect(r.why).toBe("set by staff");
+  });
+});
+
+describe("keepsSystemLink", () => {
+  // A machine handed to another organization carries "on LC-12" with it only
+  // when LC-12 is the new owner's. Otherwise the link names a system the new
+  // owner has never seen, and decides the machine's consent from its custody.
+  it("keeps the link when the new owner owns the system", () => {
+    expect(keepsSystemLink({ ownerOrgId: 2 }, 2)).toBe(true);
+  });
+
+  it("drops it when the system belongs to the previous owner", () => {
+    expect(keepsSystemLink({ ownerOrgId: 1 }, 2)).toBe(false);
+  });
+
+  it("drops it when the system is unowned or gone - re-linking is a decision, not a default", () => {
+    expect(keepsSystemLink({ ownerOrgId: null }, 2)).toBe(false);
+    expect(keepsSystemLink(null, 2)).toBe(false);
   });
 });

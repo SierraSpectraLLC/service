@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { confirmReason } from "@/components/ui/ConfirmDialog";
+import { choiceDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { Dot, Legend, Panel, Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
-import { linkRemoteDevice, removeRemoteDevice, renameRemoteDevice, setRemoteConsent } from "@/app/actions";
+import { linkRemoteDevice, reassignRemoteDevice, removeRemoteDevice, renameRemoteDevice, setRemoteConsent } from "@/app/actions";
 import { deviceLabel, deviceSubLabel, needsNickname } from "@/lib/deviceName";
 import DeviceManage, { type OpenHold, type OpenLease, type OpenLockout, type OpenNotice } from "@/components/DeviceManage";
 
@@ -15,6 +15,8 @@ export type RemoteDevice = {
   name: string;
   /** What somebody called it, or "" while it is still going by its hostname. */
   nickname: string;
+  /** The organization that owns it - the device group it sits in on the host. */
+  orgId: number | null;
   orgName: string;
   platform: string;
   lastSeen: string;
@@ -58,6 +60,11 @@ export type RemoteDevice = {
 export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEnroll, stale }: {
   devices: RemoteDevice[];
   systems: { id: number; label: string }[];
+  /**
+   * The organizations this person may enroll a machine for - and so the ones a
+   * machine may be handed to, since both are the same capability: deciding
+   * whose device group a PC sits in. Empty for anyone who may do neither.
+   */
   enrollOrgs: { id: number; name: string }[];
   canEnroll: boolean;
   stale: boolean;
@@ -162,6 +169,43 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
                   {systems.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
                 </select>
 
+                {/* Whose machine it is. A pick here moves it between device
+                    groups on the support host, which is what makes it visible
+                    to one client and not another - so, unlike the two beside
+                    it, it asks first and takes a reason. */}
+                {enrollOrgs.length > 0 && (
+                  <select value={d.orgId ?? ""} disabled={pending} aria-label={`Owner of ${d.name}`}
+                    onChange={async (e) => {
+                      const next = enrollOrgs.find((o) => String(o.id) === e.target.value);
+                      if (!next || next.id === d.orgId) return;
+                      const label = deviceLabel(d.nickname, d.name);
+                      // Cancelling leaves the select where it was: React puts a
+                      // controlled select back to its value after the handler.
+                      const why = await confirmReason({
+                        title: `Hand "${label}" to ${next.name}?`,
+                        context: d.orgName ? `now ${d.orgName}` : "not assigned to anyone",
+                        body: `It moves into ${next.name}'s device group on the support host. `
+                          + `${next.name}'s people with remote access can then reach it`
+                          + `${d.orgName ? `, and ${d.orgName}'s no longer can` : ""}. `
+                          + "Its link to a system stays only if the new owner owns that system.",
+                        action: "Hand over", tone: "primary",
+                      });
+                      if (!why) return;
+                      setError("");
+                      startTransition(async () => {
+                        const res = await reassignRemoteDevice(d.id, next.id, why);
+                        setError(res?.error ?? "");
+                        if (!res?.error) {
+                          toast({ message: `${label} now belongs to ${next.name}${res.unlinked ? " - unlinked from its system" : ""}` });
+                        }
+                      });
+                    }}
+                    className="t-meta" style={{ width: "auto", maxWidth: 200 }}>
+                    {d.orgId === null && <option value="">not assigned</option>}
+                    {enrollOrgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  </select>
+                )}
+
                 <select
                   value={d.consentOverride === null ? "derive" : d.consentOverride ? "always" : "never"}
                   disabled={pending} aria-label={`Consent for ${d.name}`}
@@ -182,17 +226,46 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
 
                 <button className="btn link" style={{ color: "var(--t-bad-fg)", marginLeft: "auto" }} disabled={pending}
                   onClick={async () => {
-                    const why = await confirmReason({
-                      title: `Remove "${deviceLabel(d.nickname, d.name)}" from remote support?`,
-                      body: "This forgets the machine here - the agent keeps running until somebody uninstalls it on the PC itself.",
-                      action: "Remove", tone: "bad",
-                    });
+                    const label = deviceLabel(d.nickname, d.name);
+                    const title = `Remove "${label}" from remote support?`;
+                    // The machine is deleted on the support host as well as
+                    // here; a row forgotten here alone is back on the next
+                    // page load. What that cannot do is stop an agent that is
+                    // still installed from enrolling itself again - so a
+                    // machine that is online right now is offered the choice
+                    // of having its agent uninstall itself first. One that is
+                    // offline cannot be told, and is not offered a promise the
+                    // host cannot keep.
+                    let why: string | null;
+                    let uninstall = false;
+                    if (d.online && !stale) {
+                      const answer = await choiceDialog({
+                        title, action: "Remove", tone: "bad", label: "Reason",
+                        placeholder: "Recorded in the audit trail", hint: "A few words, kept with the record of this action.",
+                        body: "It is removed here and on the support host. An agent left installed on the PC enrolls "
+                          + "the machine again the next time it checks in.",
+                        choiceLabel: "The agent on the PC",
+                        choices: [
+                          { value: "keep", label: "Leave it installed", note: "the machine comes back when it next checks in" },
+                          { value: "uninstall", label: "Tell it to uninstall itself first", note: "remote access to this PC ends for good" },
+                        ],
+                      });
+                      why = answer ? answer.value : null;
+                      uninstall = answer?.choice === "uninstall";
+                    } else {
+                      why = await confirmReason({
+                        title, action: "Remove", tone: "bad",
+                        body: "It is removed here and on the support host. If an agent is still installed on the PC, "
+                          + "it enrolls the machine again the next time it checks in - remove it then while it is "
+                          + "online to have the agent uninstall itself.",
+                      });
+                    }
                     if (!why) return;
                     setError("");
                     startTransition(async () => {
-                      const res = await removeRemoteDevice(d.id, why);
+                      const res = await removeRemoteDevice(d.id, why, uninstall);
                       setError(res?.error ?? "");
-                      if (!res?.error) toast({ message: `Removed ${deviceLabel(d.nickname, d.name)}` });
+                      if (!res?.error) toast({ message: `Removed ${label}${uninstall ? " and told its agent to uninstall" : ""}` });
                     });
                   }}>remove</button>
               </div>

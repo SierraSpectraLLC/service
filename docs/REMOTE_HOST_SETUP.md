@@ -759,6 +759,9 @@ they happened.
 | Locked out of SSH | You enabled `ufw`. Use the Lightsail browser terminal to `sudo ufw disable` |
 | Agent won't connect from a lab | The lab's firewall blocks outbound 443 to an unfamiliar host. Ask their IT to allow `remote.yourportal.com` |
 | Windows says the installer is unrecognized | Expected until the agent is code-signed. Two-click bypass is safe — you're the one running it. A signing certificate (~$250–450/yr) is the later fix |
+| A removed machine comes back | The portal's list is a cache of the host's; **remove** deletes the node on the host too (`removedevices`), so this now means the agent is still installed and re-enrolled itself — the host makes a fresh node for any agent that connects with a valid group certificate. Remove it again while it is online and choose *tell it to uninstall itself first*, which sends the host's own `uninstallagent`; an offline agent cannot be told. A dead node left by a reinstall (shows *never checked in*, same hostname as the live one) has nothing listening and goes with a plain remove |
+| Remove or hand-over says the host refused (`Denied`) | `REMOTE_ADMIN_USER` lacks rights on that device group. It has them on every group the portal created; a group made by hand in the host's console and adopted by name does not grant them automatically — add the account to the group there, or list it under `managealldevicegroups` in `config.json` |
+| A machine shows under the wrong organization | The portal follows the host: moving a device between groups in the host's console is picked up on the next page load, and the owner picker on `/remote` does the same move from here (`changeDeviceMesh`) |
 
 ## Upgrading the engine later
 

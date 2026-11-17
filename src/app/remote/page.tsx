@@ -126,6 +126,7 @@ export default async function RemotePage() {
       id: d.id,
       name: d.name,
       nickname: d.nickname,
+      orgId: d.orgId,
       orgName: d.orgId === null ? "" : org?.name ?? "another organization",
       platform: d.platform,
       lastSeen: d.lastSeenAt ? shopTime(d.lastSeenAt) : "",

@@ -145,3 +145,17 @@ export function mayEnroll(
 ): boolean {
   return ctx.moduleOn && houseOfRecord(viewer, target?.tenantOrgId);
 }
+
+/**
+ * When a machine changes owner, does its link to a system come with it?
+ *
+ * Only when the new owner owns that system. The link is what prints "on LC-12"
+ * beside the machine and what decides its consent from the system's custody -
+ * both facts about the previous owner's instrument, and neither should follow
+ * a PC to a client who has never seen it. A system that is gone, or owned by
+ * nobody, does not travel either: the engineer who moves the machine re-links
+ * it, which takes two seconds and is a decision rather than an accident.
+ */
+export function keepsSystemLink(system: { ownerOrgId: number | null } | null, newOrgId: number): boolean {
+  return system !== null && system.ownerOrgId === newOrgId;
+}

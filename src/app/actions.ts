@@ -104,12 +104,13 @@ import { quoteRecipients, reminderRecipients } from "@/lib/moneyRecipients";
 import { accountReady, checkoutSession, connectAuthorizeUrl, signConnectState, stripeClientId } from "@/lib/stripeApi";
 import { cleanBody, messageableFrom } from "@/lib/messages";
 import { QUALIFICATIONS, DOC_TYPES, SIG_ROLES, canApprove, canDelete, canExecute, canRevokeApproval, isProtocol } from "@/lib/gxp";
-import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
+import { consentModeFor, keepsSystemLink, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
 import { formatSize } from "@/lib/remoteFiles";
 import { cleanNickname, deviceLabel } from "@/lib/deviceName";
 import {
-  agentInstallerLink, applyDeviceConsent, connectUrl, deviceWithOrg, ensureOrgGroup, NOT_CONFIGURED,
-  isTunnelId, remoteConfigured, requestRemoteTunnel, viewerCredentials, type TunnelKind, type ViewerCredentials,
+  agentInstallerLink, applyDeviceConsent, connectUrl, deviceWithOrg, ensureOrgGroup, moveEngineDevice, NOT_CONFIGURED,
+  isTunnelId, remoteConfigured, removeEngineDevice, requestRemoteTunnel, uninstallEngineAgent, viewerCredentials,
+  type TunnelKind, type ViewerCredentials,
 } from "@/lib/remote";
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
@@ -8130,25 +8131,130 @@ export async function setRemoteConsent(deviceId: number, mode: "derive" | "alway
 }
 
 /**
- * Forget a machine. Deliberately does NOT claim to have removed access: an agent
- * that is still installed keeps checking in, and the only way to stop it is to
- * uninstall it on the machine. The caller's confirmation says so.
+ * Forget a machine - on the support host first, here second.
+ *
+ * The row here is a cache of the host's device list, refreshed every time the
+ * page opens, so deleting the row alone put the machine straight back: that is
+ * how a duplicate enrollment became two entries nobody could get rid of. The
+ * host is asked to delete its node and the row goes only once it has; a host
+ * that cannot be reached leaves both as they were, with the reason said.
+ *
+ * `uninstall` additionally tells a CONNECTED agent to remove itself from the
+ * PC, before the node is deleted (deleting first closes the agent's socket and
+ * the uninstall would reach nobody). Without it an agent that is still
+ * installed re-enrolls itself the next time it checks in - the host makes a
+ * fresh node for any agent carrying a valid group certificate - and the dialog
+ * says so. The ordinary case, a dead node left behind by a reinstall, needs no
+ * uninstall: nothing is listening.
  */
-export async function removeRemoteDevice(deviceId: number, reason: string): Promise<{ error?: string }> {
+export async function removeRemoteDevice(
+  deviceId: number, reason: string, uninstall = false,
+): Promise<{ error?: string }> {
   const u = await requireStaff();
   const why = requireReason(reason);
   if (typeof why !== "string") return why;
   const row = await deviceWithOrg(deviceId, readTenant(u));
   if (!row) return {};
+  const name = row.device.name || "a machine";
+  let agentTold = false;
+  if (row.device.nodeId && remoteConfigured()) {
+    if (uninstall) {
+      const told = await uninstallEngineAgent(row.device.nodeId);
+      if (told.error) return { error: `Couldn't tell the agent to uninstall: ${told.error}` };
+      agentTold = true;
+    }
+    const gone = await removeEngineDevice(row.device.nodeId, row.groupId ?? "");
+    if (gone.error) {
+      // Already said on the PC, which the audit trail must not lose - the
+      // machine will drop offline shortly whatever the host answered here.
+      if (agentTold) {
+        await audit({
+          actor: u.email, instrumentId: row.device.instrumentId, entityType: "remote", entityId: deviceId,
+          action: `told the agent on ${name} to uninstall itself - reason: ${why}`, field: "reason", newValue: why,
+        });
+      }
+      return gone;
+    }
+  }
   await db.delete(remoteDevices).where(eq(remoteDevices.id, deviceId));
   await audit({
     actor: u.email, instrumentId: row.device.instrumentId, entityType: "remote", entityId: deviceId,
-    action: `removed ${row.device.name || "a machine"} from remote support`
-      + ` - the agent stays installed until somebody uninstalls it - reason: ${why}`,
+    action: `removed ${name} from remote support and from the support host`
+      + (agentTold
+        ? " - told its agent to uninstall itself"
+        : " - an agent still installed on it enrolls again when it next checks in")
+      + ` - reason: ${why}`,
     field: "reason", newValue: why,
   });
   revalidatePath("/remote");
+  if (row.device.orgId !== null) revalidatePath(`/settings/organizations/${row.device.orgId}`);
   return {};
+}
+
+/**
+ * Hand a machine to another organization.
+ *
+ * A machine's owner is the organization whose device group it sits in on the
+ * support host - that group is what keeps one client's PCs out of another's
+ * sight - so the move is made THERE and mirrored here, not the other way
+ * round. A row changed here alone would be corrected back by the next page
+ * load (reconcileOrgDevices follows the host).
+ *
+ * Only an organization this person could enroll a machine for is a possible
+ * owner, which is the same list the panel's enrollment picker shows. The link
+ * to a system survives only if the new owner owns that system: "on LC-12" is
+ * a fact about the old owner's instrument, and it must not travel to a client
+ * who has never seen it.
+ */
+export async function reassignRemoteDevice(
+  deviceId: number, orgId: number, reason: string,
+): Promise<{ error?: string; unlinked?: boolean }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const row = await deviceWithOrg(deviceId, readTenant(u));
+  if (!row) return { error: "Not found" };
+  if (row.device.orgId === orgId) return {};
+  const target = (await visibleOrgs(u)).find((o) => o.id === orgId);
+  if (!target) return { error: "That organization is not one of ours" };
+  if (!mayEnroll(u, { moduleOn: (await getModules()).remote }, { tenantOrgId: tenantOf(target) })) {
+    return { error: "Not found" };
+  }
+
+  if (row.device.nodeId && remoteConfigured()) {
+    const group = await ensureOrgGroup(target.id);
+    if ("error" in group) return { error: group.error };
+    const moved = await moveEngineDevice(row.device.nodeId, group.groupId);
+    if (moved.error) return moved;
+  }
+
+  const link = await systemLinkAfterMove(row.device.instrumentId, target.id);
+  const name = row.device.name || "a machine";
+  await db.update(remoteDevices).set({
+    orgId: target.id, tenantOrgId: tenantOf(target), instrumentId: link.instrumentId,
+  }).where(eq(remoteDevices.id, deviceId));
+  await audit({
+    actor: u.email, instrumentId: row.device.instrumentId, entityType: "remote", entityId: deviceId,
+    action: `moved ${name} from ${row.orgName ?? "no organization"} to ${target.name}`
+      + (link.unlinked ? " - unlinked it from its system, which the new owner does not own" : "")
+      + ` - reason: ${why}`,
+    field: "orgId", oldValue: String(row.device.orgId ?? ""), newValue: String(target.id),
+  });
+  revalidatePath("/remote");
+  revalidatePath(`/remote/${deviceId}`);
+  revalidatePath(`/settings/organizations/${target.id}`);
+  if (row.device.orgId !== null) revalidatePath(`/settings/organizations/${row.device.orgId}`);
+  return { unlinked: link.unlinked };
+}
+
+/** The system link a machine keeps when it changes owner. See keepsSystemLink. */
+async function systemLinkAfterMove(
+  instrumentId: number | null, newOrgId: number,
+): Promise<{ instrumentId: number | null; unlinked: boolean }> {
+  if (instrumentId === null) return { instrumentId: null, unlinked: false };
+  const [inst] = await db.select({ ownerOrgId: instruments.ownerOrgId }).from(instruments).where(eq(instruments.id, instrumentId));
+  const keep = keepsSystemLink(inst ? { ownerOrgId: inst.ownerOrgId } : null, newOrgId);
+  return { instrumentId: keep ? instrumentId : null, unlinked: !keep };
 }
 
 export async function setOrgStorageLimit(orgId: number, limitMb: number): Promise<{ error?: string }> {

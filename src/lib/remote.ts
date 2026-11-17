@@ -31,7 +31,7 @@
 // meshcentral.js and re-running tests/remoteCookie.test.ts. See
 // docs/REMOTE_HOST_SETUP.md.
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { orgs, remoteDevices } from "@/db/schema";
 import { tenantOfOrg } from "@/lib/tenancy";
@@ -560,6 +560,93 @@ export async function pushLockoutTo(nodeId: string, plan: LockoutPlan): Promise<
   }
 }
 
+// ── Forgetting and moving machines ──────────────────────────────────────────
+//
+// The engine is the authority on which machines exist and whose group each is
+// in; `remote_devices` is a cache of that (reconcileOrgDevices). So a row
+// deleted here and nowhere else is back the next time somebody opens the page,
+// which is exactly what shipped first: "remove" removed nothing. Both of these
+// talk to the engine FIRST and let the caller touch the cache only once the
+// engine agreed - read against meshuser.js of the pinned 1.2.4, like the rest.
+
+/**
+ * Delete one machine on the engine. `removedevices` answers with our
+ * responseid: 'ok', or 'Denied' when the admin user lacks UNINSTALL rights on
+ * the node's group - and ALSO when the node does not exist, because the rights
+ * lookup answers "none" for a node it cannot find. The two are told apart by
+ * asking for the group's list: a node that is not in it is already gone, and
+ * "already gone" is the outcome the caller wanted.
+ *
+ * What this does not do is get rid of an agent that is still installed. The
+ * engine re-creates a node for any agent that connects with a valid group
+ * certificate (meshagent.js: "This node does not exist, create it"), so a
+ * running agent is back within a minute of being deleted. uninstallEngineAgent
+ * is the half that deals with that.
+ */
+export async function removeEngineDevice(nodeId: string, groupId: string): Promise<{ error?: string }> {
+  const cfg = remoteConfig();
+  if (!cfg) return { error: NOT_CONFIGURED };
+  if (!nodeId) return {};
+  try {
+    await engineCall(cfg, "removedevices", { nodeids: [fullNodeId(nodeId)] });
+    return {};
+  } catch (e) {
+    const why = (e as Error).message;
+    if (/^denied$/i.test(why) && groupId) {
+      const live = await listGroupDevices(groupId);
+      if (live !== null && !live.some((d) => d.nodeId === nodeId)) return {};
+      return { error:
+        "The support host refused to remove that machine. REMOTE_ADMIN_USER needs full rights on "
+        + "the organization's device group there (it has them on groups the portal created itself)." };
+    }
+    return { error: `Couldn't remove it from the support host: ${why}` };
+  }
+}
+
+/**
+ * Tell a connected agent to uninstall itself. Send-only: `uninstallagent`
+ * answers nothing on this engine (meshuser.js has no responseid path for it),
+ * and it reaches only an agent that is connected right now - an offline
+ * machine is not told and will not be told later. The engine's own console
+ * sends it exactly this way, with a dialog that says the same.
+ *
+ * Best-effort by contract. The caller removes the node afterwards, in that
+ * order, because removal closes the agent's connection and an uninstall sent
+ * after that reaches nobody.
+ */
+export async function uninstallEngineAgent(nodeId: string): Promise<{ error?: string }> {
+  const cfg = remoteConfig();
+  if (!cfg) return { error: NOT_CONFIGURED };
+  if (!nodeId) return { error: "That machine has no node id yet." };
+  try {
+    await engineSend(cfg, "uninstallagent", { nodeids: [fullNodeId(nodeId)] });
+    return {};
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+/**
+ * Move one machine into another organization's device group - what makes a
+ * change of owner true on the engine and not only in our cache. Needs EDITMESH
+ * on both groups and MANAGECOMPUTERS on the target; the engine names each
+ * refusal, and "already in that group" is not one.
+ */
+export async function moveEngineDevice(nodeId: string, groupId: string): Promise<{ error?: string }> {
+  const cfg = remoteConfig();
+  if (!cfg) return { error: NOT_CONFIGURED };
+  if (!nodeId) return { error: "That machine has no node id yet." };
+  if (!groupId) return { error: "That organization has no device group on the support host yet." };
+  try {
+    await engineCall(cfg, "changeDeviceMesh", { nodeids: [fullNodeId(nodeId)], meshid: groupId });
+    return {};
+  } catch (e) {
+    const why = (e as Error).message;
+    if (/already in correct group/i.test(why)) return {};
+    return { error: `Couldn't move it on the support host: ${why}` };
+  }
+}
+
 /**
  * Where to send the browser. Deliberately does NOT call the engine: the hot path
  * stays usable when the admin API is unreachable, because the token is minted
@@ -712,24 +799,34 @@ export const NOT_CONFIGURED =
  * opens the page.
  */
 export async function reconcileOrgDevices(orgId: number, live: EngineDevice[]): Promise<void> {
+  if (live.length === 0) return;
   // A machine belongs to the workspace that runs the organization it enrolled
   // into, so a device list can be scoped without a join.
   const tenantOrgId = await tenantOfOrg(orgId);
-  const known = await db.select({ id: remoteDevices.id, nodeId: remoteDevices.nodeId })
-    .from(remoteDevices).where(eq(remoteDevices.orgId, orgId));
-  const byNode = new Map(known.map((k) => [k.nodeId, k.id]));
+  // Looked up by node across every organization, not within this one: the
+  // engine's group is where a machine IS, and a row filed under another
+  // organization - moved in the engine's own console, or enrolled before anyone
+  // assigned it - is corrected to match rather than left where it was.
+  const known = await db.select({ id: remoteDevices.id, nodeId: remoteDevices.nodeId, orgId: remoteDevices.orgId })
+    .from(remoteDevices).where(inArray(remoteDevices.nodeId, live.map((d) => d.nodeId)));
+  const byNode = new Map(known.map((k) => [k.nodeId, k]));
   const now = new Date();
   for (const d of live) {
-    const id = byNode.get(d.nodeId);
-    if (id === undefined) {
+    const row = byNode.get(d.nodeId);
+    if (row === undefined) {
       await db.insert(remoteDevices).values({
         tenantOrgId,
         orgId, nodeId: d.nodeId, name: d.name, platform: d.platform || "windows",
         lastSeenAt: d.online ? now : null, enrolledBy: "the agent installer",
       }).onConflictDoNothing({ target: remoteDevices.nodeId });
-    } else if (d.online) {
-      await db.update(remoteDevices).set({ name: d.name, lastSeenAt: now }).where(eq(remoteDevices.id, id));
+      continue;
     }
+    const moved = row.orgId !== orgId;
+    if (!moved && !d.online) continue;
+    await db.update(remoteDevices).set({
+      ...(moved ? { orgId, tenantOrgId } : {}),
+      ...(d.online ? { name: d.name, lastSeenAt: now } : {}),
+    }).where(eq(remoteDevices.id, row.id));
   }
 }
 
@@ -982,6 +1079,55 @@ async function engineCall(
       }
       finish(() => resolve(msg));
     };
+  });
+}
+
+/**
+ * One admin command that gets no answer. For the handful of actions the engine
+ * acts on without replying (uninstallagent is the one used here), waiting for
+ * a response would mean a 5-second timeout reported as a failure every time
+ * the command worked. So: connect, send, let the bytes leave, hang up.
+ *
+ * Resolving says the command was handed to the engine, not that it acted - a
+ * rejected token looks like a socket that opens and closes without a word, and
+ * this cannot see the difference. Callers follow it with a call that DOES
+ * answer, which is what catches a host that refuses us.
+ */
+async function engineSend(
+  cfg: RemoteConfig, action: string, args: Record<string, unknown> = {},
+): Promise<void> {
+  if (typeof WebSocket === "undefined") {
+    throw new Error("this runtime has no WebSocket, so the remote-support host can't be reached from it");
+  }
+  const token = mintEngineToken(cfg, CONNECT_TTL_SECONDS);
+  const url = `${cfg.url.replace(/^http/, "ws")}/control.ashx?auth=${encodeURIComponent(token)}`;
+
+  return new Promise<void>((resolve, reject) => {
+    const ws = new WebSocket(url);
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { ws.close(); } catch { /* already gone */ }
+      fn();
+    };
+    const timer = setTimeout(
+      () => finish(() => reject(new Error(`the host didn't take '${action}' within ${ENGINE_TIMEOUT_MS}ms`))),
+      ENGINE_TIMEOUT_MS,
+    );
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ action, ...args }));
+      // Closing the moment send() returns can discard what it queued. Wait for
+      // the socket to report the frame flushed, then go.
+      const drained = () => {
+        if (ws.bufferedAmount === 0) finish(resolve);
+        else setTimeout(drained, 20);
+      };
+      drained();
+    };
+    ws.onerror = () => finish(() => reject(new Error("couldn't reach the remote-support host")));
+    ws.onclose = () => finish(() => reject(new Error("the host closed the connection before taking the command")));
   });
 }
 
