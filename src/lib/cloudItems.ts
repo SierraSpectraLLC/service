@@ -87,6 +87,13 @@ export function browseListing(raw: GraphItem[], fallbackDriveId = "", pdfOnly = 
 export const searchListing = (raw: GraphItem[], fallbackDriveId = "", pdfOnly = true): CloudItem[] =>
   browseListing(raw, fallbackDriveId, pdfOnly).filter((i) => !i.isFolder);
 
+/**
+ * One item's identity across a selection. The id alone is not it: a search
+ * can return items from several drives, and two drives can hand out the same
+ * id. Same shape as crumbKey, for the same reason.
+ */
+export const itemKey = (i: Pick<CloudItem, "driveId" | "id">) => `${i.driveId}:${i.id}`;
+
 export type Crumb = { id: string; name: string; driveId: string };
 
 /**

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { browseCloud, disconnectCloud } from "@/app/actions";
 import {
-  crumbKey, isPlaces, itemNote, pushCrumb, ROOT, truncateTo, type CloudItem, type Crumb,
+  crumbKey, isPlaces, itemKey, itemNote, pushCrumb, ROOT, truncateTo, type CloudItem, type Crumb,
 } from "@/lib/cloudItems";
 
 /**
@@ -20,16 +20,26 @@ import {
  * the library takes any file. The studio borrows the connection to pull a PDF
  * straight into the working set, so it shows no connect or disconnect chrome and
  * lists only what it can open.
+ *
+ * A third caller, the reference dialog, wants several files at once - a
+ * manufacturer's folder holds the whole set of manuals for a family, and
+ * filing them is one act, not twelve. Give it `onToggle` and `selectedKeys`
+ * and every file gets a checkbox instead of an add button, with "select all
+ * here" for the folder you are standing in.
  */
 export default function CloudBrowser({
-  account, brokenReason, onAdd, onPickFolder, manage = false, pdfOnly = true,
+  account, brokenReason, onAdd, onToggle, selectedKeys, onPickFolder, manage = false, pdfOnly = true,
   addLabel = "+ add", disabled = false,
 }: {
   /** The connected account, or "" for none yet. */
   account: string;
   /** Set when Microsoft has refused the connection - it needs remaking, not retrying. */
   brokenReason: string;
-  onAdd: (item: CloudItem) => void;
+  /** One file at a time: the button beside each file. */
+  onAdd?: (item: CloudItem) => void;
+  /** Several at once: a checkbox beside each file instead. See lib/cloudItems.itemKey. */
+  onToggle?: (item: CloudItem) => void;
+  selectedKeys?: Set<string>;
   /** Make the folder somebody is standing in the destination for a finished packet. */
   onPickFolder?: (driveId: string, folderId: string, name: string) => void;
   /** Owns the connection: shows the account, connect and disconnect. One page should. */
@@ -144,6 +154,19 @@ export default function CloudBrowser({
 
       {error && <div className="t-meta" style={{ color: "var(--t-bad-fg)", marginBottom: 6 }}>{error}</div>}
 
+      {/* The whole folder in one go - what somebody standing in "ISQ manuals"
+          came for. Only the files listed, never what is inside subfolders. */}
+      {onToggle && !busy && items.some((i) => !i.isFolder) && (() => {
+        const files = items.filter((i) => !i.isFolder);
+        const allOn = files.every((i) => selectedKeys?.has(itemKey(i)));
+        return (
+          <button type="button" className="btn link t-meta" style={{ marginBottom: 4 }} disabled={disabled}
+            onClick={() => { for (const f of files) if (allOn || !selectedKeys?.has(itemKey(f))) onToggle(f); }}>
+            {allOn ? `clear the ${files.length} selected here` : `select all ${files.length} file${files.length === 1 ? "" : "s"} here`}
+          </button>
+        );
+      })()}
+
       <div className="pdf-srclist">
         {busy && <div className="mut t-small" style={{ padding: "6px 0" }}>Loading...</div>}
         {!busy && items.length === 0 && !error && (
@@ -159,10 +182,14 @@ export default function CloudBrowser({
             {i.isFolder ? (
               <button className="btn link t-small" style={{ fontWeight: 700, flexShrink: 0 }}
                 onClick={() => { setQuery(""); setSearching(""); setTrail((t) => pushCrumb(t, i)); }}>open</button>
-            ) : (
+            ) : onToggle ? (
+              <input type="checkbox" aria-label={`Select ${i.name}`} disabled={disabled}
+                checked={selectedKeys?.has(itemKey(i)) ?? false} onChange={() => onToggle(i)}
+                style={{ flexShrink: 0, alignSelf: "center" }} />
+            ) : onAdd ? (
               <button className="btn link t-small" style={{ fontWeight: 700, flexShrink: 0 }}
                 disabled={disabled} onClick={() => onAdd(i)}>{addLabel}</button>
-            )}
+            ) : null}
             <span className="t-small" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
               title={i.name}>
               {i.isFolder ? <span aria-hidden style={{ color: "var(--t-warn-fg)" }}>▮ </span> : null}{i.name}

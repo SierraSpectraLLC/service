@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  browseListing, crumbKey, isPlaces, itemNote, PLACES_DRIVE, pushCrumb, ROOT, searchListing,
+  browseListing, crumbKey, isPlaces, itemKey, itemNote, PLACES_DRIVE, pushCrumb, ROOT, searchListing,
   toCloudItem, truncateTo, type CloudItem,
 } from "@/lib/cloudItems";
 
@@ -144,5 +144,14 @@ describe("the line under a name", () => {
     expect(at(5 * 1024 * 1024)).toBe("5.0 MB");
     expect(at(300 * 1024)).toBe("300 KB");
     expect(at(12)).toBe("1 KB");
+  });
+});
+
+describe("itemKey", () => {
+  // A selection spans drives: a search answers from several, and two drives
+  // can hand out the same id. The drive is part of what a tick refers to.
+  it("tells the same id on two drives apart, and is the crumb's own key", () => {
+    expect(itemKey({ driveId: "b!one", id: "01ABC" })).not.toBe(itemKey({ driveId: "b!two", id: "01ABC" }));
+    expect(itemKey({ driveId: "b!one", id: "01ABC" })).toBe(crumbKey({ driveId: "b!one", id: "01ABC", name: "x" }));
   });
 });
